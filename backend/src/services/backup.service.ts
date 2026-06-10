@@ -23,16 +23,16 @@ function sha256File(file: string): Promise<string> {
 }
 
 /**
- * Run pg_dump and write a SHA-256 checksum sidecar (Module 16). Used by both the
- * scheduled backup job and the manual SUPER_ADMIN trigger.
+ * Run mongodump (gzip archive) and write a SHA-256 checksum sidecar (Module 16).
+ * Used by both the scheduled backup job and the manual SUPER_ADMIN trigger.
  */
 export async function runBackup(triggeredBy: string): Promise<{ file: string; checksum: string; sizeBytes: number }> {
   const dest = (await getConfig('backup.destination_path')) || env.storage.backups;
   ensureDir(dest);
   const stamp = dayjs().format('YYYYMMDD-HHmmss');
-  const file = path.join(dest, `izlearn-${stamp}.sql`);
+  const file = path.join(dest, `izlearn-${stamp}.archive.gz`);
 
-  await execAsync(`${env.pg.dumpBin} "${env.databaseUrl}" -f "${file}"`, { maxBuffer: 1024 * 1024 * 128 });
+  await execAsync(`${env.mongo.dumpBin} --uri="${env.databaseUrl}" --archive="${file}" --gzip`, { maxBuffer: 1024 * 1024 * 128 });
 
   const checksum = await sha256File(file);
   fs.writeFileSync(`${file}.sha256`, `${checksum}  ${path.basename(file)}\n`, 'utf8');
@@ -53,7 +53,7 @@ export async function listBackups() {
   ensureDir(dest);
   return fs
     .readdirSync(dest)
-    .filter((f) => f.endsWith('.sql'))
+    .filter((f) => f.endsWith('.gz') || f.endsWith('.archive'))
     .map((f) => {
       const full = path.join(dest, f);
       const st = fs.statSync(full);
@@ -100,9 +100,9 @@ export async function verifyBackup(fileName: string): Promise<{ file: string; va
 }
 
 /**
- * Restore the database from a previously generated pg_dump SQL file (UR-56).
+ * Restore the database from a previously generated mongodump archive (UR-56).
  * The checksum is verified first; a corrupt/mismatched backup is refused. This is
- * a destructive operation — gated behind SUPER_ADMIN + e-signature at the route.
+ * a destructive operation (--drop) — gated behind SUPER_ADMIN + e-signature at the route.
  */
 export async function restoreBackup(fileName: string, triggeredBy: string): Promise<{ file: string; restoredAt: string }> {
   const full = await resolveBackupPath(fileName);
@@ -112,7 +112,7 @@ export async function restoreBackup(fileName: string, triggeredBy: string): Prom
     throw new Error('Backup checksum mismatch — restore aborted to protect data integrity.');
   }
 
-  await execAsync(`${env.pg.psqlBin} "${env.databaseUrl}" -f "${full}"`, { maxBuffer: 1024 * 1024 * 128 });
+  await execAsync(`${env.mongo.restoreBin} --uri="${env.databaseUrl}" --archive="${full}" --gzip --drop`, { maxBuffer: 1024 * 1024 * 128 });
 
   await recordEvent({
     action: 'BACKUP_RESTORED',

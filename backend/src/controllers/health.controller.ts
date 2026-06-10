@@ -20,7 +20,8 @@ export const health = asyncHandler(async (_req: Request, res: Response) => {
   let auditTrigger = false;
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    // MongoDB liveness check (Prisma has no $queryRaw on the mongodb provider).
+    await prisma.$runCommandRaw({ ping: 1 });
     db = true;
   } catch {
     db = false;

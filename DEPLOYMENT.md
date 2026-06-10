@@ -1,176 +1,123 @@
-# izLearn — Going Live for Free (Step‑by‑Step)
+# izLearn — Going Live for Free (MongoDB Atlas + Vercel + Oracle VM)
 
-This guide takes the izLearn LMS from your laptop to a **public HTTPS website**, using
-**only free services** and the best free option at each step.
+This guide deploys izLearn as a **public HTTPS website** using **free services**:
 
-## Why this stack (and why these choices)
+| Layer | Service | Cost |
+|------|---------|------|
+| **Frontend** (React/Vite) | **Vercel** | Free |
+| **Backend** (Node/Express + Redis, Docker) | **Oracle Cloud — Always Free** VM (Ampere ARM) | Free |
+| **Database** | **MongoDB Atlas** (M0, 512 MB, replica set) | Free |
+| **HTTPS for the API** | **Caddy** (auto Let's Encrypt) | Free |
+| **API domain** | **DuckDNS** | Free |
+| Outgoing email (optional) | **Brevo** SMTP (300/day) | Free |
 
-izLearn is a Docker stack (React frontend + Node/Express backend + **PostgreSQL** +
-**Redis**), and it **stores uploaded files on disk** (training materials, certificates,
-backups) and bundles **Chromium** for PDF generation. That means it needs:
+> izLearn now runs on **MongoDB** (Prisma `mongodb` provider). MongoDB **transactions
+> require a replica set** — Atlas M0 already is one, so it works out of the box. A future
+> self‑hosted Mongo must also run as a replica set.
 
-- A host that can run `docker compose` **with persistent storage** (uploaded files must
-  survive restarts), and
-- Enough RAM (~2 GB+) for Postgres + Redis + Node + Chromium.
+> **Architecture**
+> ```
+> Browser ─HTTPS─▶ Vercel (frontend SPA)
+>    │  app calls VITE_API_URL ↓ (HTTPS, CORS)
+>    └────────────▶ Caddy (:443) ─▶ backend container (:4000) ─▶ Redis
+>                                        │
+>                                        ▼  DATABASE_URL (mongodb+srv://)
+>                                   MongoDB Atlas
+> (uploaded files live on the VM's Docker volume; their metadata lives in Atlas)
+> ```
 
-Free “app platforms” (Render/Railway free tiers, etc.) either **wipe the filesystem on
-every deploy** (you’d lose uploaded materials), expire the free database after ~90 days,
-or don’t give enough RAM. So the best **free‑forever** choice is a small **Always‑Free
-cloud VM** running the existing `docker compose`, with free HTTPS in front.
-
-| Need | Best free choice | Cost |
-|------|------------------|------|
-| Server (VM) | **Oracle Cloud — Always Free** (Ampere ARM, up to 4 CPU / 24 GB RAM, 200 GB disk, **never expires**) | Free |
-| Domain name | **DuckDNS** (`yourname.duckdns.org`) | Free |
-| HTTPS / TLS cert | **Caddy** (automatic Let’s Encrypt) | Free |
-| Outgoing email (optional) | **Brevo** SMTP (300 emails/day) | Free |
-| Source hosting | **GitHub** private repo | Free |
-
-> **Heads‑up:** Oracle requires a credit/debit card **for identity verification only** at
-> sign‑up. Always‑Free resources are **never charged**. If you don’t want to use Oracle,
-> see [Alternatives](#alternatives) at the end.
-
-> **Time required:** ~45–60 minutes the first time.
+> Oracle asks for a card **for verification only** at sign‑up; Always‑Free resources are
+> never charged. Time: ~45–60 min.
 
 ---
 
-## What you’ll end up with
+## Part 1 — MongoDB Atlas (free database)
 
-```
-Browser ──HTTPS──▶ Caddy (:443, auto TLS) ──▶ frontend container (nginx :80)
-                                                   │  /api/* proxied to
-                                                   ▼
-                                              backend container (:4000)
-                                                   │
-                                       Postgres + Redis + file storage (Docker volumes)
-```
-
----
-
-## Part 0 — One‑time prep on your own PC
-
-1. **Put the code on GitHub** (so the server can pull it). In the project folder:
-   ```bash
-   git add -A
-   git commit -m "Prepare for deployment"
+1. Sign up at **https://www.mongodb.com/cloud/atlas/register**.
+2. **Create a cluster → M0 (Free)**. Pick a cloud/region near your VM. Name it e.g. `izlearn`.
+3. **Database Access → Add New Database User**: username + a strong password (Atlas can
+   autogenerate). Role: **Read and write to any database** (or scope to the `izlearn` db).
+4. **Network Access → Add IP Address**: add your **Oracle VM's public IP** (best), or
+   `0.0.0.0/0` (simplest, less strict) so the backend can connect.
+5. **Database → Connect → Drivers** → copy the connection string. It looks like:
    ```
-   Create a **private** repo on GitHub, then:
-   ```bash
-   git remote add origin https://github.com/<you>/izlearn.git   # skip if a remote already exists
-   git push -u origin HEAD
+   mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/?retryWrites=true&w=majority
    ```
-   > No GitHub? You can instead copy the folder to the server later with `scp -r` — see
-   > the note in [Part 3](#part-3--get-the-code-onto-the-server).
+   Insert the password and add the **db name** `izlearn` before the `?`:
+   ```
+   mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/izlearn?retryWrites=true&w=majority
+   ```
+   Keep this — it's your `DATABASE_URL`.
 
 ---
 
-## Part 1 — Create the free server (Oracle Cloud Always Free)
+## Part 2 — Create the free server (Oracle Cloud Always Free)
 
-1. Sign up at **https://www.oracle.com/cloud/free/** → “Start for free”. Choose your
-   country, verify email, and add a card (verification only). Pick a **Home Region** close
-   to your users — you can’t change it later.
-2. In the console: **☰ Menu → Compute → Instances → Create instance**.
-3. Configure:
-   - **Name:** `izlearn`
-   - **Image:** *Canonical Ubuntu 22.04*
-   - **Shape:** click **Change shape → Ampere (ARM)** → `VM.Standard.A1.Flex` →
-     set **2 OCPUs** and **12 GB RAM** (well within the Always‑Free limit). *(If Ampere
-     capacity is unavailable in your region, retry later or pick another region.)*
-   - **Boot volume:** leave default (~50 GB is plenty; up to 200 GB is free).
-4. **SSH keys:** choose **Generate a key pair** and **download the private key** (e.g.
-   `izlearn.key`). Keep it safe.
-5. Click **Create**. When it’s **Running**, copy the **Public IP address** (e.g.
-   `140.x.x.x`).
-6. Connect from your PC (Git Bash / macOS / Linux / Windows PowerShell):
+1. Sign up at **https://www.oracle.com/cloud/free/** → verify email + card. Pick a **Home
+   Region** near your users.
+2. **☰ → Compute → Instances → Create instance**:
+   - **Name:** `izlearn`  ·  **Image:** *Canonical Ubuntu 22.04*
+   - **Shape → Ampere (ARM)** `VM.Standard.A1.Flex`, **2 OCPU / 12 GB RAM** (Always‑Free).
+   - **SSH keys:** *Generate a key pair* and **download the private key** (`izlearn.key`).
+3. **Create**, wait for **Running**, copy the **Public IP**.
+4. Connect:
    ```bash
-   chmod 400 izlearn.key            # macOS/Linux only
+   chmod 400 izlearn.key            # macOS/Linux
    ssh -i izlearn.key ubuntu@<PUBLIC_IP>
    ```
 
 ---
 
-## Part 2 — Install Docker on the server
-
-Run these on the server (one block):
+## Part 3 — Install Docker (on the server)
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-newgrp docker        # apply the new group without logging out
+sudo usermod -aG docker $USER && newgrp docker
 docker --version && docker compose version
 ```
 
 ---
 
-## Part 3 — Get the code onto the server
+## Part 4 — Get the code + configure secrets
 
 ```bash
 sudo apt-get install -y git
-git clone https://github.com/<you>/izlearn.git
-cd izlearn
-```
-> Private repo? When prompted, use a **GitHub Personal Access Token** as the password
-> (GitHub → Settings → Developer settings → Tokens), or set up an SSH deploy key.
-
-> **No GitHub?** From your PC instead:
-> `scp -i izlearn.key -r f:/training-tran-main ubuntu@<PUBLIC_IP>:~/izlearn`
-
----
-
-## Part 4 — Configure secrets (`.env`)
-
-The stack reads a single `.env` at the project root. Create it from the template and set
-**strong, unique** values:
-
-```bash
+git clone https://github.com/<you>/izlearn.git && cd izlearn   # or scp the folder up
 cp .env.example .env
 
-# Generate two long random secrets and a DB password:
+# Generate strong secrets:
 echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)"
 echo "JWT_REFRESH_SECRET=$(openssl rand -hex 32)"
-echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
 ```
 
-Open the file (`nano .env`) and set every value. It must end up looking like:
+Edit `.env` (`nano .env`) — note `.env` is gitignored, so secrets aren't committed:
 
 ```ini
-# PostgreSQL
-POSTGRES_USER=izlearn
-POSTGRES_PASSWORD=<paste the generated 32-char password>
-POSTGRES_DB=izlearn
+# Atlas connection string from Part 1
+DATABASE_URL=mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/izlearn?retryWrites=true&w=majority
 
-# Auth secrets (paste the generated values)
-JWT_ACCESS_SECRET=<paste 64-char hex>
-JWT_REFRESH_SECRET=<paste a DIFFERENT 64-char hex>
+JWT_ACCESS_SECRET=<paste>
+JWT_REFRESH_SECRET=<paste a different one>
 
-# Public URL of the site (set this to your DuckDNS domain from Part 6, with https://)
-FRONTEND_ORIGIN=https://YOURNAME.duckdns.org
+# Your Vercel URL (fill in after Part 7; used for CORS)
+FRONTEND_ORIGIN=https://your-app.vercel.app
 
-# First admin account (you will log in with these, then change the password)
 SEED_ADMIN_USERNAME=admin
-SEED_ADMIN_PASSWORD=<a strong password you choose>
+SEED_ADMIN_PASSWORD=<a strong password>
 SEED_ADMIN_EMAIL=you@example.com
 ```
 
-Save and exit (in nano: `Ctrl‑O`, `Enter`, `Ctrl‑X`).
-
-> Keep `.env` secret — it’s already in `.gitignore`, so it is **not** committed.
-
 ---
 
-## Part 5 — Open the firewall (the #1 gotcha on Oracle)
+## Part 5 — Open the firewall (the #1 Oracle gotcha)
 
-Oracle blocks inbound traffic in **two** places. You must open **80** and **443** in both.
+Open **80** and **443** in **both** places.
 
-**5a. Cloud firewall (OCI console):**
-- **☰ → Networking → Virtual Cloud Networks →** your VCN **→ Security Lists →** the
-  *Default Security List*.
-- **Add Ingress Rules** (do this twice):
-  - Source CIDR `0.0.0.0/0`, IP Protocol **TCP**, Destination port **80**
-  - Source CIDR `0.0.0.0/0`, IP Protocol **TCP**, Destination port **443**
+**5a. OCI console:** ☰ → Networking → Virtual Cloud Networks → your VCN → Security Lists →
+Default → **Add Ingress Rules**: Source `0.0.0.0/0`, TCP, port **80**; repeat for **443**.
 
-**5b. Server firewall (Ubuntu ships with restrictive iptables):**
+**5b. On the server:**
 ```bash
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
@@ -179,133 +126,91 @@ sudo netfilter-persistent save
 
 ---
 
-## Part 6 — Free domain (DuckDNS)
-
-A domain is required for free HTTPS certificates.
-
-1. Go to **https://www.duckdns.org**, sign in (Google/GitHub), and create a subdomain,
-   e.g. `yourname` → gives you **`yourname.duckdns.org`**.
-2. In the **current ip** box, enter your server’s **Public IP** and click **update ip**.
-3. Make sure `FRONTEND_ORIGIN` in `.env` matches: `https://yourname.duckdns.org`.
-
-> Optional auto‑update (keeps DNS correct if the IP ever changes): add a cron job using
-> the token shown on the DuckDNS page —
-> `*/5 * * * * curl -s "https://www.duckdns.org/update?domains=yourname&token=<TOKEN>&ip="`
-
----
-
-## Part 7 — Keep the app private behind HTTPS
-
-So only Caddy is exposed publicly, bind the frontend container to localhost. Edit the
-ports line for the **frontend** service in `docker-compose.yml`:
-
-```yaml
-  frontend:
-    ...
-    ports:
-      - '127.0.0.1:8081:80'     # was '8081:80'
-```
-
-(Use `nano docker-compose.yml`.) Now port 8081 is reachable **only** by Caddy on the same
-machine, never from the internet.
-
----
-
-## Part 8 — Launch the stack
+## Part 6 — Launch the backend
 
 ```bash
 docker compose up -d --build
 ```
-
-First build takes a few minutes (it compiles the frontend and installs Chromium). On
-start the backend **automatically runs database migrations and seeds the admin account**.
-
-Check it’s healthy:
+On start the backend runs **`prisma db push`** (creates collections + indexes in Atlas) and
+**seeds** the admin account. Verify:
 ```bash
 docker compose ps
-docker compose logs -f backend     # Ctrl-C to stop watching; look for "listening on 4000"
-curl -I http://127.0.0.1:8081      # should return HTTP/1.1 200
+docker compose logs -f backend     # look for "listening on 4000"; no replica-set errors
+curl -s http://127.0.0.1:4000/api/health   # expect status ok/degraded JSON
 ```
+> If you see *"Transaction numbers are only allowed on a replica set"* — your `DATABASE_URL`
+> isn't pointing at Atlas (or a replica set). Fix the string and `docker compose up -d`.
 
 ---
 
-## Part 9 — Free automatic HTTPS (Caddy)
+## Part 7 — API domain + free HTTPS (DuckDNS + Caddy)
 
-Install Caddy on the host:
-```bash
-sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt-get update && sudo apt-get install -y caddy
-```
+The backend needs a public HTTPS URL for the Vercel frontend to call.
 
-Configure it — replace the file with your domain:
-```bash
-sudo nano /etc/caddy/Caddyfile
-```
-```caddy
-yourname.duckdns.org {
-    encode gzip
-    reverse_proxy 127.0.0.1:8081 {
-        # allow large training-material uploads
-        flush_interval -1
-    }
-}
-```
-Reload and Caddy will fetch a free Let’s Encrypt certificate automatically:
-```bash
-sudo systemctl reload caddy
-sudo systemctl status caddy --no-pager     # should be active (running)
-```
-
-🎉 Open **https://yourname.duckdns.org** in a browser — the site is live with HTTPS.
+1. **DuckDNS:** at https://www.duckdns.org create a subdomain, e.g. `izlearn-api`, and set its
+   IP to the VM's **Public IP** → gives `izlearn-api.duckdns.org`.
+2. **Install Caddy:**
+   ```bash
+   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+   sudo apt-get update && sudo apt-get install -y caddy
+   ```
+3. **Configure** (`sudo nano /etc/caddy/Caddyfile`):
+   ```caddy
+   izlearn-api.duckdns.org {
+       encode gzip
+       reverse_proxy 127.0.0.1:4000
+   }
+   ```
+   ```bash
+   sudo systemctl reload caddy
+   curl -I https://izlearn-api.duckdns.org/api/health   # HTTPS now works
+   ```
 
 ---
 
-## Part 10 — First login & essential setup
+## Part 8 — Deploy the frontend to Vercel
 
-1. **Log in** with `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` from your `.env`.
-2. **Change the admin password** immediately (top‑right user menu → Change Password).
-3. **Set your e‑signature password** (Profile/account settings). This is **required** to
-   Publish, Archive, Revise topics, change passing scores, and assign bundles — the
-   controlled actions all demand a two‑component e‑signature.
-4. **(Optional) Enable email notifications** — free via **Brevo**:
-   - Create a free account at **https://www.brevo.com**, then **SMTP & API → SMTP**.
-   - In izLearn: **System Setup / System Config**, set:
-     - `smtp.host` = `smtp-relay.brevo.com`
-     - `smtp.port` = `587`
-     - `smtp.user` = your Brevo SMTP login
-     - `smtp.password` = your Brevo SMTP **key**
-     - `smtp.from` = `izLearn <you@yourdomain>`
-   - *(Gmail works too: host `smtp.gmail.com`, port `587`, and a Google “App Password”.)*
-5. Create your real roles, departments, designations, users, topics and bundles.
+1. Push the repo to **GitHub** (if not already).
+2. At **https://vercel.com** → **Add New → Project** → import the repo.
+3. **Configure project:**
+   - **Root Directory:** `frontend`
+   - Framework preset: **Vite** (build `npm run build`, output `dist` — already in
+     `frontend/vercel.json`, which also adds SPA routing).
+   - **Environment Variable:**
+     `VITE_API_URL = https://izlearn-api.duckdns.org/api`
+4. **Deploy.** Vercel gives you a URL like `https://your-app.vercel.app`.
+5. **Back on the server:** set `FRONTEND_ORIGIN` in `.env` to that exact Vercel URL, then:
+   ```bash
+   docker compose up -d        # picks up the new CORS origin
+   ```
+
+🎉 Open your Vercel URL — the SPA loads and all `/api` calls go to the VM backend over HTTPS.
+
+---
+
+## Part 9 — First login & setup
+
+1. Log in with `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`.
+2. **Change the admin password** immediately.
+3. **Set your e‑signature password** (Profile) — required for Publish / Archive / Revise /
+   Change passing score / Assign bundle.
+4. **(Optional) email** — free Brevo: System Config → set `smtp.host=smtp-relay.brevo.com`,
+   `smtp.port=587`, `smtp.user`, `smtp.password` (Brevo SMTP key), `smtp.from`.
+5. Create your real departments, designations, users, topics, bundles.
 
 ---
 
 ## Maintenance
 
-**Deploy updates** (after pushing new code to GitHub):
-```bash
-cd ~/izlearn
-git pull
-docker compose up -d --build      # migrations re-run automatically and safely
-```
-
-**View logs:** `docker compose logs -f backend`
-
-**Restart everything:** `docker compose restart`
-
-**Backups (your data lives in Docker volumes):**
-- Database snapshot:
-  ```bash
-  docker compose exec -T postgres pg_dump -U izlearn izlearn > backup_$(date +%F).sql
-  ```
-- Uploaded files live in the `storage` volume; the app also has a built‑in Backup feature
-  (Admin → Backup). For off‑site safety, periodically copy `backup_*.sql` to your PC:
-  `scp -i izlearn.key ubuntu@<PUBLIC_IP>:~/izlearn/backup_*.sql .`
-
-**Auto‑restart on reboot:** already handled — every service uses
-`restart: unless-stopped`, and Caddy runs as a systemd service.
+- **Update:** `cd ~/izlearn && git pull && docker compose up -d --build` (re‑runs `db push`).
+  Frontend redeploys automatically on each GitHub push (Vercel).
+- **Backups (Admin → Backup):** uses `mongodump` to a gzip archive in the `backups` volume,
+  with a SHA‑256 checksum + verify/restore. Copy archives off‑box periodically:
+  `scp -i izlearn.key ubuntu@<IP>:~/izlearn/<backups-volume-path>/*.gz .` (or use Atlas's own
+  cloud backups).
+- **Logs:** `docker compose logs -f backend`  ·  **Restart:** `docker compose restart`.
 
 ---
 
@@ -313,37 +218,37 @@ docker compose up -d --build      # migrations re-run automatically and safely
 
 | Symptom | Fix |
 |--------|-----|
-| Browser can’t reach the site | Re‑check **Part 5** (both OCI ingress rules **and** the iptables rules) and that DuckDNS points to the current public IP. |
-| HTTPS cert fails to issue | Port **80** must be open (Let’s Encrypt validates over it). Confirm DNS resolves: `dig yourname.duckdns.org`. Check `sudo journalctl -u caddy -n 50`. |
-| Backend keeps restarting | `docker compose logs backend`. Usually a missing/blank value in `.env` (in production, missing `DATABASE_URL`/JWT secrets hard‑fail at boot). |
-| “Ampere capacity unavailable” at instance create | Try a different Availability Domain, retry later, or temporarily use a smaller A1 (1 OCPU/6 GB) — still free. |
-| Uploads fail for large files | Caddy streams by default; ensure you didn’t add a size limit, and the frontend nginx already allows 1 GB. |
-| Out of disk over time | `docker system prune -af` to clear old build layers (does **not** touch your data volumes). |
+| Frontend loads but every API call fails (CORS / network) | `VITE_API_URL` must be the full `https://…/api`; `FRONTEND_ORIGIN` on the server must equal the Vercel URL; then `docker compose up -d`. |
+| Backend log: *"Transaction numbers are only allowed on a replica set"* | `DATABASE_URL` must point at Atlas (or a replica set). |
+| Atlas connection refused / timeout | Add the VM's public IP under Atlas **Network Access**. |
+| HTTPS cert won't issue | Port **80** open (Part 5, both places); DNS resolves: `dig izlearn-api.duckdns.org`; `sudo journalctl -u caddy -n 50`. |
+| Backend restarts on boot | `docker compose logs backend` — usually a missing `.env` value (DATABASE_URL / JWT secrets hard‑fail in production). |
+| Out of disk over time | `docker system prune -af` (won't touch the `storage`/`backups` volumes). |
 
 ---
 
-## Alternatives
+## Notes & trade‑offs (MongoDB)
 
-- **You already own a domain + use Cloudflare:** skip DuckDNS/Caddy and run a free
-  **Cloudflare Tunnel** (`cloudflared`) to `localhost:8081` — gives HTTPS with **no open
-  inbound ports** at all.
-- **Don’t want Oracle:** **Google Cloud** has an always‑free `e2-micro`, but its **1 GB
-  RAM is too small** for this stack (Postgres + Redis + Chromium). **AWS/Azure** free tiers
-  **expire after 12 months**. **Render/Railway** free tiers don’t give **persistent disk**,
-  so uploaded materials would be lost — not suitable for this app.
-- **Internal/LAN only (no internet host):** run `docker compose up -d --build` on any
-  always‑on PC and access it at `http://<that-PC-IP>:8081` (add that IP to
-  `FRONTEND_ORIGIN`). No domain or HTTPS needed for a closed network.
+- **Transactions need a replica set** — Atlas provides it; a future self‑hosted Mongo must run
+  in replica‑set mode (`--replSet`).
+- **Schema sync is `prisma db push`** (MongoDB has no SQL migration history) — lighter change
+  control than the previous Postgres migrations; worth noting for GMP audits.
+- **DB‑level audit immutability triggers** (a Postgres feature) have no MongoDB equivalent.
+  Audit‑trail and e‑signature records are still never updated/deleted by the app (immutability
+  is enforced at the application layer), but the previous DB‑level defence‑in‑depth is gone.
+- **Atlas free M0 = 512 MB** — fine for launch; only *metadata* is stored in Mongo (uploaded
+  files stay on the VM disk). Watch usage as the catalogue grows.
 
 ---
 
 ### Quick reference — full first deploy
 
 ```bash
-# on the server, after Docker is installed and firewall opened
+# Atlas: create M0, DB user, allow VM IP, copy mongodb+srv string  (Part 1)
+# Server (after Docker + firewall):
 git clone https://github.com/<you>/izlearn.git && cd izlearn
-cp .env.example .env && nano .env          # set strong secrets + FRONTEND_ORIGIN
-nano docker-compose.yml                     # frontend ports -> '127.0.0.1:8081:80'
-docker compose up -d --build
-# then install Caddy (Part 9) and point DuckDNS at the public IP
+cp .env.example .env && nano .env        # DATABASE_URL=Atlas, secrets, FRONTEND_ORIGIN
+docker compose up -d --build             # db push + seed against Atlas
+# DuckDNS → VM IP; install Caddy → reverse_proxy 127.0.0.1:4000   (Part 7)
+# Vercel: import repo, Root=frontend, VITE_API_URL=https://<api-domain>/api  (Part 8)
 ```

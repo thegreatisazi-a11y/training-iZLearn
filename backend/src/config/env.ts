@@ -47,9 +47,9 @@ export const env = {
     tmp: process.env.STORAGE_TMP || './storage/tmp',
   },
 
-  pg: {
-    dumpBin: process.env.PG_DUMP_BIN || 'pg_dump',
-    psqlBin: process.env.PSQL_BIN || 'psql',
+  mongo: {
+    dumpBin: process.env.MONGODUMP_BIN || 'mongodump',
+    restoreBin: process.env.MONGORESTORE_BIN || 'mongorestore',
   },
 
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',

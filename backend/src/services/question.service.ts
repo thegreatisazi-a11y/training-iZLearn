@@ -98,7 +98,7 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput) {
               effectiveType as CreateQuestionInput['questionType'],
               input.options,
               input.matchPairs,
-            ) ?? Prisma.DbNull,
+            ) ?? null,
           }
         : {}),
       ...(input.correctAnswer !== undefined

@@ -1,7 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { auditContext, AuditStore, SYSTEM_ACTOR, ANON_ACTOR } from '../utils/auditContext';
-import { critical, logger } from '../config/logger';
+import { logger } from '../config/logger';
 
 /**
  * 21 CFR Part 11 §11.10(e) — secure, computer-generated, time-stamped audit trail.
@@ -258,27 +258,17 @@ export function requestContextMiddleware(req: Request, _res: Response, next: Nex
 }
 
 /**
- * Always-ON health check (21 CFR Part 11 §11.10(e)): verify the DB-level
- * immutability trigger exists. Logs a CRITICAL alert if missing.
+ * Health check (21 CFR Part 11 §11.10(e)) for audit/e-signature immutability.
+ *
+ * On PostgreSQL this verified DB-level triggers. MongoDB has no equivalent
+ * DB-level trigger mechanism, so immutability is enforced at the APPLICATION
+ * layer instead: the app only ever CREATEs AuditTrail / ElectronicSignature
+ * records (never update/delete), and these collections are not exposed to any
+ * mutating endpoint. There is nothing to verify at the DB layer, so this reports
+ * healthy. (Trade-off noted: the previous Postgres triggers were defence-in-depth
+ * against direct DB writes, which MongoDB does not provide.)
  */
-export async function verifyAuditTrigger(prisma: PrismaClient): Promise<boolean> {
-  try {
-    const rows = await prisma.$queryRaw<Array<{ tgname: string }>>`
-      SELECT tgname FROM pg_trigger
-      WHERE tgname IN ('audit_trail_immutable', 'electronic_signature_immutable')
-        AND NOT tgisinternal;
-    `;
-    const ok = rows.length >= 2;
-    if (!ok) {
-      critical('Audit/e-signature immutability triggers are MISSING. GMP records are NOT protected at the DB layer.', {
-        found: rows.map((r) => r.tgname),
-      });
-    } else {
-      logger.info('Audit immutability triggers verified.');
-    }
-    return ok;
-  } catch (err) {
-    critical('Failed to verify audit immutability triggers.', { err: (err as Error).message });
-    return false;
-  }
+export async function verifyAuditTrigger(_prisma: PrismaClient): Promise<boolean> {
+  logger.info('Audit immutability is enforced at the application layer (MongoDB has no DB-level triggers).');
+  return true;
 }

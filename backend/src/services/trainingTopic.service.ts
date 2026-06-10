@@ -324,7 +324,7 @@ export async function reviseTopic(id: string, req: Request) {
         topicVersion: nextVersion,
         questionText: q.questionText,
         questionType: q.questionType,
-        options: (q.options ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+        options: q.options === null ? null : (q.options as Prisma.InputJsonValue),
         correctAnswer: q.correctAnswer as Prisma.InputJsonValue,
         explanation: q.explanation,
         isMandatory: q.isMandatory,
