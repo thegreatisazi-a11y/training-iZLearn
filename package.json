@@ -1,0 +1,25 @@
+{
+  "name": "izlearn",
+  "version": "1.0.0",
+  "private": true,
+  "description": "izLearn — GxP-compliant Learning Management System (21 CFR Part 11 / EU Annex 11 / ALCOA++)",
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev -w backend\" \"npm:dev -w frontend\"",
+    "build": "npm run build -w shared && npm run build -w backend && npm run build -w frontend",
+    "seed": "npm run seed -w backend",
+    "migrate": "npm run migrate -w backend",
+    "test": "npm run test -w backend && npm run test -w frontend",
+    "security:audit": "npm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

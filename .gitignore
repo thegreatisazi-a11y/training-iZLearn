@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Prisma
+backend/prisma/*.db
+
+# Uploads & generated artifacts (never commit GMP records / PII)
+backend/storage/
+backend/uploads/
+backend/certificates/
+backend/backups/
+backend/reports/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test coverage
+coverage/

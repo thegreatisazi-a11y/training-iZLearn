@@ -1,0 +1,847 @@
+// izLearn — Prisma schema
+// GxP-compliant LMS. Universal rules enforced on every GMP model:
+//   - createdAt / updatedAt / createdBy / isDeleted on all tables
+//   - NEVER hard-delete: deletes set isDeleted = true with an audit trail entry
+//   - All authoritative timestamps come from the DB server (@default(now()))
+//
+// NOTE: model & field names use Prisma defaults (PascalCase tables, camelCase
+// columns) so the hand-authored initial migration SQL matches the client 1:1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Core Identity
+// ============================================================
+
+model User {
+  id                    String    @id @default(uuid())
+  employeeId            String    @unique
+  fullName              String
+  windowsUsername       String    @unique
+  email                 String?
+  passwordHash          String
+  signaturePasswordHash String? // separate e-signature password
+  userType              UserType
+  departmentId          String
+  locationId            String
+  supervisorId          String? // direct line manager (UR-42)
+  designationId         String? // job designation (master data)
+  isActive              Boolean   @default(true)
+  isDeleted             Boolean   @default(false)
+  lastLoginAt           DateTime?
+  failedLoginAttempts   Int       @default(0)
+  lockedUntil           DateTime?
+  passwordChangedAt     DateTime?
+  mustChangePassword    Boolean   @default(false)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  createdBy             String
+
+  @@index([departmentId])
+  @@index([locationId])
+  @@index([isDeleted])
+}
+
+enum UserType {
+  INTERNAL
+  EXTERNAL
+  CONTRACTOR
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  roleName    String   @unique
+  description String?
+  permissions Json // { moduleName: { read, write, approve, print, export } }
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedBy String
+  assignedAt DateTime @default(now())
+  isActive   Boolean  @default(true)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model Department {
+  id         String   @id @default(uuid())
+  name       String
+  locationId String
+  isActive   Boolean  @default(true)
+  isDeleted  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  createdBy  String
+
+  @@index([locationId])
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+}
+
+/// Pending user-creation requests (Module 2 approval workflow).
+model UserCreationRequest {
+  id              String            @id @default(uuid())
+  userType        UserType
+  fullName        String
+  employeeId      String
+  windowsUsername String
+  email           String?
+  departmentId    String
+  locationId      String
+  supervisorId    String? // UR-42: direct line manager
+  designationId   String? // job designation (master data)
+  roleIds         Json // array of roleId
+  remarks         String?
+  status          UserRequestStatus @default(PENDING_APPROVAL)
+  decidedBy       String?
+  decidedAt       DateTime?
+  decisionRemarks String?
+  signatureId     String?
+  createdUserId   String? // populated once approved
+  isDeleted       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  createdBy       String
+
+  @@index([status])
+}
+
+enum UserRequestStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+// ============================================================
+// Training Content
+// ============================================================
+
+model TrainingTopic {
+  id                      String       @id @default(uuid())
+  topicCode               String       @unique // Generated once, NEVER modifiable (system-owned)
+  topicNumber             String? // User-entered number/label shown to users instead of topicCode
+  sopNumber               String? // controlled SOP / document number (distinct from internal topicCode)
+  title                   String
+  description             String?
+  trainingType            TrainingType
+  status                  TopicStatus  @default(DRAFT) // draft topics are hidden from trainees
+  departmentId            String? // optional department this SOP/topic belongs to
+  designationId           String? // optional designation mapping
+  roleId                  String? // optional role mapping
+  durationMinutes         Int
+  passingScorePercent     Int
+  maxAttempts             Int
+  questionLimit           Int? // per-topic number of questions drawn for an assessment (null = system default)
+  randomizeQuestions      Boolean      @default(true) // randomize the non-mandatory question pool
+  showExplanations        Boolean      @default(true) // show incorrect-answer explanations after a failed attempt
+  blockAfterMaxAttempts   Boolean      @default(true) // block the assessment after the configured max attempts
+  refresherIntervalMonths Int?
+  materialViewSeconds     Int? // minimum seconds the material must stay open before the assessment unlocks
+  effectiveDate           DateTime? // date the (published) version becomes effective
+  reviewDate              DateTime? // next scheduled review date for the SOP/topic
+  currentVersion          Int          @default(1)
+  parentTopicId           String? // links a revision back to the original
+  supersededByTopicId     String? // set on the OLD row when a revision supersedes it (auto-archive)
+  isActive                Boolean      @default(true)
+  isDeleted               Boolean      @default(false)
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+  createdBy               String
+
+  @@index([parentTopicId])
+  @@index([isDeleted])
+  @@index([status])
+}
+
+enum TrainingType {
+  CLASSROOM
+  E_LEARNING
+  OJT
+  OFFLINE
+  INDUCTION
+  REFRESHER
+  WORKSHOP
+  SOP
+  ONLINE
+}
+
+enum TopicStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+model TrainingMaterial {
+  id                  String   @id @default(uuid())
+  topicId             String
+  originalFileName    String
+  storedFileName      String // UUID-based safe name on disk
+  filePath            String
+  fileType            String // pdf, docx, pptx, mp4, etc.
+  fileSize            Int // bytes
+  requiredViewSeconds Int? // per-material minimum reading/viewing time before the assessment unlocks
+  version             Int      @default(1)
+  isCurrentVersion    Boolean  @default(true)
+  isObsolete          Boolean  @default(false)
+  isStaged            Boolean  @default(false) // pending file on a PUBLISHED topic; inert until the topic is revised
+  replacesMaterialId  String? // when staged as a Replace/Update, the current material this supersedes on revise
+  archivedAt          DateTime? // set when the file is superseded (moved to Archived Materials / version history)
+  archivedBy          String? // user who triggered the supersession (revise)
+  changeReason        String? // reason-for-change captured when the file was archived
+  isDeleted           Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           String
+
+  @@index([topicId])
+  @@index([isStaged])
+}
+
+/// Server-side record of a user reading/viewing a training material. Used to
+/// ENFORCE the minimum reading time before an assessment can be started (the
+/// elapsed wall-clock between startedAt and completedAt is validated server-side).
+model MaterialViewLog {
+  id              String    @id @default(uuid())
+  userId          String
+  materialId      String
+  topicId         String
+  topicVersion    Int
+  requiredSeconds Int       @default(0)
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  isCompleted     Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, materialId, topicVersion])
+  @@index([userId, topicId])
+}
+
+model Question {
+  id            String       @id @default(uuid())
+  topicId       String
+  topicVersion  Int
+  questionText  String
+  questionType  QuestionType
+  options       Json? // Array of option objects {id, text} or match pairs
+  correctAnswer Json // Array of correct option IDs or answer string
+  explanation   String? // Shown to user after incorrect answer
+  isMandatory   Boolean      @default(false)
+  isActive      Boolean      @default(true)
+  isDeleted     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  createdBy     String
+
+  @@index([topicId, topicVersion])
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE_SINGLE
+  MULTIPLE_CHOICE_MULTI
+  MATCH_THE_WORDS
+  FILL_IN_THE_BLANKS
+  TRUE_FALSE
+}
+
+// ============================================================
+// Scheduling & Delivery
+// ============================================================
+
+model TrainingSchedule {
+  id            String         @id @default(uuid())
+  topicId       String
+  scheduledDate DateTime
+  trainerId     String // Must NOT be in traineeIds
+  trainingType  TrainingType
+  methodology   String?
+  venue         String?
+  maxTrainees   Int?
+  status        ScheduleStatus @default(PLANNED)
+  isDeleted     Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  createdBy     String
+
+  @@index([topicId])
+  @@index([scheduledDate])
+}
+
+enum ScheduleStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model TrainingAssignment {
+  id               String           @id @default(uuid())
+  userId           String
+  topicId          String
+  scheduleId       String?
+  assignedBy       String
+  assignmentType   AssignmentType
+  dueDate          DateTime?
+  refresherDueDate DateTime?
+  status           AssignmentStatus @default(PENDING)
+  tniId            String?
+  isDeleted        Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  createdBy        String
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([scheduleId])
+  @@index([status])
+}
+
+enum AssignmentType {
+  COURSE_SPECIFIC
+  PERSON_SPECIFIC
+  ROLE_SPECIFIC
+  TNI_BASED
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  BLOCKED
+  WAIVED
+}
+
+model Attendance {
+  id         String           @id @default(uuid())
+  scheduleId String
+  userId     String
+  status     AttendanceStatus
+  markedBy   String
+  markedAt   DateTime         @default(now())
+  method     AttendanceMethod
+  isDeleted  Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  createdBy  String
+
+  @@index([scheduleId])
+  @@index([userId])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+enum AttendanceMethod {
+  MANUAL
+  EXCEL_UPLOAD
+  ONLINE_AUTO
+}
+
+/// OJT (on-the-job training) evaluation record.
+model OjtRecord {
+  id              String   @id @default(uuid())
+  topicId         String
+  userId          String
+  evaluatorId     String
+  evaluationDate  DateTime
+  evaluationScore Float
+  remarks         String?
+  isDeleted       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String
+
+  @@index([userId])
+  @@index([topicId])
+}
+
+/// Offline / classroom training record with optional attendance sheet.
+model OfflineTrainingRecord {
+  id              String   @id @default(uuid())
+  topicId         String
+  venue           String
+  trainerName     String
+  durationMinutes Int
+  trainingDate    DateTime
+  traineeIds      Json // array of userId
+  attendanceSheet String? // stored file path
+  isDeleted       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String
+
+  @@index([topicId])
+}
+
+// ============================================================
+// Assessment
+// ============================================================
+
+model AssessmentAttempt {
+  id            String    @id @default(uuid())
+  userId        String
+  topicId       String
+  topicVersion  Int
+  assignmentId  String?
+  attemptNumber Int
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  score         Float?
+  isPassed      Boolean?
+  isBlocked     Boolean   @default(false)
+  answers       Json? // { questionId: userAnswer }
+  questionsUsed Json? // Snapshot of questions shown in this attempt
+  isDeleted     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdBy     String
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([assignmentId])
+}
+
+model Certificate {
+  id                String          @id @default(uuid())
+  userId            String
+  topicId           String
+  topicVersion      Int? // version of the topic that was completed (record traceability)
+  attemptId         String
+  certificateNumber String          @unique
+  issuedAt          DateTime        @default(now())
+  filePath          String
+  certificateType   CertificateType
+  isDeleted         Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  createdBy         String
+
+  @@index([userId])
+  @@index([topicId])
+}
+
+enum CertificateType {
+  TRAINING
+  INDUCTION
+}
+
+enum PageOrientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+enum PageSize {
+  A4
+  LETTER
+}
+
+model CertificateTemplate {
+  id                         String          @id @default(uuid())
+  templateName               String
+  certificateType            CertificateType
+  isActive                   Boolean         @default(true)
+  isDefault                  Boolean         @default(false)
+  orientation                PageOrientation @default(LANDSCAPE)
+  pageSize                   PageSize        @default(A4)
+  backgroundImagePath        String?
+  logoPath                   String?
+  primaryColor               String          @default("#0f766e")
+  secondaryColor             String          @default("#334155")
+  fontFamily                 String          @default("Georgia")
+  headerText                 String          @default("Certificate of Training Completion")
+  subHeaderText              String          @default("This is to certify that")
+  bodyText                   String          @default("{{employeeName}} ({{employeeId}}) has successfully completed the training {{topicName}} [{{topicCode}}] with a score of {{score}}% on {{completionDate}}.")
+  footerText                 String          @default("Certificate No: {{certificateNumber}}")
+  signatory1Name             String?
+  signatory1Title            String?
+  signatory1SignatureImagePath String?
+  signatory2Name             String?
+  signatory2Title            String?
+  signatory2SignatureImagePath String?
+  showBorder                 Boolean         @default(true)
+  borderColor                String          @default("#0f766e")
+  borderWidth                Int             @default(6)
+  watermarkText              String?
+  showWatermark              Boolean         @default(true)
+  isDeleted                  Boolean         @default(false)
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+  createdBy                  String
+
+  @@index([certificateType])
+}
+
+// ============================================================
+// Documents & JD
+// ============================================================
+
+model JobDescription {
+  id           String    @id @default(uuid())
+  userId       String
+  departmentId String
+  roleId       String
+  title        String
+  content      String // Rich text / HTML
+  version      Int       @default(1)
+  status       DocStatus @default(DRAFT)
+  approvedBy   String?
+  approvedAt   DateTime?
+  signatureId  String?
+  parentJdId   String? // previous version, for history chains
+  isDeleted    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  createdBy    String
+
+  @@index([userId])
+  @@index([departmentId, roleId])
+}
+
+enum DocStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  OBSOLETE
+  REJECTED
+}
+
+/// Master JD template per department + role (used to pre-fill on transfer).
+model JDTemplate {
+  id           String   @id @default(uuid())
+  departmentId String
+  roleId       String
+  title        String
+  content      String
+  isActive     Boolean  @default(true)
+  isDeleted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String
+
+  @@unique([departmentId, roleId])
+}
+
+model PersonalDocument {
+  id               String   @id @default(uuid())
+  userId           String
+  documentType     String
+  title            String
+  originalFileName String
+  storedFileName   String
+  filePath         String
+  isDeleted        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        String
+
+  @@index([userId])
+}
+
+// ============================================================
+// Training Need Identification
+// ============================================================
+
+model TNI {
+  id            String    @id @default(uuid())
+  userId        String
+  topicId       String
+  identifiedBy  String
+  justification String
+  status        TNIStatus @default(PENDING)
+  approvedBy    String?
+  approvedAt    DateTime?
+  signatureId   String?
+  isDeleted     Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdBy     String
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum TNIStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============================================================
+// Feedback
+// ============================================================
+
+model FeedbackForm {
+  id        String   @id @default(uuid())
+  topicId   String
+  title     String
+  questions Json // Array of { id, text, type, options }
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String
+
+  @@index([topicId])
+}
+
+model FeedbackResponse {
+  id          String   @id @default(uuid())
+  formId      String
+  userId      String
+  scheduleId  String?
+  responses   Json // { questionId: answer }
+  submittedAt DateTime @default(now())
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+
+  @@index([formId])
+}
+
+// ============================================================
+// Notifications & Announcements
+// ============================================================
+
+model Announcement {
+  id          String    @id @default(uuid())
+  title       String
+  content     String
+  targetRoles Json // Array of roleIds, empty = all
+  isActive    Boolean   @default(true)
+  expiresAt   DateTime?
+  isDeleted   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdBy   String
+}
+
+model EmailNotificationLog {
+  id          String      @id @default(uuid())
+  userId      String?
+  toEmail     String
+  type        String
+  subject     String
+  status      EmailStatus @default(QUEUED)
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  errorMsg    String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  createdBy   String
+
+  @@index([status])
+  @@index([userId])
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+// ============================================================
+// Compliance Core
+// ============================================================
+
+/// INSERT ONLY — no updates, no deletes — enforced by DB trigger and app layer.
+model AuditTrail {
+  id              String   @id @default(uuid())
+  userId          String
+  userFullName    String // Denormalized snapshot at time of action
+  action          String // CREATE | UPDATE | DELETE | LOGIN | ...
+  entityType      String
+  entityId        String?
+  oldValue        Json? // Full snapshot before change
+  newValue        Json? // Full snapshot after change
+  reasonForChange String? // Mandatory for UPDATE/DELETE of GMP records
+  ipAddress       String?
+  userAgent       String?
+  sessionId       String?
+  timestamp       DateTime @default(dbgenerated("NOW()")) // Always from DB server
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+model ElectronicSignature {
+  id           String   @id @default(uuid())
+  userId       String
+  userFullName String // Snapshot
+  recordType   String
+  recordId     String
+  meaning      String // "Approved" | "Reviewed" | "Rejected" | "Performed" | ...
+  signedAt     DateTime @default(dbgenerated("NOW()"))
+  ipAddress    String?
+
+  @@index([recordType, recordId])
+  @@index([userId])
+}
+
+model UserSession {
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  sessionId    String   @unique
+  deviceInfo   String?
+  ipAddress    String?
+  expiresAt    DateTime
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordHistory {
+  id           String   @id @default(uuid())
+  userId       String
+  passwordHash String
+  changedAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model SystemConfig {
+  key         String   @id // e.g., "password.min_length"
+  value       String
+  description String?
+  updatedBy   String
+  updatedAt   DateTime @updatedAt
+}
+
+// ============================================================
+// Master Data Configuration (UR-102/103)
+// ============================================================
+
+/// Admin-configurable Training Type master (UR-102/103).
+/// Built-in types (isBuiltIn=true) map to the TrainingType enum and cannot be deleted.
+/// Admins can add custom types and deactivate any type.
+model TrainingTypeMaster {
+  id          String   @id @default(uuid())
+  code        String   @unique // 'CLASSROOM' etc. or custom codes
+  displayName String
+  description String?
+  isBuiltIn   Boolean  @default(false) // built-in types cannot be hard-deleted
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+}
+
+/// Admin-configurable Document Type master (UR-102/103).
+/// Used by PersonalDocument.documentType to restrict valid values.
+model DocumentTypeMaster {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  displayName String
+  description String?
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+}
+
+/// Admin-configurable Designation (job title) master.
+/// Referenced by User.designationId and UserCreationRequest.designationId.
+model DesignationMaster {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  displayName String
+  description String?
+  isActive    Boolean  @default(true)
+  isDeleted   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+}
+
+// ============================================================
+// Topic Version History & Bundles
+// ============================================================
+
+/// First-class version-history record for a training topic. Each entry captures
+/// the superseded materials and a snapshot of the questions at that version, so
+/// every course shows "changed on {date,time}" with the old files + question set.
+/// Current questions remain live in the Question table — only a copy is snapshotted.
+model TopicVersionHistory {
+  id                String   @id @default(uuid())
+  topicId           String
+  version           Int
+  changedBy         String
+  reason            String?
+  note              String?
+  materialsSnapshot Json // array of the materials current at this version
+  questionsSnapshot Json // array of the questions current at this version
+  changedAt         DateTime @default(now())
+  isDeleted         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String
+
+  @@index([topicId])
+}
+
+/// A named collection of training topics that can be assigned together.
+/// Targeting (departments/roles) is stored inline as JSON arrays, mirroring the
+/// Announcement.targetRoles precedent.
+model TopicBundle {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  departmentIds Json      @default("[]") // array of departmentId to assign to
+  roleIds       Json      @default("[]") // array of roleId to assign to
+  designationIds Json     @default("[]") // array of designationId to assign to
+  userIds       Json      @default("[]") // array of specific userId to assign to (in addition to dept/role)
+  dueDate       DateTime? // default due date applied when the bundle is assigned
+  isActive      Boolean   @default(true)
+  isDeleted     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String
+}
+
+/// Join row linking a topic to a bundle (many-to-many). Soft-delete only: removing
+/// a topic from a bundle sets isDeleted=true (membership history is preserved).
+model BundleTopic {
+  bundleId  String
+  topicId   String
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+  createdBy String
+
+  @@id([bundleId, topicId])
+  @@index([topicId])
+}

@@ -1,0 +1,243 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Download } from 'lucide-react';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable, type Column } from '@/components/common/DataTable';
+import { FileUpload } from '@/components/common/FileUpload';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input, Field } from '@/components/ui/input';
+import { Tabs } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Dialog } from '@/components/ui/dialog';
+import { useAuthStore } from '@/store/authStore';
+import { svc } from '@/services';
+import { apiError } from '@/lib/axios';
+import { toast } from '@/store/uiStore';
+import { formatDate } from '@/lib/format';
+
+interface Assignment {
+  id: string;
+  topicId: string;
+  topicTitle?: string;
+  status: string;
+  dueDate: string | null;
+}
+interface Certificate {
+  id: string;
+  certificateNumber: string;
+  topicTitle?: string;
+  topicId: string;
+  issuedAt: string;
+  certificateType: string;
+}
+interface PersonalDoc {
+  id: string;
+  title: string;
+  documentType: string;
+  uploadedAt?: string;
+  createdAt?: string;
+}
+
+function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [loginPassword, setLoginPassword] = useState('');
+  const [signaturePassword, setSignaturePassword] = useState('');
+  const [confirmSignaturePassword, setConfirm] = useState('');
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => svc.auth.setSignaturePassword({ loginPassword, signaturePassword, confirmSignaturePassword }),
+    onSuccess: () => {
+      toast.success('Signature password set.');
+      setLoginPassword('');
+      setSignaturePassword('');
+      setConfirm('');
+      onClose();
+    },
+    onError: (e) => setError(apiError(e)),
+  });
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Set Signature Password"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !loginPassword || !signaturePassword}>
+            {mutation.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-sm text-slate-600">Your signature password is the second component of your electronic signature (21 CFR Part 11).</p>
+      <Field label="Login password">
+        <Input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      <Field label="New signature password">
+        <Input type="password" value={signaturePassword} onChange={(e) => setSignaturePassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      <Field label="Confirm signature password">
+        <Input type="password" value={confirmSignaturePassword} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </Dialog>
+  );
+}
+
+export default function ProfilePage() {
+  const me = useAuthStore((s) => s.user);
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<'training' | 'certificates' | 'documents'>('training');
+  const [sigOpen, setSigOpen] = useState(false);
+
+  const training = useQuery({
+    queryKey: ['profile', 'training', me?.id],
+    queryFn: () => svc.assignments.list({ userId: me?.id, pageSize: 200 }),
+    enabled: !!me?.id && tab === 'training',
+  });
+  const certificates = useQuery({
+    queryKey: ['certificates', 'mine'],
+    queryFn: () => svc.certificates.listMine() as unknown as Promise<Certificate[]>,
+    enabled: tab === 'certificates',
+  });
+  const docs = useQuery({
+    queryKey: ['personalDocs', 'mine'],
+    queryFn: () => svc.personalDocs.mine() as unknown as Promise<PersonalDoc[]>,
+    enabled: tab === 'documents',
+  });
+
+  // Document upload state.
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [documentType, setDocumentType] = useState('');
+  const [docTitle, setDocTitle] = useState('');
+
+  const uploadMutation = useMutation({
+    mutationFn: () => svc.personalDocs.upload(docFile as File, documentType, docTitle),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['personalDocs', 'mine'] });
+      toast.success('Document uploaded.');
+      setDocFile(null);
+      setDocumentType('');
+      setDocTitle('');
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const trainingColumns: Column<Assignment>[] = [
+    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+    { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
+  ];
+  const certColumns: Column<Certificate>[] = [
+    { key: 'certificateNumber', header: 'Certificate No.' },
+    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'certificateType', header: 'Type' },
+    { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
+    {
+      key: 'actions',
+      header: '',
+      render: (r) => (
+        <Button size="sm" variant="outline" onClick={() => svc.certificates.download(r.id, `${r.certificateNumber}.pdf`).catch((e) => toast.error(apiError(e)))}>
+          <Download className="h-4 w-4" /> Download
+        </Button>
+      ),
+    },
+  ];
+  const docColumns: Column<PersonalDoc>[] = [
+    { key: 'title', header: 'Title' },
+    { key: 'documentType', header: 'Type' },
+    { key: 'uploadedAt', header: 'Uploaded', render: (r) => formatDate(r.uploadedAt ?? r.createdAt) },
+    {
+      key: 'actions',
+      header: '',
+      render: (r) => (
+        <Button size="sm" variant="outline" onClick={() => svc.personalDocs.download(r.id, r.title).catch((e) => toast.error(apiError(e)))}>
+          <Download className="h-4 w-4" /> Download
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <PageHeader
+        title="My Profile"
+        description={me ? `${me.fullName} · ${me.employeeId}` : undefined}
+        actions={<Button variant="outline" onClick={() => setSigOpen(true)}>Set Signature Password</Button>}
+      />
+
+      <Card className="mb-6">
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
+            <div>
+              <dt className="text-slate-500">Username</dt>
+              <dd className="text-slate-800">{me?.windowsUsername}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Employee ID</dt>
+              <dd className="text-slate-800">{me?.employeeId}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500">Email</dt>
+              <dd className="text-slate-800">{me?.email ?? '—'}</dd>
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <dt className="text-slate-500">Roles</dt>
+              <dd className="text-slate-800">{me?.roleNames?.join(', ')}</dd>
+            </div>
+          </dl>
+        </CardContent>
+      </Card>
+
+      <div className="mb-4">
+        <Tabs
+          tabs={[
+            { key: 'training', label: 'My Training' },
+            { key: 'certificates', label: 'My Certificates' },
+            { key: 'documents', label: 'My Documents' },
+          ]}
+          value={tab}
+          onChange={(k) => setTab(k as typeof tab)}
+        />
+      </div>
+
+      {tab === 'training' && (
+        <DataTable columns={trainingColumns} rows={(training.data?.data ?? []) as unknown as Assignment[]} loading={training.isLoading} emptyText="No training assigned." />
+      )}
+
+      {tab === 'certificates' && (
+        <DataTable columns={certColumns} rows={certificates.data ?? []} loading={certificates.isLoading} emptyText="You have no certificates yet." />
+      )}
+
+      {tab === 'documents' && (
+        <div className="space-y-4">
+          <Card>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-3">
+                <Field label="Document type">
+                  <Input value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="e.g. CV, Degree" />
+                </Field>
+                <Field label="Title">
+                  <Input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} />
+                </Field>
+                <div className="flex items-end">
+                  <FileUpload onSelect={setDocFile} label={docFile ? docFile.name : 'Choose file'} />
+                </div>
+              </div>
+              <Button onClick={() => uploadMutation.mutate()} disabled={uploadMutation.isPending || !docFile || !documentType || !docTitle}>
+                {uploadMutation.isPending ? 'Uploading…' : 'Upload Document'}
+              </Button>
+            </CardContent>
+          </Card>
+          <DataTable columns={docColumns} rows={docs.data ?? []} loading={docs.isLoading} emptyText="No documents uploaded." />
+        </div>
+      )}
+
+      <SignaturePasswordDialog open={sigOpen} onClose={() => setSigOpen(false)} />
+    </div>
+  );
+}

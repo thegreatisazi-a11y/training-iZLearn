@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Reusable component classes */
+@layer components {
+  .iz-card {
+    @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+  }
+  .iz-input {
+    @apply w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:bg-slate-100;
+  }
+  .iz-label {
+    @apply mb-1 block text-sm font-medium text-slate-700;
+  }
+}

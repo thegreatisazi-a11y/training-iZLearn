@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "izLearn (Docker)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "frontend"],
+      "port": 8081,
+      "autoPort": false
+    }
+  ]
+}

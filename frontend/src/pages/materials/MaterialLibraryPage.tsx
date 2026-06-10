@@ -1,0 +1,211 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Download, Trash2, Eye } from 'lucide-react';
+import { ALLOWED_MATERIAL_EXTENSIONS } from '@izlearn/shared';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable, Column } from '@/components/common/DataTable';
+import { FileUpload } from '@/components/common/FileUpload';
+import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
+import { InlineFileViewer } from '@/components/common/InlineFileViewer';
+import { Card, CardContent } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input, Field } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { useAuthStore } from '@/store/authStore';
+import { toast } from '@/store/uiStore';
+import { apiError } from '@/lib/axios';
+import { svc } from '@/services';
+
+interface Material {
+  id: string;
+  originalFileName: string;
+  fileType: string;
+  version: number;
+  isCurrentVersion: boolean;
+  isObsolete: boolean;
+}
+
+const FILE_TYPE_OPTIONS = ALLOWED_MATERIAL_EXTENSIONS.map((e) => ({ value: e, label: e.toUpperCase() }));
+
+export default function MaterialLibraryPage() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const canWrite = useAuthStore((s) => s.hasPermission)('materialManagement', 'write');
+
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [fileType, setFileType] = useState('');
+  const [filterTopicId, setFilterTopicId] = useState('');
+  const [uploadTopicId, setUploadTopicId] = useState('');
+  const [deleting, setDeleting] = useState<Material | null>(null);
+  const [viewing, setViewing] = useState<Material | null>(null);
+
+  const { data: topics } = useQuery({ queryKey: ['topics', 'all'], queryFn: () => svc.topics.list({ pageSize: 200 }) });
+  const topicOptions = ((topics?.data ?? []) as { id: string; title: string }[]).map((t) => ({ value: t.id, label: t.title }));
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['materials', { page, search, fileType, filterTopicId }],
+    queryFn: () =>
+      svc.materials.list({
+        page,
+        search: search || undefined,
+        fileType: fileType || undefined,
+        topicId: filterTopicId || undefined,
+      }),
+  });
+
+  const uploadMut = useMutation({
+    mutationFn: (file: File) => svc.materials.upload(file, uploadTopicId),
+    onSuccess: () => {
+      toast.success('Material uploaded');
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (reason: string) => svc.materials.remove(deleting!.id, reason),
+    onSuccess: () => {
+      toast.success('Material deleted');
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const columns: Column<Material>[] = [
+    { key: 'originalFileName', header: 'File', render: (r) => <span className="font-medium text-slate-800">{r.originalFileName}</span> },
+    { key: 'fileType', header: 'Type', render: (r) => <span className="uppercase">{r.fileType}</span> },
+    { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
+    { key: 'isCurrentVersion', header: 'Current', render: (r) => (r.isCurrentVersion ? <Badge tone="APPROVED">Current</Badge> : <Badge tone="WAIVED">No</Badge>) },
+    { key: 'isObsolete', header: 'Obsolete', render: (r) => (r.isObsolete ? <Badge tone="REJECTED">Obsolete</Badge> : '—') },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (r) => (
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setViewing(r)}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <Eye className="h-4 w-4" /> View
+          </button>
+          <button
+            type="button"
+            onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))}
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            <Download className="h-4 w-4" /> Download
+          </button>
+          {canWrite && (
+            <button className="text-red-600 hover:text-red-700" onClick={() => setDeleting(r)} aria-label="Delete">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      <PageHeader title="Material Library" description="Controlled training documents" />
+
+      {canWrite && (
+        <Card className="mb-5">
+          <CardContent>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[220px]">
+                <Field label="Upload to topic">
+                  <Select options={topicOptions} placeholder="Select a topic…" value={uploadTopicId} onChange={(e) => setUploadTopicId(e.target.value)} />
+                </Field>
+              </div>
+              <div className="mb-3">
+                {uploadTopicId ? (
+                  <FileUpload
+                    accept={ALLOWED_MATERIAL_EXTENSIONS.map((e) => `.${e}`).join(',')}
+                    onSelect={(f) => uploadMut.mutate(f)}
+                    label={uploadMut.isPending ? 'Uploading…' : 'Upload material'}
+                  />
+                ) : (
+                  <p className="text-sm text-slate-400">Select a topic to enable upload.</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Input
+          className="max-w-xs"
+          placeholder="Search by file name…"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+        />
+        <Select
+          className="max-w-[160px]"
+          options={FILE_TYPE_OPTIONS}
+          placeholder="All file types"
+          value={fileType}
+          onChange={(e) => {
+            setFileType(e.target.value);
+            setPage(1);
+          }}
+        />
+        <Select
+          className="max-w-xs"
+          options={topicOptions}
+          placeholder="All topics"
+          value={filterTopicId}
+          onChange={(e) => {
+            setFilterTopicId(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+
+      <DataTable<Material>
+        columns={columns}
+        rows={(data?.data ?? []) as unknown as Material[]}
+        loading={isLoading}
+        page={data?.page}
+        pageSize={data?.pageSize}
+        total={data?.total}
+        onPageChange={setPage}
+        emptyText="No materials found."
+      />
+
+      <ReasonForChangeDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={async (r) => { await deleteMut.mutateAsync(r); }} title="Delete Material" />
+
+      <Dialog
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        className="max-w-4xl"
+        title={viewing?.originalFileName ?? 'View Material'}
+        footer={
+          <>
+            {viewing && (
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/materials/${viewing.id}/view?name=${encodeURIComponent(viewing.originalFileName)}&type=${viewing.fileType}`)}
+              >
+                Open full page
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
+          </>
+        }
+      >
+        {viewing && <InlineFileViewer materialId={viewing.id} fileName={viewing.originalFileName} fileType={viewing.fileType} />}
+      </Dialog>
+    </div>
+  );
+}

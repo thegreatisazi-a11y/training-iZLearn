@@ -1,0 +1,93 @@
+# UR-164: Vulnerability Management — automated dependency audit on every push/PR.
+# Runs `npm audit` for backend and frontend. Any HIGH or CRITICAL severity finding
+# fails the build. Results are uploaded as a GitHub Actions artifact for review.
+
+name: Security Audit
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Weekly scan every Monday at 07:00 UTC
+    - cron: '0 7 * * 1'
+
+jobs:
+  audit-backend:
+    name: Backend Dependency Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit (fail on high/critical)
+        run: npm audit --audit-level=high --json > audit-report-backend.json || true
+
+      - name: Check for high/critical vulnerabilities
+        run: |
+          CRITICAL=$(cat audit-report-backend.json | node -e "const d=require('/dev/stdin'); console.log((d.metadata?.vulnerabilities?.critical ?? 0) + (d.metadata?.vulnerabilities?.high ?? 0))")
+          echo "High+Critical vulnerabilities: $CRITICAL"
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::$CRITICAL high/critical vulnerabilities found in backend dependencies. Run 'npm audit fix' or update affected packages."
+            exit 1
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-audit-report
+          path: backend/audit-report-backend.json
+          retention-days: 30
+
+  audit-frontend:
+    name: Frontend Dependency Audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit (fail on high/critical)
+        run: npm audit --audit-level=high --json > audit-report-frontend.json || true
+
+      - name: Check for high/critical vulnerabilities
+        run: |
+          CRITICAL=$(cat audit-report-frontend.json | node -e "const d=require('/dev/stdin'); console.log((d.metadata?.vulnerabilities?.critical ?? 0) + (d.metadata?.vulnerabilities?.high ?? 0))")
+          echo "High+Critical vulnerabilities: $CRITICAL"
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::$CRITICAL high/critical vulnerabilities found in frontend dependencies. Run 'npm audit fix' or update affected packages."
+            exit 1
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-audit-report
+          path: frontend/audit-report-frontend.json
+          retention-days: 30
