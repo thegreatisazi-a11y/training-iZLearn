@@ -4,8 +4,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "lib": ["ES2021"],
-    "outDir": "dist",
-    "rootDir": ".",
+    "noEmit": true,
     "baseUrl": ".",
     "paths": {
       "@izlearn/shared": ["../shared/schemas/index.ts"],

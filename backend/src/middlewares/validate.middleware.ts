@@ -27,7 +27,7 @@ export function validate(schema: ZodTypeAny, source: Source = 'body') {
       }
     }
     // Replace with the parsed/coerced value (with cross-cutting fields preserved).
-    (req as Record<string, unknown>)[source] = parsed;
+    (req as unknown as Record<string, unknown>)[source] = parsed;
     next();
   };
 }

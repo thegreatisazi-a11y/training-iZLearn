@@ -32,7 +32,10 @@ export async function exportToExcel(
  */
 export async function parseExcel(buffer: Buffer): Promise<Array<Record<string, unknown>>> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
+  // exceljs resolves `Buffer` from a transitively-bundled older @types/node,
+  // which is structurally incompatible with the workspace's @types/node Buffer.
+  // The cast bridges the two definitions for this otherwise valid runtime call.
+  await wb.xlsx.load(buffer as unknown as Parameters<typeof wb.xlsx.load>[0]);
   const ws = wb.worksheets[0];
   if (!ws) return [];
 

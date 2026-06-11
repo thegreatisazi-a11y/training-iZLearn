@@ -96,8 +96,21 @@ export const SAMPLE_CERT_DATA: CertificatePlaceholderData = {
   orgName: 'izLearn Pharmaceuticals',
 };
 
-export type CertificateTemplateLike = Partial<CertificateTemplateInput> & {
-  certificateType?: string;
+// The renderer is fed both validated form input (narrow enums, `undefined` for
+// absent fields) and raw Prisma rows (enum columns surface as plain `string`,
+// optional columns as `T | null`). It treats every field loosely
+// (`t.fontFamily || 'Georgia'`, `isRenderableImage(t.logoPath)`, etc.), so this
+// adapter type widens enums to `string` and allows `null` on every field to
+// accept either source without a cast at the call site.
+type Loosen<T> = { [K in keyof T]?: T[K] | null };
+export type CertificateTemplateLike = Omit<
+  Loosen<CertificateTemplateInput>,
+  'certificateType' | 'orientation' | 'pageSize' | 'fontFamily'
+> & {
+  certificateType?: string | null;
+  orientation?: string | null;
+  pageSize?: string | null;
+  fontFamily?: string | null;
 };
 
 function esc(s: string): string {
@@ -117,7 +130,7 @@ export function applyPlaceholders(text: string, data: CertificatePlaceholderData
   });
 }
 
-function isRenderableImage(s?: string): boolean {
+function isRenderableImage(s?: string | null): boolean {
   return !!s && /^(https?:|data:)/.test(s);
 }
 
@@ -146,7 +159,7 @@ export function renderCertificateTemplateHtml(
     ? `background-image:url('${t.backgroundImagePath}');background-size:cover;background-position:center;`
     : '';
 
-  const sigBlock = (name?: string, title?: string, img?: string) => {
+  const sigBlock = (name?: string | null, title?: string | null, img?: string | null) => {
     if (!name && !title && !isRenderableImage(img)) return '';
     const sigImg = isRenderableImage(img) ? `<img class="sigimg" src="${img}" />` : '<div class="sigspace"></div>';
     return `<div class="sig">
