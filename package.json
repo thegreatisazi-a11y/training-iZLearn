@@ -14,7 +14,8 @@
     "seed": "npm run seed -w backend",
     "migrate": "npm run migrate -w backend",
     "test": "npm run test -w backend && npm run test -w frontend",
-    "security:audit": "npm audit --audit-level=high"
+    "security:audit": "npm audit --audit-level=high",
+    "build:backend": "npm run build -w shared && npm run build -w backend"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
