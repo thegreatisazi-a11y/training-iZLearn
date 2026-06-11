@@ -1,14 +1,12 @@
-import path from 'path';
-import fs from 'fs';
 import { Request } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
-import { env } from '../config/env';
 import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
 import { generateTopicCode } from '../utils/certificateNumber';
-import { ensureDir, generateStoredName } from '../utils/fileUtils';
+import { generateStoredName } from '../utils/fileUtils';
 import { toCsv } from '../utils/csv';
+import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
 import { snapshotVersion } from './topicVersionHistory.service';
 import { notifyCourseRevised } from './notification.service';
@@ -285,18 +283,17 @@ export async function reviseTopic(id: string, req: Request) {
   const replacedIds = new Set(staged.map((s) => s.replacesMaterialId).filter(Boolean) as string[]);
 
   // Carry forward unchanged current files (those not superseded by a staged Replace).
-  ensureDir(env.storage.materials);
   for (const m of current) {
     if (replacedIds.has(m.id)) continue;
     const storedFileName = generateStoredName(m.originalFileName);
-    const destPath = path.join(env.storage.materials, storedFileName);
-    if (fs.existsSync(m.filePath)) fs.copyFileSync(m.filePath, destPath);
+    const destKey = `materials/${storedFileName}`;
+    if (await storage.objectExists(m.filePath)) await storage.copyObject(m.filePath, destKey);
     await prisma.trainingMaterial.create({
       data: {
         topicId: created.id,
         originalFileName: m.originalFileName,
         storedFileName,
-        filePath: destPath,
+        filePath: destKey,
         fileType: m.fileType,
         fileSize: m.fileSize,
         requiredViewSeconds: m.requiredViewSeconds,

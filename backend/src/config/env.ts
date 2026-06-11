@@ -19,7 +19,7 @@ export const env = {
   isProd: process.env.NODE_ENV === 'production',
   port: parseInt(process.env.PORT || '4000', 10),
 
-  databaseUrl: required('DATABASE_URL', 'postgresql://izlearn:izlearn@localhost:5432/izlearn?schema=public'),
+  databaseUrl: required('DATABASE_URL', 'mongodb://localhost:27017/izlearn'),
 
   redis: {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
@@ -50,6 +50,25 @@ export const env = {
   mongo: {
     dumpBin: process.env.MONGODUMP_BIN || 'mongodump',
     restoreBin: process.env.MONGORESTORE_BIN || 'mongorestore',
+  },
+
+  /**
+   * Cloudflare R2 (S3-compatible) object storage. When R2_BUCKET + credentials are
+   * present the storage service uploads/serves files from R2 (required on Render,
+   * whose disk is ephemeral); otherwise it falls back to the local `storage` dirs
+   * (fine for local dev). Endpoint defaults to the account's R2 S3 API host.
+   */
+  r2: {
+    bucket: process.env.R2_BUCKET || '',
+    accountId: process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
+    endpoint:
+      process.env.R2_ENDPOINT ||
+      (process.env.R2_ACCOUNT_ID ? `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : ''),
+    get enabled() {
+      return Boolean(process.env.R2_BUCKET && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY);
+    },
   },
 
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',

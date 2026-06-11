@@ -1,9 +1,7 @@
-import path from 'path';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
-import { env } from '../config/env';
-import { ensureDir } from '../utils/fileUtils';
-import { htmlToPdfFile } from '../utils/pdfGenerator';
+import { renderPdfFromHtml } from '../utils/pdfGenerator';
+import * as storage from './storage.service';
 import { generateCertificateNumber } from '../utils/certificateNumber';
 import { formatDate } from '../utils/dateUtils';
 import { escapeHtml } from '../utils/reportHeader';
@@ -82,8 +80,7 @@ export async function issueForAttempt(attemptId: string) {
 
   const certificateNumber = generateCertificateNumber();
   const isInduction = topic.trainingType === 'INDUCTION';
-  ensureDir(env.storage.certificates);
-  const filePath = path.join(env.storage.certificates, `${certificateNumber}.pdf`);
+  const key = `certificates/${certificateNumber}.pdf`;
 
   const completionDate = formatDate(attempt.completedAt ?? new Date(), org.timezone);
 
@@ -127,7 +124,8 @@ export async function issueForAttempt(attemptId: string) {
     });
   }
 
-  await htmlToPdfFile(html, filePath, { landscape, format: pageFormat });
+  const pdf = await renderPdfFromHtml(html, { landscape, format: pageFormat });
+  await storage.putBuffer(key, pdf, 'application/pdf');
 
   const cert = await prisma.certificate.create({
     data: {
@@ -136,7 +134,7 @@ export async function issueForAttempt(attemptId: string) {
       topicVersion: attempt.topicVersion ?? topic.currentVersion,
       attemptId,
       certificateNumber,
-      filePath,
+      filePath: key,
       certificateType: isInduction ? 'INDUCTION' : 'TRAINING',
       createdBy: user.id,
     },

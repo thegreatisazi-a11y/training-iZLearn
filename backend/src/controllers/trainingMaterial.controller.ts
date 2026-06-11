@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
 import { paginationQuery, updateMaterialSchema } from '@izlearn/shared';
 import { hasPermission } from '../utils/permissions';
+import { contentTypeForExt } from '../utils/fileUtils';
+import { streamDownload } from '../utils/fileDownload';
 import * as svc from '../services/trainingMaterial.service';
 import * as viewSvc from '../services/materialView.service';
 
@@ -59,8 +61,8 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
   }
-  const { filePath, originalFileName } = await svc.downloadMaterial(req.params.id);
-  res.download(filePath, originalFileName);
+  const { key, originalFileName, fileType } = await svc.downloadMaterial(req.params.id);
+  await streamDownload(res, key, originalFileName, contentTypeForExt(fileType), { inline: true });
 });
 
 export const replace = asyncHandler(async (req: Request, res: Response) => {

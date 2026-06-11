@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, AppError } from '../utils/response';
 import { hasPermission } from '../utils/permissions';
+import { streamDownload } from '../utils/fileDownload';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/certificate.service';
 
@@ -20,7 +21,7 @@ export const download = asyncHandler(async (req, res) => {
     throw AppError.forbidden('You may only download your own certificates.');
   }
   await recordEvent({ action: 'FILE_DOWNLOAD', entityType: 'Certificate', entityId: cert.id });
-  res.download(cert.filePath, `${cert.certificateNumber}.pdf`);
+  await streamDownload(res, cert.filePath, `${cert.certificateNumber}.pdf`, 'application/pdf', { inline: true });
 });
 
 export const issue = asyncHandler(async (req, res) =>

@@ -1,15 +1,16 @@
-import path from 'path';
-import fs from 'fs';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
-import { env } from '../config/env';
-import { validateUpload, scanFileForVirus, ensureDir, getExtension, generateStoredName } from '../utils/fileUtils';
+import { validateUpload, scanFileForVirus, getExtension, generateStoredName } from '../utils/fileUtils';
 import { getNumber } from './systemConfig.service';
+import * as storage from './storage.service';
 import { recordEvent } from './auditTrail.service';
 import { snapshotVersion } from './topicVersionHistory.service';
 import type { PaginationQuery } from '@izlearn/shared';
+
+/** Object-storage key for a material's stored file. */
+const materialKey = (storedFileName: string) => `materials/${storedFileName}`;
 
 /**
  * Training materials (Module 4) — the uploaded files (PDF/PPT/video/...) that
@@ -41,9 +42,9 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
-  ensureDir(env.storage.materials);
-  const filePath = path.join(env.storage.materials, file.filename);
-  fs.renameSync(file.path, filePath);
+  // Persist the file to object storage (R2 in prod; local-fs fallback in dev).
+  const key = materialKey(file.filename);
+  await storage.putFile(key, file.path, file.mimetype);
 
   const staged = isPublished(topic.status);
   if (!staged) {
@@ -61,7 +62,7 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
       topicId,
       originalFileName: file.originalname,
       storedFileName: file.filename,
-      filePath,
+      filePath: key,
       fileType: getExtension(file.originalname),
       fileSize: file.size,
       version: lastVersion + 1,
@@ -101,9 +102,8 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
-  ensureDir(env.storage.materials);
-  const filePath = path.join(env.storage.materials, file.filename);
-  fs.renameSync(file.path, filePath);
+  const key = materialKey(file.filename);
+  await storage.putFile(key, file.path, file.mimetype);
 
   const staged = isPublished(topic.status);
   if (!staged) {
@@ -120,7 +120,7 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       topicId: old.topicId,
       originalFileName: file.originalname,
       storedFileName: file.filename,
-      filePath,
+      filePath: key,
       fileType: getExtension(file.originalname),
       fileSize: file.size,
       version: lastVersion + 1,
@@ -167,11 +167,10 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
 
-  ensureDir(env.storage.materials);
   const storedFileName = generateStoredName(source.originalFileName);
-  const destPath = path.join(env.storage.materials, storedFileName);
-  if (!fs.existsSync(source.filePath)) throw AppError.badRequest('The source file is no longer available on disk.');
-  fs.copyFileSync(source.filePath, destPath);
+  const destKey = materialKey(storedFileName);
+  if (!(await storage.objectExists(source.filePath))) throw AppError.badRequest('The source file is no longer available in storage.');
+  await storage.copyObject(source.filePath, destKey);
 
   const staged = isPublished(topic.status);
   if (!staged) {
@@ -188,7 +187,7 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
       topicId,
       originalFileName: source.originalFileName,
       storedFileName,
-      filePath: destPath,
+      filePath: destKey,
       fileType: source.fileType,
       fileSize: source.fileSize,
       version: lastVersion + 1,
@@ -269,8 +268,8 @@ export async function getMaterial(id: string) {
   return material;
 }
 
-/** Returns the on-disk location + display name; the controller streams the file. */
-export async function downloadMaterial(id: string): Promise<{ filePath: string; originalFileName: string }> {
+/** Returns the storage key + display name + type; the controller streams the file. */
+export async function downloadMaterial(id: string): Promise<{ key: string; originalFileName: string; fileType: string }> {
   const material = await getMaterial(id);
   await recordEvent({
     action: 'FILE_DOWNLOAD',
@@ -278,7 +277,7 @@ export async function downloadMaterial(id: string): Promise<{ filePath: string; 
     entityId: material.id,
     newValue: { originalFileName: material.originalFileName },
   });
-  return { filePath: material.filePath, originalFileName: material.originalFileName };
+  return { key: material.filePath, originalFileName: material.originalFileName, fileType: material.fileType };
 }
 
 /** Set a material's required reading/viewing time (seconds). */

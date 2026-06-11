@@ -1,11 +1,9 @@
-import path from 'path';
-import fs from 'fs';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
-import { env } from '../config/env';
-import { validateUpload, scanFileForVirus, ensureDir } from '../utils/fileUtils';
+import { validateUpload, scanFileForVirus } from '../utils/fileUtils';
 import { getNumber } from './systemConfig.service';
+import * as storage from './storage.service';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { recordEvent } from './auditTrail.service';
 import { notifyScheduleCreated } from './notification.service';
@@ -254,16 +252,15 @@ export async function attachOfflineAttendanceSheet(id: string, file: Express.Mul
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
-  ensureDir(env.storage.documents);
-  const filePath = path.join(env.storage.documents, file.filename);
-  fs.renameSync(file.path, filePath);
+  const key = `attendance/${file.filename}`;
+  await storage.putFile(key, file.path, file.mimetype);
 
-  const updated = await prisma.offlineTrainingRecord.update({ where: { id }, data: { attendanceSheet: filePath } });
+  const updated = await prisma.offlineTrainingRecord.update({ where: { id }, data: { attendanceSheet: key } });
   await recordEvent({
     action: 'FILE_UPLOAD',
     entityType: 'OfflineTrainingRecord',
     entityId: id,
-    newValue: { attendanceSheet: filePath, originalFileName: file.originalname },
+    newValue: { attendanceSheet: key, originalFileName: file.originalname },
   });
   return updated;
 }

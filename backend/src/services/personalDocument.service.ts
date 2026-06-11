@@ -1,11 +1,8 @@
-import fs from 'fs';
-import path from 'path';
-import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
-import { env } from '../config/env';
-import { ensureDir, validateUpload, scanFileForVirus, getExtension } from '../utils/fileUtils';
+import { validateUpload, scanFileForVirus } from '../utils/fileUtils';
 import { getNumber } from './systemConfig.service';
+import * as storage from './storage.service';
 import { recordEvent } from './auditTrail.service';
 
 export async function listByUser(userId: string) {
@@ -30,9 +27,8 @@ export async function uploadPersonalDoc(
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
-  ensureDir(env.storage.documents);
-  const dest = path.join(env.storage.documents, file.filename);
-  fs.renameSync(file.path, dest);
+  const key = `personal-documents/${file.filename}`;
+  await storage.putFile(key, file.path, file.mimetype);
 
   const doc = await prisma.personalDocument.create({
     data: {
@@ -41,7 +37,7 @@ export async function uploadPersonalDoc(
       title: params.title,
       originalFileName: file.originalname,
       storedFileName: file.filename,
-      filePath: dest,
+      filePath: key,
       createdBy,
     },
   });

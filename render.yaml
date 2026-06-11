@@ -1,0 +1,60 @@
+# Render blueprint for the izLearn backend API.
+# Frontend is hosted on Vercel; database is MongoDB Atlas; files are on Cloudflare R2.
+#
+# Deploy: create a new "Blueprint" on Render pointed at this repo. Then set the
+# secret env vars (marked sync:false) in the Render dashboard:
+#   DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET,
+#   R2_BUCKET, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+#   FRONTEND_ORIGIN (your Vercel URL), SEED_ADMIN_* (optional).
+services:
+  - type: web
+    name: izlearn-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT automatically; the app binds process.env.PORT.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: JWT_REFRESH_TTL
+        value: 8h
+      - key: BCRYPT_COST
+        value: "12"
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: SEED_ADMIN_USERNAME
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: izlearn-redis
+          property: connectionString
+
+  - type: redis
+    name: izlearn-redis
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: [] # only reachable from Render services

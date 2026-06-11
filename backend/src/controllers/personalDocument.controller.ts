@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, AppError } from '../utils/response';
 import { hasPermission } from '../utils/permissions';
+import { contentTypeForExt, getExtension } from '../utils/fileUtils';
+import { streamDownload } from '../utils/fileDownload';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/personalDocument.service';
 
@@ -34,7 +36,7 @@ export const download = asyncHandler(async (req, res) => {
   const doc = await svc.getDoc(req.params.id);
   if (!canRead(req, doc.userId)) throw AppError.forbidden();
   await recordEvent({ action: 'FILE_DOWNLOAD', entityType: 'PersonalDocument', entityId: doc.id });
-  res.download(doc.filePath, doc.originalFileName);
+  await streamDownload(res, doc.filePath, doc.originalFileName, contentTypeForExt(getExtension(doc.originalFileName)), { inline: true });
 });
 
 export const remove = asyncHandler(async (req, res) => {

@@ -30,6 +30,11 @@ export function getExtension(filename: string): string {
   return path.extname(filename).replace('.', '').toLowerCase();
 }
 
+/** Best-effort Content-Type for an extension (used when streaming stored files). */
+export function contentTypeForExt(ext: string): string {
+  return MIME_BY_EXT[ext.toLowerCase()]?.[0] ?? 'application/octet-stream';
+}
+
 /** Strip directory separators and null bytes; keep a safe base name. */
 export function sanitizeFilename(filename: string): string {
   return path

@@ -1,254 +1,192 @@
-# izLearn — Going Live for Free (MongoDB Atlas + Vercel + Oracle VM)
+# izLearn — Deployment (Vercel + Render + MongoDB Atlas + Cloudflare R2)
 
-This guide deploys izLearn as a **public HTTPS website** using **free services**:
+This guide deploys izLearn as a public HTTPS app using managed services:
 
-| Layer | Service | Cost |
+| Layer | Service | Notes |
 |------|---------|------|
-| **Frontend** (React/Vite) | **Vercel** | Free |
-| **Backend** (Node/Express + Redis, Docker) | **Oracle Cloud — Always Free** VM (Ampere ARM) | Free |
-| **Database** | **MongoDB Atlas** (M0, 512 MB, replica set) | Free |
-| **HTTPS for the API** | **Caddy** (auto Let's Encrypt) | Free |
-| **API domain** | **DuckDNS** | Free |
-| Outgoing email (optional) | **Brevo** SMTP (300/day) | Free |
+| **Frontend** (React/Vite SPA) | **Vercel** | Static build, served on HTTPS |
+| **Backend** (Node/Express + Bull) | **Render** (Docker web service) | Defined by `render.yaml` |
+| **Queue/cache** (Bull jobs) | **Render Key Value / Redis** | Auto-provisioned by `render.yaml` |
+| **Database** | **MongoDB Atlas** (M0 free tier is a replica set) | Prisma `mongodb` provider |
+| **File storage** | **MongoDB (default)** or **Cloudflare R2** (optional) | Demo: files live in Mongo (survive redeploys, no extra account). Production: set `R2_*` to use R2 |
 
-> izLearn now runs on **MongoDB** (Prisma `mongodb` provider). MongoDB **transactions
-> require a replica set** — Atlas M0 already is one, so it works out of the box. A future
-> self‑hosted Mongo must also run as a replica set.
-
-> **Architecture**
-> ```
-> Browser ─HTTPS─▶ Vercel (frontend SPA)
->    │  app calls VITE_API_URL ↓ (HTTPS, CORS)
->    └────────────▶ Caddy (:443) ─▶ backend container (:4000) ─▶ Redis
->                                        │
->                                        ▼  DATABASE_URL (mongodb+srv://)
->                                   MongoDB Atlas
-> (uploaded files live on the VM's Docker volume; their metadata lives in Atlas)
-> ```
-
-> Oracle asks for a card **for verification only** at sign‑up; Always‑Free resources are
-> never charged. Time: ~45–60 min.
-
----
-
-## Part 1 — MongoDB Atlas (free database)
-
-1. Sign up at **https://www.mongodb.com/cloud/atlas/register**.
-2. **Create a cluster → M0 (Free)**. Pick a cloud/region near your VM. Name it e.g. `izlearn`.
-3. **Database Access → Add New Database User**: username + a strong password (Atlas can
-   autogenerate). Role: **Read and write to any database** (or scope to the `izlearn` db).
-4. **Network Access → Add IP Address**: add your **Oracle VM's public IP** (best), or
-   `0.0.0.0/0` (simplest, less strict) so the backend can connect.
-5. **Database → Connect → Drivers** → copy the connection string. It looks like:
-   ```
-   mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/?retryWrites=true&w=majority
-   ```
-   Insert the password and add the **db name** `izlearn` before the `?`:
-   ```
-   mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/izlearn?retryWrites=true&w=majority
-   ```
-   Keep this — it's your `DATABASE_URL`.
-
----
-
-## Part 2 — Create the free server (Oracle Cloud Always Free)
-
-1. Sign up at **https://www.oracle.com/cloud/free/** → verify email + card. Pick a **Home
-   Region** near your users.
-2. **☰ → Compute → Instances → Create instance**:
-   - **Name:** `izlearn`  ·  **Image:** *Canonical Ubuntu 22.04*
-   - **Shape → Ampere (ARM)** `VM.Standard.A1.Flex`, **2 OCPU / 12 GB RAM** (Always‑Free).
-   - **SSH keys:** *Generate a key pair* and **download the private key** (`izlearn.key`).
-3. **Create**, wait for **Running**, copy the **Public IP**.
-4. Connect:
-   ```bash
-   chmod 400 izlearn.key            # macOS/Linux
-   ssh -i izlearn.key ubuntu@<PUBLIC_IP>
-   ```
-
----
-
-## Part 3 — Install Docker (on the server)
-
-```bash
-sudo apt-get update && sudo apt-get upgrade -y
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER && newgrp docker
-docker --version && docker compose version
+```
+Browser ──HTTPS──▶ Vercel (SPA)  ──HTTPS /api──▶ Render (backend) ──▶ MongoDB Atlas
+                                                          │            (data + file bytes)
+                                                          ├──▶ Render Redis (Bull queues)
+                                                          └──▶ Cloudflare R2  ⟵ optional (set R2_* to enable)
 ```
 
+> **Why this shape:** Render wipes the container filesystem on every deploy/restart, so
+> uploads must **not** live on local disk. For a free demo the app stores file bytes in
+> **MongoDB** (a `FileBlob` collection) — they survive redeploys and need no extra
+> service; certificate PDFs work too. Limits: **≤ 15 MB per file** (Mongo's 16 MB
+> document cap) and the cluster's **512 MB** total — fine for SOP PDFs, not for large
+> video. Set the `R2_*` env vars anytime to switch to Cloudflare R2 (no code change).
+>
+> MongoDB transactions (audit middleware) **require a replica set** — Atlas M0 already is
+> one. The Postgres DB-level audit-immutability triggers are gone; audit immutability is
+> now enforced at the **application layer** (no endpoint ever updates/deletes audit rows).
+
 ---
 
-## Part 4 — Get the code + configure secrets
+## 0. Prerequisites
+- A GitHub repo containing this project (Render + Vercel deploy from Git).
+- Accounts: **MongoDB Atlas**, **Cloudflare** (R2), **Render**, **Vercel**.
 
-```bash
-sudo apt-get install -y git
-git clone https://github.com/<you>/izlearn.git && cd izlearn   # or scp the folder up
-cp .env.example .env
+---
 
-# Generate strong secrets:
-echo "JWT_ACCESS_SECRET=$(openssl rand -hex 32)"
-echo "JWT_REFRESH_SECRET=$(openssl rand -hex 32)"
+## 1. MongoDB Atlas (database)
+1. Create a **free M0 cluster**.
+2. **Database Access** → add a user (username + password). Avoid `@ : / ? #` in the
+   password, or URL-encode them in the connection string.
+3. **Network Access** → add `0.0.0.0/0` (Render egress IPs are dynamic on the free tier).
+4. **Connect → Drivers** → copy the connection string and append the DB name:
+   ```
+   mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/izlearn?retryWrites=true&w=majority
+   ```
+   Keep this as your **`DATABASE_URL`** (set it in Render — never commit it).
+
+No migrations are needed: the backend runs `prisma db push` on boot to sync collections
+and indexes, then seeds the baseline roles + first admin (idempotent).
+
+---
+
+## 2. File storage — Mongo (default) or Cloudflare R2 (optional)
+**For the free demo, skip this section** — with no `R2_*` vars set, the backend stores
+uploaded materials, certificate PDFs, and documents directly in MongoDB (the `FileBlob`
+collection). They survive redeploys; the only limits are **≤ 15 MB per file** and the
+cluster's 512 MB. Large video uploads will be rejected with a clear message.
+
+**To use Cloudflare R2 instead** (recommended for real users — durable, off the DB):
+1. Cloudflare dashboard → **R2** → **Create bucket** (e.g. `izlearn`).
+2. **R2 → Manage R2 API Tokens → Create API token** with **Object Read & Write** on that
+   bucket. Copy the **Access Key ID** and **Secret Access Key** (shown once).
+3. Note your **Account ID** (R2 overview page). The S3 endpoint is
+   `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` (the app derives this automatically).
+
+You'll set these on Render:
 ```
+R2_BUCKET=izlearn
+R2_ACCOUNT_ID=<account id>
+R2_ACCESS_KEY_ID=<access key id>
+R2_SECRET_ACCESS_KEY=<secret access key>
+# R2_ENDPOINT=   # optional override; defaults to the account host above
+```
+> If the R2 vars are absent the backend falls back to local-disk storage (fine for
+> local dev, **not** for Render — files would be wiped on each deploy).
 
-Edit `.env` (`nano .env`) — note `.env` is gitignored, so secrets aren't committed:
+---
 
-```ini
-# Atlas connection string from Part 1
-DATABASE_URL=mongodb+srv://<user>:<pass>@izlearn.xxxxx.mongodb.net/izlearn?retryWrites=true&w=majority
+## 3. Backend on Render
+The repo includes **`render.yaml`** (a Render Blueprint) that defines the backend web
+service (built from `backend/Dockerfile`) and a Redis instance.
 
-JWT_ACCESS_SECRET=<paste>
-JWT_REFRESH_SECRET=<paste a different one>
+1. Render dashboard → **New → Blueprint** → connect the repo. Render reads `render.yaml`
+   and creates **`izlearn-backend`** + **`izlearn-redis`**.
+2. On the `izlearn-backend` service, set the secret env vars (Blueprint marks them
+   `sync:false`) under **Environment**:
 
-# Your Vercel URL (fill in after Part 7; used for CORS)
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | the Atlas connection string from step 1 |
+   | `JWT_ACCESS_SECRET` | a long random string |
+   | `JWT_REFRESH_SECRET` | a different long random string |
+   | `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | **optional** — only if using R2 (step 2). Leave unset to store files in MongoDB |
+   | `FRONTEND_ORIGIN` | your Vercel URL, e.g. `https://izlearn.vercel.app` (comma-separate to allow several) |
+   | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | first admin (optional; defaults exist) |
+
+   `REDIS_URL` is wired automatically from the Redis service. `PORT` is injected by
+   Render. `NODE_ENV=production` and the JWT TTLs are preset in the Blueprint.
+3. Deploy. On boot the container runs: `prisma db push` → `seed` → `start`. Health check:
+   `GET /api/health`. Note the service URL, e.g. `https://izlearn-backend.onrender.com`.
+
+> Free Render web services sleep when idle and cold-start on the next request (a few
+> seconds). Fine for testing; use a paid plan for always-on.
+
+---
+
+## 4. Frontend on Vercel
+The frontend is a workspace that depends on `@izlearn/shared`, so build from the **repo
+root** (a root `vercel.json` is included with the correct monorepo build).
+
+1. Vercel → **New Project** → import the repo.
+2. **Settings:**
+   - **Root Directory:** repo root (leave blank / `.`).
+   - Framework Preset: **Other** (the root `vercel.json` sets the commands):
+     - Install: `npm install`
+     - Build: `npm run build -w shared && npm run build -w frontend`
+     - Output: `frontend/dist`
+3. **Environment Variables** → add:
+   ```
+   VITE_API_URL = https://izlearn-backend.onrender.com/api
+   ```
+   (your Render backend URL + `/api`). This is read at build time by the SPA.
+4. Deploy. Note the Vercel URL, then make sure it is in the backend's `FRONTEND_ORIGIN`
+   (step 3) for CORS, and redeploy the backend if you changed it.
+
+---
+
+## 5. First login
+Open the Vercel URL and sign in with the seeded admin
+(`SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`, default `admin` / `ChangeMe@123`).
+1. Change the password on first login.
+2. In **My Profile**, set a **signature password** — required for the e-signed actions
+   (publish/revise/archive a course, change roles, assign a bundle, etc.).
+
+---
+
+## 6. Environment variable reference
+
+**Backend (Render):**
+```
+NODE_ENV=production
+DATABASE_URL=mongodb+srv://…            # Atlas (replica set)
+REDIS_URL=…                             # auto from render.yaml
+JWT_ACCESS_SECRET=…  JWT_REFRESH_SECRET=…
+JWT_ACCESS_TTL=15m   JWT_REFRESH_TTL=8h
+BCRYPT_COST=12
 FRONTEND_ORIGIN=https://your-app.vercel.app
-
-SEED_ADMIN_USERNAME=admin
-SEED_ADMIN_PASSWORD=<a strong password>
-SEED_ADMIN_EMAIL=you@example.com
+R2_BUCKET=…  R2_ACCOUNT_ID=…  R2_ACCESS_KEY_ID=…  R2_SECRET_ACCESS_KEY=…
+SEED_ADMIN_USERNAME=…  SEED_ADMIN_PASSWORD=…  SEED_ADMIN_EMAIL=…
 ```
+**Frontend (Vercel):** `VITE_API_URL=https://<render-backend>/api`
+
+See `.env.example` for the full annotated list.
 
 ---
 
-## Part 5 — Open the firewall (the #1 Oracle gotcha)
+## 7. Local development
+Use Docker (`docker-compose.yml` runs Redis + the backend; the frontend runs with Vite),
+or run the workspaces directly. MongoDB must be a **replica set** for transactions:
 
-Open **80** and **443** in **both** places.
+- **Easiest:** point `DATABASE_URL` at your Atlas cluster.
+- **Local Mongo:** run a single-node replica set, e.g.
+  `docker run -d -p 27017:27017 mongo:7 --replSet rs0` then
+  `docker exec <id> mongosh --eval "rs.initiate()"`, and use
+  `mongodb://localhost:27017/izlearn?replicaSet=rs0`.
 
-**5a. OCI console:** ☰ → Networking → Virtual Cloud Networks → your VCN → Security Lists →
-Default → **Add Ingress Rules**: Source `0.0.0.0/0`, TCP, port **80**; repeat for **443**.
-
-**5b. On the server:**
-```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
-```
-
----
-
-## Part 6 — Launch the backend
+With `R2_*` unset, files are stored in your (local or Atlas) MongoDB. To use the on-disk
+`./storage` folder instead during offline dev, set `STORAGE_DRIVER=local`.
 
 ```bash
-docker compose up -d --build
+npm install
+npm run build -w shared
+npm run -w backend prisma:generate
+npm run dev            # backend + frontend (concurrently)
 ```
-On start the backend runs **`prisma db push`** (creates collections + indexes in Atlas) and
-**seeds** the admin account. Verify:
-```bash
-docker compose ps
-docker compose logs -f backend     # look for "listening on 4000"; no replica-set errors
-curl -s http://127.0.0.1:4000/api/health   # expect status ok/degraded JSON
-```
-> If you see *"Transaction numbers are only allowed on a replica set"* — your `DATABASE_URL`
-> isn't pointing at Atlas (or a replica set). Fix the string and `docker compose up -d`.
 
 ---
 
-## Part 7 — API domain + free HTTPS (DuckDNS + Caddy)
-
-The backend needs a public HTTPS URL for the Vercel frontend to call.
-
-1. **DuckDNS:** at https://www.duckdns.org create a subdomain, e.g. `izlearn-api`, and set its
-   IP to the VM's **Public IP** → gives `izlearn-api.duckdns.org`.
-2. **Install Caddy:**
-   ```bash
-   sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-   sudo apt-get update && sudo apt-get install -y caddy
-   ```
-3. **Configure** (`sudo nano /etc/caddy/Caddyfile`):
-   ```caddy
-   izlearn-api.duckdns.org {
-       encode gzip
-       reverse_proxy 127.0.0.1:4000
-   }
-   ```
-   ```bash
-   sudo systemctl reload caddy
-   curl -I https://izlearn-api.duckdns.org/api/health   # HTTPS now works
-   ```
-
----
-
-## Part 8 — Deploy the frontend to Vercel
-
-1. Push the repo to **GitHub** (if not already).
-2. At **https://vercel.com** → **Add New → Project** → import the repo.
-3. **Configure project:**
-   - **Root Directory:** `frontend`
-   - Framework preset: **Vite** (build `npm run build`, output `dist` — already in
-     `frontend/vercel.json`, which also adds SPA routing).
-   - **Environment Variable:**
-     `VITE_API_URL = https://izlearn-api.duckdns.org/api`
-4. **Deploy.** Vercel gives you a URL like `https://your-app.vercel.app`.
-5. **Back on the server:** set `FRONTEND_ORIGIN` in `.env` to that exact Vercel URL, then:
-   ```bash
-   docker compose up -d        # picks up the new CORS origin
-   ```
-
-🎉 Open your Vercel URL — the SPA loads and all `/api` calls go to the VM backend over HTTPS.
-
----
-
-## Part 9 — First login & setup
-
-1. Log in with `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`.
-2. **Change the admin password** immediately.
-3. **Set your e‑signature password** (Profile) — required for Publish / Archive / Revise /
-   Change passing score / Assign bundle.
-4. **(Optional) email** — free Brevo: System Config → set `smtp.host=smtp-relay.brevo.com`,
-   `smtp.port=587`, `smtp.user`, `smtp.password` (Brevo SMTP key), `smtp.from`.
-5. Create your real departments, designations, users, topics, bundles.
-
----
-
-## Maintenance
-
-- **Update:** `cd ~/izlearn && git pull && docker compose up -d --build` (re‑runs `db push`).
-  Frontend redeploys automatically on each GitHub push (Vercel).
-- **Backups (Admin → Backup):** uses `mongodump` to a gzip archive in the `backups` volume,
-  with a SHA‑256 checksum + verify/restore. Copy archives off‑box periodically:
-  `scp -i izlearn.key ubuntu@<IP>:~/izlearn/<backups-volume-path>/*.gz .` (or use Atlas's own
-  cloud backups).
-- **Logs:** `docker compose logs -f backend`  ·  **Restart:** `docker compose restart`.
-
----
-
-## Troubleshooting
-
-| Symptom | Fix |
-|--------|-----|
-| Frontend loads but every API call fails (CORS / network) | `VITE_API_URL` must be the full `https://…/api`; `FRONTEND_ORIGIN` on the server must equal the Vercel URL; then `docker compose up -d`. |
-| Backend log: *"Transaction numbers are only allowed on a replica set"* | `DATABASE_URL` must point at Atlas (or a replica set). |
-| Atlas connection refused / timeout | Add the VM's public IP under Atlas **Network Access**. |
-| HTTPS cert won't issue | Port **80** open (Part 5, both places); DNS resolves: `dig izlearn-api.duckdns.org`; `sudo journalctl -u caddy -n 50`. |
-| Backend restarts on boot | `docker compose logs backend` — usually a missing `.env` value (DATABASE_URL / JWT secrets hard‑fail in production). |
-| Out of disk over time | `docker system prune -af` (won't touch the `storage`/`backups` volumes). |
-
----
-
-## Notes & trade‑offs (MongoDB)
-
-- **Transactions need a replica set** — Atlas provides it; a future self‑hosted Mongo must run
-  in replica‑set mode (`--replSet`).
-- **Schema sync is `prisma db push`** (MongoDB has no SQL migration history) — lighter change
-  control than the previous Postgres migrations; worth noting for GMP audits.
-- **DB‑level audit immutability triggers** (a Postgres feature) have no MongoDB equivalent.
-  Audit‑trail and e‑signature records are still never updated/deleted by the app (immutability
-  is enforced at the application layer), but the previous DB‑level defence‑in‑depth is gone.
-- **Atlas free M0 = 512 MB** — fine for launch; only *metadata* is stored in Mongo (uploaded
-  files stay on the VM disk). Watch usage as the catalogue grows.
-
----
-
-### Quick reference — full first deploy
-
-```bash
-# Atlas: create M0, DB user, allow VM IP, copy mongodb+srv string  (Part 1)
-# Server (after Docker + firewall):
-git clone https://github.com/<you>/izlearn.git && cd izlearn
-cp .env.example .env && nano .env        # DATABASE_URL=Atlas, secrets, FRONTEND_ORIGIN
-docker compose up -d --build             # db push + seed against Atlas
-# DuckDNS → VM IP; install Caddy → reverse_proxy 127.0.0.1:4000   (Part 7)
-# Vercel: import repo, Root=frontend, VITE_API_URL=https://<api-domain>/api  (Part 8)
-```
+## 8. Operational notes
+- **Database backups:** use **Atlas's built-in backups**. The app's `mongodump` backup
+  feature writes to local disk, which does **not** persist on Render's ephemeral
+  filesystem — treat it as a self-hosted-only convenience.
+- **Schema changes:** there are no SQL migrations on Mongo. Editing `schema.prisma` and
+  redeploying re-runs `prisma db push` on boot to apply the changes (additive/sync).
+- **Audit trail:** immutable by application design (no update/delete endpoints). With
+  MongoDB there is no DB-level trigger enforcing this, unlike the prior Postgres build.
+- **Files:** by default stored in MongoDB (`FileBlob`, keyed `materials/…`,
+  `certificates/…`, `personal-documents/…`, `attendance/…`); set `R2_*` to move them to
+  Cloudflare R2 with no code change. Either way downloads are streamed through the API
+  (auth-checked), not public URLs. Mongo backend rejects single files larger than 15 MB.

@@ -223,6 +223,20 @@ model TrainingMaterial {
   @@index([isStaged])
 }
 
+/// Demo/default object-storage backend: file bytes stored directly in MongoDB,
+/// keyed by the storage key (e.g. "materials/<uuid>.pdf"). Used when Cloudflare R2
+/// is not configured. Subject to Mongo's 16 MB per-document limit — large media
+/// should use R2 in production. Not audited (operational binary storage).
+model FileBlob {
+  id          String   @id @default(uuid()) @map("_id")
+  key         String   @unique
+  data        Bytes
+  contentType String?
+  size        Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 /// Server-side record of a user reading/viewing a training material. Used to
 /// ENFORCE the minimum reading time before an assessment can be started (the
 /// elapsed wall-clock between startedAt and completedAt is validated server-side).
