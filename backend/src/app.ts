@@ -41,11 +41,15 @@ export async function createApp(): Promise<Express> {
   // CORS — whitelist only (security.allowed_origins) plus the configured frontend.
   // FRONTEND_ORIGIN supports a comma-separated list so multiple origins (e.g. localhost
   // and a LAN IP) can be allowed without changing the database config.
-  const envOrigins = env.frontendOrigin.split(',').map((o) => o.trim()).filter(Boolean);
+  // Normalise by stripping any trailing slash: browsers send the Origin header
+  // without one (e.g. "https://app.vercel.app"), so a configured value like
+  // "https://app.vercel.app/" would otherwise never match.
+  const stripSlash = (o: string) => o.trim().replace(/\/+$/, '');
+  const envOrigins = env.frontendOrigin.split(',').map(stripSlash).filter(Boolean);
   let allowedOrigins: string[] = envOrigins;
   try {
     const fromConfig = await getList('security.allowed_origins');
-    allowedOrigins = Array.from(new Set([...allowedOrigins, ...fromConfig]));
+    allowedOrigins = Array.from(new Set([...allowedOrigins, ...fromConfig.map(stripSlash)]));
   } catch {
     /* DB may not be reachable yet during tests — fall back to env origin */
   }
