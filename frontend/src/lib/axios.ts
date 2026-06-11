@@ -1,6 +1,11 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE = (import.meta.env.VITE_API_URL as string) || '/api';
+// Normalise the configured API origin so it ALWAYS targets exactly one `/api`
+// segment — VITE_API_URL works whether it's set to the bare origin
+// ("https://api.example.com"), already ends in "/api", or has a trailing slash.
+// Falls back to the relative "/api" (Vite dev proxy / same-origin) when unset.
+const RAW_API = (import.meta.env.VITE_API_URL as string)?.trim() || '/api';
+const API_BASE = RAW_API.replace(/\/+$/, '').replace(/\/api$/, '') + '/api';
 
 const ACCESS_KEY = 'izlearn_access';
 const REFRESH_KEY = 'izlearn_refresh';
