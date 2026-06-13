@@ -21,6 +21,14 @@ function normalizePermissions(permissions: PermissionMatrix): Prisma.InputJsonVa
   return out as Prisma.InputJsonValue;
 }
 
+/** Order-independent JSON comparison so a reordered-but-identical matrix is a no-op. */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  const obj = v as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
+}
+
 /**
  * Role management (Module 3) — RBAC roles + permission matrix. Soft-delete only;
  * seeded/system roles can never be hard-deleted, only deactivated. Plain writes
@@ -73,19 +81,29 @@ export async function createRole(input: CreateRoleInput, req: Request) {
 }
 
 export async function updateRole(id: string, input: UpdateRoleInput, req: Request) {
-  await getRole(id);
+  const existing = await getRole(id);
+
+  // No-op rule: if nothing actually changes, do NOT sign, write, or audit.
+  const normalizedNew = input.permissions !== undefined ? normalizePermissions(input.permissions) : undefined;
+  const permsChanged = normalizedNew !== undefined && stableStringify(normalizedNew) !== stableStringify(existing.permissions);
+  const descChanged = input.description !== undefined && (input.description ?? null) !== (existing.description ?? null);
+  const activeChanged = input.isActive !== undefined && input.isActive !== existing.isActive;
+  if (!permsChanged && !descChanged && !activeChanged) {
+    return existing;
+  }
+
   // CR-6: role/permission edits require an electronic signature (username +
   // signature password + confirm + reason), captured here before the write.
   await signFromRequest(req, 'Role', id, 'Approved');
-  if (input.permissions !== undefined) {
+  if (permsChanged) {
     auditContext.setActionOverride('PERMISSION_CHANGE');
   }
   return prisma.role.update({
     where: { id },
     data: {
-      ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.permissions !== undefined ? { permissions: normalizePermissions(input.permissions) } : {}),
-      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      ...(descChanged ? { description: input.description } : {}),
+      ...(permsChanged ? { permissions: normalizedNew } : {}),
+      ...(activeChanged ? { isActive: input.isActive } : {}),
     },
   });
 }

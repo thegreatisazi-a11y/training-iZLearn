@@ -20,8 +20,13 @@ const permissionFlags = z.object({
 });
 export type PermissionFlags = z.infer<typeof permissionFlags>;
 
-/** The permission matrix: { moduleKey: { read, write, approve, print, export } }. */
-export const permissionMatrix = z.record(z.enum(PERMISSION_MODULES), permissionFlags);
+/**
+ * The permission matrix: { moduleKey: { actionKey: boolean } }. Action keys are the
+ * per-module catalog actions (see permissionCatalog) plus the derived legacy flags
+ * (read/write/approve/print/export). Kept as an open record so each module can carry
+ * only its own real actions instead of a fixed verb set.
+ */
+export const permissionMatrix = z.record(z.string(), z.record(z.string(), z.boolean()));
 export type PermissionMatrix = z.infer<typeof permissionMatrix>;
 
 export const createRoleSchema = z.object({

@@ -5,6 +5,7 @@
  */
 export * from './common';
 export * from './enums';
+export * from './permissionCatalog';
 export * from './auth';
 export * from './eSignature';
 export * from './location';

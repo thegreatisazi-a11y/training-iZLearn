@@ -133,7 +133,25 @@ export const LEGACY_FALLBACK: Record<PermissionVerb, 'read' | 'write' | 'approve
   export: 'export',
 };
 
-/** Derive the 5 legacy flags from a granular verb set (so existing guards keep working). */
+/**
+ * Self-service / display actions that must NOT grant any module-level legacy
+ * capability (e.g. acknowledging your own JD must never imply approve/write on the
+ * Job Description module). They are enforced by ownership checks, not the matrix.
+ */
+const NEUTRAL_ACTIONS = new Set(['acknowledge', 'configure_widgets']);
+/** Only these explicitly grant the legacy "approve" capability that routes check. */
+const APPROVE_ACTIONS = new Set(['approve', 'review']);
+
+/**
+ * Derive the 5 legacy flags (read/write/approve/print/export) from ANY granted
+ * action set (the curated per-module catalog actions). Existing route guards check
+ * these legacy flags (or the granular verb directly), so enforcement is preserved:
+ *   - any "view*" action          → read
+ *   - approve / review            → approve
+ *   - print / export              → print / export
+ *   - every other granted action  → write
+ *   - acknowledge / configure_*   → neutral (no legacy capability)
+ */
 export function deriveLegacyFlags(flags: Record<string, boolean | undefined>): {
   read: boolean;
   write: boolean;
@@ -141,14 +159,22 @@ export function deriveLegacyFlags(flags: Record<string, boolean | undefined>): {
   print: boolean;
   export: boolean;
 } {
-  const f = (k: string) => flags[k] === true;
-  return {
-    read: f('view') || f('read'),
-    write: f('create') || f('edit') || f('archive') || f('revise') || f('assign') || f('write'),
-    approve: f('review') || f('approve'),
-    print: f('print'),
-    export: f('export'),
-  };
+  let read = false;
+  let write = false;
+  let approve = false;
+  let print = false;
+  let exp = false;
+  for (const [k, v] of Object.entries(flags)) {
+    if (v !== true) continue;
+    if (k === 'read' || k === 'write') continue; // skip the derived keys themselves
+    if (NEUTRAL_ACTIONS.has(k)) continue;
+    if (k === 'print') print = true;
+    else if (k === 'export') exp = true;
+    else if (k === 'view' || k.startsWith('view')) read = true;
+    else if (APPROVE_ACTIONS.has(k)) approve = true;
+    else write = true;
+  }
+  return { read, write, approve, print, export: exp };
 }
 
 /** Canonical list of RBAC module keys used in the permission matrix. */

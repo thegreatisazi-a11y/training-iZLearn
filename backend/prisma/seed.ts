@@ -13,13 +13,7 @@
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import {
-  DEFAULT_SYSTEM_CONFIG,
-  PERMISSION_MODULES,
-  deriveLegacyFlags,
-  type PermissionModule,
-  type PermissionVerb,
-} from '@izlearn/shared';
+import { DEFAULT_SYSTEM_CONFIG, PERMISSION_CATALOG, deriveLegacyFlags } from '@izlearn/shared';
 
 const prisma = new PrismaClient();
 
@@ -28,47 +22,38 @@ const SYSTEM = 'SYSTEM';
 
 type Flags = Record<string, boolean>;
 
+/** Build one module's flags from its granted action keys + derived legacy flags. */
+function moduleFlags(actionKeys: string[], granted: string[]): Flags {
+  const f: Flags = {};
+  for (const a of actionKeys) f[a] = granted.includes(a);
+  return { ...f, ...deriveLegacyFlags(f) };
+}
+
 /**
- * Build a module's flag set from an explicit list of the 10 granular verbs, then
- * append the derived legacy keys (read/write/approve/print/export) so older route
- * guards that still check the legacy aliases keep working. (D6 keeps the full
- * 10-verb matrix internally; the seeded role set is the 4-role model.)
+ * Build a full permission matrix from a per-module grant map over the permission
+ * catalog. A module mapped to 'all' grants every action; an omitted module grants
+ * nothing. Only real (catalog) actions are ever stored.
  */
-function granular(verbs: PermissionVerb[]): Flags {
-  const flags: Flags = {
-    view: false,
-    create: false,
-    edit: false,
-    archive: false,
-    revise: false,
-    assign: false,
-    review: false,
-    approve: false,
-    print: false,
-    export: false,
-  };
-  for (const v of verbs) flags[v] = true;
-  return { ...flags, ...deriveLegacyFlags(flags) };
+function buildMatrix(grants: Record<string, string[] | 'all'>): Record<string, Flags> {
+  const out: Record<string, Flags> = {};
+  for (const def of PERMISSION_CATALOG) {
+    const keys = def.actions.map((a) => a.key);
+    const g = grants[def.module];
+    out[def.module] = moduleFlags(keys, g === 'all' ? keys : g ?? []);
+  }
+  return out;
 }
 
-const ALL_VERBS = [...new Set<PermissionVerb>(['view', 'create', 'edit', 'archive', 'revise', 'assign', 'review', 'approve', 'print', 'export'])];
-
-/** Build a full permission matrix from a per-module granular-verb map (omitted modules → no access). */
-function buildGranular(overrides: Partial<Record<PermissionModule, PermissionVerb[]>>): Record<string, Flags> {
-  const all: Record<string, Flags> = {};
-  for (const mod of PERMISSION_MODULES) all[mod] = granular(overrides[mod] ?? []);
-  return all;
-}
-
-/** SUPER_ADMIN — every module, every verb. */
+/** SUPER_ADMIN — every catalog action on every module. */
 function allFull(): Record<string, Flags> {
-  const all: Record<string, Flags> = {};
-  for (const mod of PERMISSION_MODULES) all[mod] = granular(ALL_VERBS);
-  return all;
+  const grants: Record<string, 'all'> = {};
+  for (const def of PERMISSION_CATALOG) grants[def.module] = 'all';
+  return buildMatrix(grants);
 }
 
 /**
- * D6 — the 4-role model. Super Admin (everything), Supervisor (user management,
+ * D6 — the 4-role model, expressed over the per-module permission catalog (only
+ * real actions per module). Super Admin (everything), Supervisor (user/team mgmt,
  * JD/TNI assignment & approval, reports), Trainer (course/question/material
  * authoring), Trainee (takes training, acknowledges JD, owns CV).
  */
@@ -80,48 +65,48 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
   },
   {
     roleName: 'SUPERVISOR',
-    description: 'User management, JD/TNI assignment & approval, training oversight and reports.',
-    permissions: buildGranular({
+    description: 'User & team management, JD/TNI assignment & approval, training oversight and reports.',
+    permissions: buildMatrix({
       dashboard: ['view'],
-      userManagement: ['view', 'create', 'edit', 'approve', 'assign', 'print', 'export'],
+      userManagement: ['view', 'create', 'edit', 'approve', 'assign', 'reset_password', 'print', 'export'],
+      team: 'all',
       roleManagement: ['view'],
       masterSetup: ['view'],
       courseManagement: ['view'],
-      topicVersionHistory: ['view'],
-      trainingAssignment: ['view', 'assign', 'approve'],
       materialManagement: ['view'],
-      jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
-      tni: ['view', 'create', 'edit', 'assign', 'approve'],
-      cv: ['view', 'create', 'edit'],
-      team: ['view', 'review', 'approve', 'export', 'print'],
+      topicVersionHistory: ['view'],
+      trainingAssignment: ['view', 'assign', 'approve', 'print', 'export'],
       scheduling: ['view', 'create', 'edit', 'assign'],
       attendance: ['view', 'create', 'edit'],
+      tni: ['view', 'create', 'edit', 'assign', 'approve', 'print', 'export'],
+      jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
+      cv: ['view'],
       assessments: ['view'],
-      questionBank: ['view'],
       certificates: ['view', 'print', 'export'],
-      feedback: ['view'],
-      announcements: ['view', 'create'],
       reports: ['view', 'print', 'export'],
       auditTrail: ['view', 'print', 'export'],
+      feedback: ['view'],
+      announcements: ['view', 'create'],
     }),
   },
   {
     roleName: 'TRAINER',
     description: 'Creates courses, question banks and materials; handles TNI/course authoring.',
-    permissions: buildGranular({
+    permissions: buildMatrix({
       dashboard: ['view'],
-      courseManagement: ['view', 'create', 'edit', 'archive', 'revise', 'approve', 'print', 'export'],
+      courseManagement: ['view', 'create', 'edit', 'revise', 'archive', 'approve', 'assign', 'print', 'export'],
+      materialManagement: ['view', 'create', 'edit', 'archive'],
       topicVersionHistory: ['view', 'export'],
-      materialManagement: ['view', 'create', 'edit', 'archive', 'revise'],
-      questionBank: ['view', 'create', 'edit', 'archive'],
-      tni: ['view', 'create', 'edit'],
+      questionBank: 'all',
+      bundleManagement: ['view'],
       trainingAssignment: ['view', 'assign'],
       scheduling: ['view', 'create', 'edit'],
       attendance: ['view', 'create', 'edit'],
-      assessments: ['view', 'create', 'edit'],
+      tni: ['view', 'create', 'edit'],
+      assessments: ['view', 'create', 'edit', 'archive', 'approve'],
       certificates: ['view'],
-      jobDescription: ['view'],
-      cv: ['view', 'create', 'edit'],
+      jobDescription: ['view', 'acknowledge'],
+      cv: ['view', 'edit'],
       feedback: ['view', 'create'],
       announcements: ['view'],
       reports: ['view', 'print', 'export'],
@@ -130,15 +115,15 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
   {
     roleName: 'TRAINEE',
     description: 'Takes assigned training & assessments, acknowledges JD, owns CV.',
-    permissions: buildGranular({
+    permissions: buildMatrix({
       dashboard: ['view'],
       courseManagement: ['view'],
       topicVersionHistory: ['view'],
       materialManagement: ['view'],
-      assessments: ['view', 'create'],
+      assessments: ['view', 'take'],
       certificates: ['view', 'print'],
-      jobDescription: ['view'],
-      cv: ['view', 'create', 'edit'],
+      jobDescription: ['view', 'acknowledge'],
+      cv: ['view', 'edit'],
       tni: ['view'],
       feedback: ['view', 'create'],
       announcements: ['view'],
