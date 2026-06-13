@@ -46,7 +46,14 @@ export async function listJDs(q: PaginationQuery & { userId?: string }) {
     }),
     prisma.jobDescription.count({ where }),
   ]);
-  return { data, total, page: q.page, pageSize: q.pageSize };
+  // Resolve approver id → name so the list shows "Approved By" as a person, not a UUID.
+  const approverIds = Array.from(new Set(data.map((d) => d.approvedBy).filter(Boolean) as string[]));
+  const approvers = approverIds.length
+    ? await prisma.user.findMany({ where: { id: { in: approverIds } }, select: { id: true, fullName: true } })
+    : [];
+  const nameById = new Map(approvers.map((u) => [u.id, u.fullName]));
+  const withApproverNames = data.map((d) => ({ ...d, approvedByName: d.approvedBy ? nameById.get(d.approvedBy) ?? null : null }));
+  return { data: withApproverNames, total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function getJD(id: string) {

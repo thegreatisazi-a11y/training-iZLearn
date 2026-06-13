@@ -28,6 +28,7 @@ interface JD {
   content: string;
   userFullName?: string;
   approvedBy?: string | null;
+  approvedByName?: string | null;
   approvedAt?: string | null;
 }
 
@@ -161,7 +162,7 @@ export default function JDPage() {
     },
     { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status.replace(/_/g, ' ')}</Badge> },
-    { key: 'approvedBy', header: 'Approved By', render: (r) => (r.approvedBy ? userName.get(r.approvedBy) ?? r.approvedBy : '—') },
+    { key: 'approvedBy', header: 'Approved By', render: (r) => r.approvedByName ?? (r.approvedBy ? userName.get(r.approvedBy) ?? r.approvedBy : '—') },
     { key: 'approvedAt', header: 'Approved At', render: (r) => formatDate(r.approvedAt) },
     {
       key: 'actions',
