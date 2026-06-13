@@ -2,14 +2,23 @@ import { Router } from 'express';
 import * as c from '../controllers/trainingTypeMaster.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
+import { validate } from '../middlewares/validate.middleware';
 import { requireReasonForChange } from '../middlewares/reasonForChange.middleware';
+import { createTrainingTypeMasterSchema, updateTrainingTypeMasterSchema } from '@izlearn/shared';
 
 const router = Router();
 router.use(authenticate);
 
 router.get('/', requirePermission('masterSetup', 'read'), c.list);
-router.post('/', requirePermission('masterSetup', 'write'), c.create);
-router.patch('/:id', requirePermission('masterSetup', 'write'), c.update);
+router.post('/', requirePermission('masterSetup', 'write'), validate(createTrainingTypeMasterSchema), c.create);
+// CR-45: updates require both schema validation and a reason for change (21 CFR Part 11).
+router.patch(
+  '/:id',
+  requirePermission('masterSetup', 'write'),
+  requireReasonForChange,
+  validate(updateTrainingTypeMasterSchema),
+  c.update,
+);
 // 7.3: removal requires a reason for change.
 router.delete('/:id', requirePermission('masterSetup', 'write'), requireReasonForChange, c.remove);
 

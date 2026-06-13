@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { nonEmptyString, uuid, reasonForChange } from './common';
+import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
 
 export const createTNISchema = z.object({
   userId: uuid,
@@ -15,3 +15,22 @@ export const tniDecisionSchema = z.object({
   reasonForChange: reasonForChange.optional(),
 });
 export type TNIDecisionInput = z.infer<typeof tniDecisionSchema>;
+
+/** CR-46/47: set one cell of the TNI requirement matrix (role × topic). */
+export const setTniRequirementSchema = z.object({
+  roleId: uuid,
+  topicId: uuid,
+  isRequired: z.boolean(),
+  note: optionalString,
+});
+export type SetTniRequirementInput = z.infer<typeof setTniRequirementSchema>;
+
+/** CR-49: assign training from the requirement matrix (optionally a single role). */
+export const applyTniMatrixSchema = z.object({
+  roleId: uuid.optional(),
+  dueDate: z.coerce.date().optional(),
+  // CR-57: assign-later — create the matrix assignments as DEFERRED until activation.
+  activateLater: z.boolean().optional(),
+  activateOn: z.coerce.date().optional(),
+});
+export type ApplyTniMatrixInput = z.infer<typeof applyTniMatrixSchema>;

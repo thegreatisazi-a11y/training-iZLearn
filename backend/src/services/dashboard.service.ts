@@ -13,8 +13,10 @@ export async function getDashboard(user: AuthUser) {
       myCounts[s] = await prisma.trainingAssignment.count({ where: { userId: user.id, status: s, isDeleted: false } });
     }),
   );
+  // CR-42: a refresher is "due" once its date has arrived on the COMPLETED assignment
+  // (the new pending assignment is only created by the refresher job at that point).
   const refresherDue = await prisma.trainingAssignment.count({
-    where: { userId: user.id, isDeleted: false, refresherDueDate: { not: null }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+    where: { userId: user.id, isDeleted: false, status: 'COMPLETED', refresherDueDate: { not: null, lte: new Date() } },
   });
   const myCertificates = await prisma.certificate.count({ where: { userId: user.id, isDeleted: false } });
 

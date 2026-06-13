@@ -14,16 +14,25 @@ export const matchPair = z.object({
   right: z.string(),
 });
 
+/** CR-35: a non-empty answer key for the given question type. */
+function answerIsPresent(questionType: string, correctAnswer: unknown): boolean {
+  if (questionType === 'MATCH_THE_WORDS') return true; // validated via matchPairs
+  if (Array.isArray(correctAnswer)) return correctAnswer.length > 0;
+  return String(correctAnswer ?? '').trim().length > 0;
+}
+
 export const createQuestionSchema = z
   .object({
     topicId: uuid,
     questionText: nonEmptyString,
     questionType,
-    options: z.array(questionOption).optional(),
+    // CR-34: at most 4 options per question.
+    options: z.array(questionOption).max(4, 'A question can have at most 4 options').optional(),
     matchPairs: z.array(matchPair).optional(),
     /** Array of correct option ids, an answer string, or accepted variants. */
     correctAnswer: z.union([z.array(z.string()), z.string()]),
     explanation: optionalString,
+    helpText: optionalString,
     isMandatory: z.boolean().default(false),
   })
   .superRefine((q, ctx) => {
@@ -37,6 +46,13 @@ export const createQuestionSchema = z
     if (q.questionType === 'MATCH_THE_WORDS' && (!q.matchPairs || q.matchPairs.length < 2)) {
       ctx.addIssue({ code: 'custom', message: 'At least two pairs are required', path: ['matchPairs'] });
     }
+    // CR-35: a correct answer is mandatory at creation.
+    if (!answerIsPresent(q.questionType, q.correctAnswer)) {
+      ctx.addIssue({ code: 'custom', message: 'A correct answer must be selected.', path: ['correctAnswer'] });
+    }
+    if (q.questionType === 'MULTIPLE_CHOICE_SINGLE' && Array.isArray(q.correctAnswer) && q.correctAnswer.length !== 1) {
+      ctx.addIssue({ code: 'custom', message: 'Select exactly one correct answer.', path: ['correctAnswer'] });
+    }
   });
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 
@@ -45,10 +61,11 @@ export const updateQuestionSchema = z
     questionText: nonEmptyString.optional(),
     // 4.5: questionType is now editable; options/correctAnswer are re-derived for the new type.
     questionType: questionType.optional(),
-    options: z.array(questionOption).optional(),
+    options: z.array(questionOption).max(4, 'A question can have at most 4 options').optional(),
     matchPairs: z.array(matchPair).optional(),
     correctAnswer: z.union([z.array(z.string()), z.string()]).optional(),
     explanation: optionalString,
+    helpText: optionalString,
     isMandatory: z.boolean().optional(),
     isActive: z.boolean().optional(),
     reasonForChange,

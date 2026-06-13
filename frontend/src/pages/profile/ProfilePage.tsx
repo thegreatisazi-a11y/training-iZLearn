@@ -41,21 +41,47 @@ interface PersonalDoc {
 
 function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [loginPassword, setLoginPassword] = useState('');
+  const [oldSignaturePassword, setOldSignaturePassword] = useState('');
   const [signaturePassword, setSignaturePassword] = useState('');
   const [confirmSignaturePassword, setConfirm] = useState('');
   const [error, setError] = useState('');
 
+  const reset = () => {
+    setLoginPassword('');
+    setOldSignaturePassword('');
+    setSignaturePassword('');
+    setConfirm('');
+    setError('');
+  };
+
+  // Client-side check so the user gets immediate, specific feedback before we
+  // ever hit the network. The backend enforces the same rule (CR-19).
+  const mismatch = confirmSignaturePassword.length > 0 && signaturePassword !== confirmSignaturePassword;
+
   const mutation = useMutation({
-    mutationFn: () => svc.auth.setSignaturePassword({ loginPassword, signaturePassword, confirmSignaturePassword }),
+    mutationFn: () =>
+      svc.auth.setSignaturePassword({
+        loginPassword,
+        oldSignaturePassword: oldSignaturePassword || undefined,
+        signaturePassword,
+        confirmSignaturePassword,
+      }),
     onSuccess: () => {
       toast.success('Signature password set.');
-      setLoginPassword('');
-      setSignaturePassword('');
-      setConfirm('');
+      reset();
       onClose();
     },
     onError: (e) => setError(apiError(e)),
   });
+
+  const submit = () => {
+    if (signaturePassword !== confirmSignaturePassword) {
+      setError('New signature and confirm password must match.');
+      return;
+    }
+    setError('');
+    mutation.mutate();
+  };
 
   return (
     <Dialog
@@ -67,20 +93,30 @@ function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: ()
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !loginPassword || !signaturePassword}>
+          <Button
+            onClick={submit}
+            disabled={mutation.isPending || !loginPassword || !signaturePassword || !confirmSignaturePassword || mismatch}
+          >
             {mutation.isPending ? 'Saving…' : 'Save'}
           </Button>
         </>
       }
     >
       <p className="mb-3 text-sm text-slate-600">Your signature password is the second component of your electronic signature (21 CFR Part 11).</p>
-      <Field label="Login password">
+      <Field label="Login password" required>
         <Input type="password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
       </Field>
-      <Field label="New signature password">
+      <Field label="Old signature password" hint="Required only if you already have a signature password set.">
+        <Input type="password" value={oldSignaturePassword} onChange={(e) => setOldSignaturePassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      <Field label="New signature password" required>
         <Input type="password" value={signaturePassword} onChange={(e) => setSignaturePassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
       </Field>
-      <Field label="Confirm signature password">
+      <Field
+        label="Confirm new signature password"
+        required
+        error={mismatch ? 'New signature and confirm password must match.' : undefined}
+      >
         <Input type="password" value={confirmSignaturePassword} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
       </Field>
       {error && <p className="text-sm text-red-600">{error}</p>}

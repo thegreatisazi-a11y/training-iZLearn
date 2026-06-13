@@ -34,12 +34,12 @@ interface JD {
 interface JDTemplate {
   id: string;
   title: string;
-  departmentName?: string;
-  roleName?: string;
+  functionalRoleId?: string | null;
+  departmentId?: string | null;
 }
 
 const emptyForm = { userId: '', departmentId: '', roleId: '', title: '', content: '' };
-const emptyTemplate = { departmentId: '', roleId: '', title: '', content: '' };
+const emptyTemplate = { functionalRoleId: '', departmentId: '', title: '', content: '' };
 
 export default function JDPage() {
   const qc = useQueryClient();
@@ -66,6 +66,12 @@ export default function JDPage() {
   const userOptions = ((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => ({ value: u.id, label: u.fullName }));
   const departmentOptions = ((departments?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const roleOptions = ((roles?.data ?? []) as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
+  // D-JD1: JD templates are keyed by Functional Role (DesignationMaster).
+  const { data: functionalRoles } = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
+  const frList = (functionalRoles?.data ?? []) as { id: string; displayName: string }[];
+  const functionalRoleOptions = frList.map((d) => ({ value: d.id, label: d.displayName }));
+  const frName = new Map(frList.map((d) => [d.id, d.displayName]));
+  const deptName = new Map(((departments?.data ?? []) as { id: string; name: string }[]).map((d) => [d.id, d.name]));
 
   const { data, isLoading } = useQuery({
     queryKey: ['jds', { page, search }],
@@ -125,7 +131,13 @@ export default function JDPage() {
   });
 
   const createTemplateMut = useMutation({
-    mutationFn: () => svc.jds.createTemplate(templateForm),
+    mutationFn: () =>
+      svc.jds.createTemplate({
+        functionalRoleId: templateForm.functionalRoleId,
+        departmentId: templateForm.departmentId || undefined,
+        title: templateForm.title,
+        content: templateForm.content,
+      }),
     onSuccess: () => {
       toast.success('Template created');
       qc.invalidateQueries({ queryKey: ['jd-templates'] });
@@ -189,8 +201,8 @@ export default function JDPage() {
 
   const templateColumns: Column<JDTemplate>[] = [
     { key: 'title', header: 'Title', render: (r) => <span className="font-medium text-slate-800">{r.title}</span> },
-    { key: 'departmentName', header: 'Department', render: (r) => r.departmentName ?? '—' },
-    { key: 'roleName', header: 'Role', render: (r) => r.roleName ?? '—' },
+    { key: 'functionalRole', header: 'Functional Role', render: (r) => (r.functionalRoleId ? frName.get(r.functionalRoleId) ?? '—' : '—') },
+    { key: 'departmentName', header: 'Department', render: (r) => (r.departmentId ? deptName.get(r.departmentId) ?? '—' : 'Any') },
   ];
 
   return (
@@ -341,7 +353,7 @@ export default function JDPage() {
             </Button>
             <Button
               onClick={() => createTemplateMut.mutate()}
-              disabled={createTemplateMut.isPending || !templateForm.departmentId || !templateForm.roleId || !templateForm.title || !templateForm.content}
+              disabled={createTemplateMut.isPending || !templateForm.functionalRoleId || !templateForm.title || !templateForm.content}
             >
               {createTemplateMut.isPending ? 'Saving…' : 'Create'}
             </Button>
@@ -349,11 +361,11 @@ export default function JDPage() {
         }
       >
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Department">
-            <Select options={departmentOptions} placeholder="Select…" value={templateForm.departmentId} onChange={(e) => setTemplateForm({ ...templateForm, departmentId: e.target.value })} />
+          <Field label="Functional Role" required>
+            <Select options={functionalRoleOptions} placeholder="Select…" value={templateForm.functionalRoleId} onChange={(e) => setTemplateForm({ ...templateForm, functionalRoleId: e.target.value })} />
           </Field>
-          <Field label="Role">
-            <Select options={roleOptions} placeholder="Select…" value={templateForm.roleId} onChange={(e) => setTemplateForm({ ...templateForm, roleId: e.target.value })} />
+          <Field label="Department (optional)">
+            <Select options={[{ value: '', label: 'Any department' }, ...departmentOptions]} placeholder="Any department" value={templateForm.departmentId} onChange={(e) => setTemplateForm({ ...templateForm, departmentId: e.target.value })} />
           </Field>
         </div>
         <Field label="Title">

@@ -50,11 +50,17 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export const setSignaturePasswordSchema = z
   .object({
     loginPassword: nonEmptyString,
+    /**
+     * Required only when the user already has a signature password set; the
+     * backend enforces that conditionally (it cannot be expressed here without
+     * knowing the user's current state). Always optional at the schema level.
+     */
+    oldSignaturePassword: z.string().optional(),
     signaturePassword: passwordPolicy(),
     confirmSignaturePassword: nonEmptyString,
   })
   .refine((d) => d.signaturePassword === d.confirmSignaturePassword, {
-    message: 'Signature passwords do not match',
+    message: 'New signature and confirm password must match',
     path: ['confirmSignaturePassword'],
   });
 export type SetSignaturePasswordInput = z.infer<typeof setSignaturePasswordSchema>;

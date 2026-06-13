@@ -40,6 +40,8 @@ export const REPORT_TYPES = [
   'feedback-analysis',
   'bundle-assignment-status',
   'employee-training-history',
+  'effective-to-completion-days', // CR-54
+  'training-type-wise-status', // CR-55
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
@@ -482,6 +484,74 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Score', key: 'score' },
           { header: 'Completed', key: 'completedAt' },
           { header: 'Due Date', key: 'dueDate' },
+        ],
+        rows,
+      };
+    }
+
+    // CR-54: days between a topic's effective date and each completion date.
+    case 'effective-to-completion-days': {
+      const attempts = await prisma.assessmentAttempt.findMany({
+        where: { isDeleted: false, isPassed: true, completedAt: { not: null }, ...(f.topicId ? { topicId: f.topicId } : {}) },
+        orderBy: { completedAt: 'desc' },
+      });
+      const rows = attempts
+        .filter((at) => activeUser(at.userId))
+        .map((at) => {
+          const topic = m.topics.get(at.topicId);
+          const eff = topic?.effectiveDate ?? null;
+          const comp = at.completedAt ?? null;
+          const days = eff && comp ? Math.round((comp.getTime() - eff.getTime()) / 86_400_000) : '';
+          return {
+            employee: m.users.get(at.userId)?.fullName ?? '',
+            employeeId: m.users.get(at.userId)?.employeeId ?? '',
+            topic: topic?.title ?? '',
+            topicCode: topic?.topicCode ?? '',
+            effectiveDate: formatDate(eff),
+            completedAt: formatDate(comp),
+            days,
+          };
+        });
+      return {
+        title: 'Effective-to-Completion Days Report',
+        columns: [
+          { header: 'Employee', key: 'employee' },
+          { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Topic', key: 'topic' },
+          { header: 'Topic Code', key: 'topicCode' },
+          { header: 'Effective Date', key: 'effectiveDate' },
+          { header: 'Completed', key: 'completedAt' },
+          { header: 'Days to Complete', key: 'days' },
+        ],
+        rows,
+      };
+    }
+
+    // CR-55: assignment status aggregated by training type.
+    case 'training-type-wise-status': {
+      const assignments = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
+      const agg = new Map<string, { total: number; completed: number }>();
+      for (const a of assignments) {
+        if (!activeUser(a.userId)) continue;
+        const tt = m.topics.get(a.topicId)?.trainingType ?? 'UNKNOWN';
+        const cur = agg.get(tt) ?? { total: 0, completed: 0 };
+        cur.total += 1;
+        if (a.status === 'COMPLETED') cur.completed += 1;
+        agg.set(tt, cur);
+      }
+      const rows = Array.from(agg.entries()).map(([trainingType, v]) => ({
+        trainingType,
+        total: v.total,
+        completed: v.completed,
+        compliance: v.total ? `${Math.round((v.completed / v.total) * 100)}%` : '0%',
+      }));
+      return {
+        title: 'Training-Type-wise Status Report',
+        columns: [
+          { header: 'Training Type', key: 'trainingType' },
+          { header: 'Total Assigned', key: 'total' },
+          { header: 'Completed', key: 'completed' },
+          { header: 'Compliance %', key: 'compliance' },
         ],
         rows,
       };

@@ -7,7 +7,11 @@ export const start = asyncHandler(async (req: Request, res: Response) =>
 );
 
 export const submit = asyncHandler(async (req, res) =>
-  sendSuccess(res, await svc.submitAttempt(req.body.attemptId, req.body.answers, req.user!.id), 'Assessment submitted'),
+  sendSuccess(res, await svc.submitAttempt(req.body.attemptId, req.body.answers, req.user!.id, req.body.autoSubmitted === true), 'Assessment submitted'),
+);
+
+export const acknowledgeRead = asyncHandler(async (req: Request, res: Response) =>
+  sendCreated(res, await svc.completeByAcknowledgement(req.user!.id, req.body.topicId, req.body.assignmentId), 'Training completed'),
 );
 
 export const listMine = asyncHandler(async (req, res) =>

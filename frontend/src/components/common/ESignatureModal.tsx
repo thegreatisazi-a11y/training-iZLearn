@@ -42,6 +42,7 @@ export function ESignatureModal({
   const [password, setPassword] = useState('');
   const [meaning, setMeaning] = useState(defaultMeaning);
   const [reason, setReason] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -51,6 +52,7 @@ export function ESignatureModal({
       setPassword('');
       setMeaning(defaultMeaning);
       setReason('');
+      setConfirmed(false);
       setError('');
     }
   }, [open, defaultMeaning]);
@@ -80,7 +82,7 @@ export function ESignatureModal({
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={loading || !username || !password || !reasonOk}>
+          <Button onClick={submit} disabled={loading || !username || !password || !reasonOk || !confirmed}>
             {loading ? 'Signing…' : 'Sign'}
           </Button>
         </>
@@ -107,7 +109,16 @@ export function ESignatureModal({
           />
         </Field>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <label className="mt-1 flex items-start gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={confirmed}
+          onChange={(e) => setConfirmed(e.target.checked)}
+        />
+        <span>I confirm that I am applying my electronic signature and that this action is attributable to me.</span>
+      </label>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </Dialog>
   );
 }

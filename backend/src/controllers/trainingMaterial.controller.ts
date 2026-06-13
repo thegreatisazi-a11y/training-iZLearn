@@ -4,6 +4,8 @@ import { paginationQuery, updateMaterialSchema } from '@izlearn/shared';
 import { hasPermission } from '../utils/permissions';
 import { contentTypeForExt } from '../utils/fileUtils';
 import { streamDownload } from '../utils/fileDownload';
+import { prisma } from '../config/prisma';
+import { getBool } from '../services/systemConfig.service';
 import * as svc from '../services/trainingMaterial.service';
 import * as viewSvc from '../services/materialView.service';
 
@@ -59,6 +61,16 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
     const material = await svc.getMaterial(req.params.id);
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
+    }
+    // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
+    // training, material access is revoked (enable via material.lock_after_completion).
+    if (await getBool('material.lock_after_completion', false)) {
+      const completed = await prisma.trainingAssignment.findFirst({
+        where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
+      });
+      if (completed) {
+        throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+      }
     }
   }
   const { key, originalFileName, fileType } = await svc.downloadMaterial(req.params.id);

@@ -46,4 +46,5 @@ export const DEFAULT_SYSTEM_CONFIG: Record<string, { value: string; description:
   'security.allowed_ip_ranges': { value: '', description: 'UR-80: comma-separated client IP prefixes allowed to access the app (empty = no restriction)' },
   'assessment.default_question_count': { value: '10', description: 'Default number of questions per assessment' },
   'assessment.require_assignment': { value: 'false', description: 'UR-43: require an active training assignment before a quiz is accessible' },
+  'material.lock_after_completion': { value: 'false', description: 'CR-33: revoke a trainee’s access to training material once they have completed the training' },
 };

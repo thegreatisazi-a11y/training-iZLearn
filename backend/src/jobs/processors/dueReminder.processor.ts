@@ -1,6 +1,6 @@
 import { prisma } from '../../config/prisma';
 import { getList } from '../../services/systemConfig.service';
-import { notifyTrainingDue, notifyTrainingOverdue } from '../../services/notification.service';
+import { notifyTrainingDue, notifyTrainingOverdue, notifyTrainingAssigned } from '../../services/notification.service';
 import { startOfDay, endOfDay, addDays } from '../../utils/dateUtils';
 import { logger } from '../../config/logger';
 
@@ -8,13 +8,26 @@ import { logger } from '../../config/logger';
 export async function runDueReminderCheck() {
   const now = new Date();
 
-  // Overdue: past due and still open → mark OVERDUE and notify.
+  // CR-57: activate assign-later (DEFERRED) assignments whose activateOn has arrived.
+  const toActivate = await prisma.trainingAssignment.findMany({
+    where: { isDeleted: false, status: 'DEFERRED', activateOn: { not: null, lte: endOfDay(now) } },
+  });
+  for (const a of toActivate) {
+    await prisma.trainingAssignment.update({ where: { id: a.id }, data: { status: 'PENDING', activateOn: null } });
+    await notifyTrainingAssigned(a.userId, a.topicId, a.dueDate);
+  }
+
+  // Overdue: past due and still open → mark OVERDUE, require supervisor sign-off,
+  // notify once (overdueNotifiedAt dedups repeat notifications). CR-56.
   const overdue = await prisma.trainingAssignment.findMany({
     where: { isDeleted: false, dueDate: { lt: startOfDay(now) }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
   });
   for (const a of overdue) {
-    await prisma.trainingAssignment.update({ where: { id: a.id }, data: { status: 'OVERDUE' } });
-    if (a.dueDate) await notifyTrainingOverdue(a.userId, a.topicId, a.dueDate);
+    await prisma.trainingAssignment.update({
+      where: { id: a.id },
+      data: { status: 'OVERDUE', requiresSupervisorApproval: true, overdueNotifiedAt: a.overdueNotifiedAt ?? now },
+    });
+    if (a.dueDate && !a.overdueNotifiedAt) await notifyTrainingOverdue(a.userId, a.topicId, a.dueDate);
   }
 
   // Due in N days for each configured threshold.

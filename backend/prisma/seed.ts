@@ -13,63 +13,65 @@
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import { DEFAULT_SYSTEM_CONFIG, PERMISSION_MODULES, deriveLegacyFlags, type PermissionModule } from '@izlearn/shared';
+import {
+  DEFAULT_SYSTEM_CONFIG,
+  PERMISSION_MODULES,
+  deriveLegacyFlags,
+  type PermissionModule,
+  type PermissionVerb,
+} from '@izlearn/shared';
 
 const prisma = new PrismaClient();
 
 const BCRYPT_COST = 12;
 const SYSTEM = 'SYSTEM';
 
-/** Legacy-style override authored per role; expanded to the 10 granular verbs below. */
-type LegacyOverride = { read?: boolean; write?: boolean; approve?: boolean; print?: boolean; export?: boolean };
 type Flags = Record<string, boolean>;
 
 /**
- * Expand a legacy override into the full 10-verb set, then append the derived
- * legacy keys. write → create/edit/archive/revise/assign; approve → review/approve.
+ * Build a module's flag set from an explicit list of the 10 granular verbs, then
+ * append the derived legacy keys (read/write/approve/print/export) so older route
+ * guards that still check the legacy aliases keep working. (D6 keeps the full
+ * 10-verb matrix internally; the seeded role set is the 4-role model.)
  */
-function expand(o: LegacyOverride): Flags {
-  const w = !!o.write;
-  const a = !!o.approve;
+function granular(verbs: PermissionVerb[]): Flags {
   const flags: Flags = {
-    view: !!o.read,
-    create: w,
-    edit: w,
-    archive: w,
-    revise: w,
-    assign: w,
-    review: a,
-    approve: a,
-    print: !!o.print,
-    export: !!o.export,
+    view: false,
+    create: false,
+    edit: false,
+    archive: false,
+    revise: false,
+    assign: false,
+    review: false,
+    approve: false,
+    print: false,
+    export: false,
   };
+  for (const v of verbs) flags[v] = true;
   return { ...flags, ...deriveLegacyFlags(flags) };
 }
 
-/** Build a permission matrix: every module all-false, then overrides applied + expanded. */
-function buildPermissions(overrides: Partial<Record<PermissionModule, LegacyOverride>>): Record<string, Flags> {
-  const o = { ...overrides } as Partial<Record<PermissionModule, LegacyOverride>>;
-  // New modules default from their closest functional sibling unless explicitly set.
-  if (o.topicVersionHistory === undefined && o.courseManagement) {
-    o.topicVersionHistory = { read: o.courseManagement.read, print: o.courseManagement.print, export: o.courseManagement.export, approve: o.courseManagement.approve };
-  }
-  if (o.trainingAssignment === undefined && o.scheduling) o.trainingAssignment = o.scheduling;
+const ALL_VERBS = [...new Set<PermissionVerb>(['view', 'create', 'edit', 'archive', 'revise', 'assign', 'review', 'approve', 'print', 'export'])];
+
+/** Build a full permission matrix from a per-module granular-verb map (omitted modules → no access). */
+function buildGranular(overrides: Partial<Record<PermissionModule, PermissionVerb[]>>): Record<string, Flags> {
   const all: Record<string, Flags> = {};
-  for (const mod of PERMISSION_MODULES) all[mod] = expand(o[mod] ?? {});
+  for (const mod of PERMISSION_MODULES) all[mod] = granular(overrides[mod] ?? []);
   return all;
 }
 
-const FULL: LegacyOverride = { read: true, write: true, approve: true, print: true, export: true };
-const RWPE: LegacyOverride = { read: true, write: true, print: true, export: true };
-const READ: LegacyOverride = { read: true };
-const READ_PRINT_EXPORT: LegacyOverride = { read: true, print: true, export: true };
-
+/** SUPER_ADMIN — every module, every verb. */
 function allFull(): Record<string, Flags> {
   const all: Record<string, Flags> = {};
-  for (const mod of PERMISSION_MODULES) all[mod] = expand(FULL);
+  for (const mod of PERMISSION_MODULES) all[mod] = granular(ALL_VERBS);
   return all;
 }
 
+/**
+ * D6 — the 4-role model. Super Admin (everything), Supervisor (user management,
+ * JD/TNI assignment & approval, reports), Trainer (course/question/material
+ * authoring), Trainee (takes training, acknowledges JD, owns CV).
+ */
 const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Record<string, Flags> }[] = [
   {
     roleName: 'SUPER_ADMIN',
@@ -77,134 +79,117 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
     permissions: allFull(),
   },
   {
-    roleName: 'QA_ADMIN',
-    description: 'Quality Assurance administrator — approvals, audit trail, reports.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      userManagement: { read: true, write: true, approve: true },
-      roleManagement: READ,
-      masterSetup: { read: true, write: true },
-      courseManagement: { ...RWPE, approve: true },
-      bundleManagement: { ...RWPE, approve: true },
-      materialManagement: RWPE,
-      jobDescription: { ...RWPE, approve: true },
-      tni: { ...RWPE, approve: true },
-      scheduling: RWPE,
-      attendance: RWPE,
-      assessments: { ...RWPE, approve: true },
-      questionBank: RWPE,
-      certificates: READ_PRINT_EXPORT,
-      feedback: READ_PRINT_EXPORT,
-      announcements: { read: true, write: true },
-      reports: READ_PRINT_EXPORT,
-      auditTrail: READ_PRINT_EXPORT,
-      systemConfig: { read: true, write: true },
-    }),
-  },
-  {
-    roleName: 'DEPARTMENT_HEAD',
-    description: 'Departmental oversight — approves TNI/JD, reviews training status.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      userManagement: READ,
-      jobDescription: { read: true, write: true, approve: true, print: true },
-      tni: { read: true, write: true, approve: true },
-      scheduling: { read: true, write: true },
-      attendance: { read: true, write: true },
-      assessments: READ,
-      certificates: READ_PRINT_EXPORT,
-      feedback: READ_PRINT_EXPORT,
-      announcements: READ,
-      reports: READ_PRINT_EXPORT,
-    }),
-  },
-  {
-    roleName: 'TRAINING_COORDINATOR',
-    description: 'Plans schedules, manages assignments and attendance.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      userManagement: READ,
-      courseManagement: { read: true, write: true, print: true },
-      bundleManagement: { read: true, write: true, print: true },
-      materialManagement: { read: true, write: true },
-      tni: { read: true, write: true },
-      scheduling: RWPE,
-      attendance: RWPE,
-      assessments: { read: true, write: true },
-      questionBank: { read: true, write: true },
-      certificates: READ_PRINT_EXPORT,
-      feedback: { read: true, write: true, print: true, export: true },
-      announcements: { read: true, write: true },
-      reports: READ_PRINT_EXPORT,
+    roleName: 'SUPERVISOR',
+    description: 'User management, JD/TNI assignment & approval, training oversight and reports.',
+    permissions: buildGranular({
+      dashboard: ['view'],
+      userManagement: ['view', 'create', 'edit', 'approve', 'assign', 'print', 'export'],
+      roleManagement: ['view'],
+      masterSetup: ['view'],
+      courseManagement: ['view'],
+      topicVersionHistory: ['view'],
+      trainingAssignment: ['view', 'assign', 'approve'],
+      materialManagement: ['view'],
+      jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
+      tni: ['view', 'create', 'edit', 'assign', 'approve'],
+      cv: ['view', 'create', 'edit'],
+      scheduling: ['view', 'create', 'edit', 'assign'],
+      attendance: ['view', 'create', 'edit'],
+      assessments: ['view'],
+      questionBank: ['view'],
+      certificates: ['view', 'print', 'export'],
+      feedback: ['view'],
+      announcements: ['view', 'create'],
+      reports: ['view', 'print', 'export'],
+      auditTrail: ['view', 'print', 'export'],
     }),
   },
   {
     roleName: 'TRAINER',
-    description: 'Delivers training, marks attendance, manages question bank.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      courseManagement: READ,
-      bundleManagement: READ,
-      materialManagement: READ,
-      scheduling: READ,
-      attendance: { read: true, write: true },
-      assessments: READ,
-      questionBank: { read: true, write: true },
-      certificates: READ,
-      feedback: READ,
-      announcements: READ,
-      reports: { read: true, print: true },
+    description: 'Creates courses, question banks and materials; handles TNI/course authoring.',
+    permissions: buildGranular({
+      dashboard: ['view'],
+      courseManagement: ['view', 'create', 'edit', 'archive', 'revise', 'approve', 'print', 'export'],
+      topicVersionHistory: ['view', 'export'],
+      materialManagement: ['view', 'create', 'edit', 'archive', 'revise'],
+      questionBank: ['view', 'create', 'edit', 'archive'],
+      tni: ['view', 'create', 'edit'],
+      trainingAssignment: ['view', 'assign'],
+      scheduling: ['view', 'create', 'edit'],
+      attendance: ['view', 'create', 'edit'],
+      assessments: ['view', 'create', 'edit'],
+      certificates: ['view'],
+      jobDescription: ['view'],
+      cv: ['view', 'create', 'edit'],
+      feedback: ['view', 'create'],
+      announcements: ['view'],
+      reports: ['view', 'print', 'export'],
     }),
   },
   {
     roleName: 'TRAINEE',
-    description: 'Takes assigned training and assessments.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      courseManagement: READ,
-      bundleManagement: READ,
-      materialManagement: READ,
-      assessments: { read: true, write: true },
-      certificates: { read: true, print: true },
-      feedback: { read: true, write: true },
-      announcements: READ,
+    description: 'Takes assigned training & assessments, acknowledges JD, owns CV.',
+    permissions: buildGranular({
+      dashboard: ['view'],
+      courseManagement: ['view'],
+      topicVersionHistory: ['view'],
+      materialManagement: ['view'],
+      assessments: ['view', 'create'],
+      certificates: ['view', 'print'],
+      jobDescription: ['view'],
+      cv: ['view', 'create', 'edit'],
+      tni: ['view'],
+      feedback: ['view', 'create'],
+      announcements: ['view'],
     }),
   },
-  {
-    roleName: 'IT_ADMIN',
-    description: 'Technical administration — users, roles, configuration, backups.',
-    permissions: buildPermissions({
-      dashboard: READ,
-      userManagement: FULL,
-      roleManagement: { read: true, write: true },
-      masterSetup: { read: true, write: true },
-      systemConfig: { read: true, write: true },
-      backup: { read: true, write: true },
-      announcements: { read: true, write: true },
-      auditTrail: READ_PRINT_EXPORT,
-    }),
-  },
-  {
-    roleName: 'AUDITOR',
-    description: 'Read-only access to records, audit trail and reports (with print/export).',
-    permissions: buildPermissions({
-      dashboard: READ,
-      userManagement: READ,
-      roleManagement: READ,
-      courseManagement: READ,
-      bundleManagement: READ,
-      jobDescription: READ_PRINT_EXPORT,
-      tni: READ,
-      scheduling: READ,
-      attendance: READ,
-      assessments: READ,
-      certificates: READ_PRINT_EXPORT,
-      feedback: READ_PRINT_EXPORT,
-      reports: READ_PRINT_EXPORT,
-      auditTrail: READ_PRINT_EXPORT,
-      systemConfig: READ,
-    }),
-  },
+];
+
+/**
+ * D-JD1 — the 15 Functional Roles. "Functional Role" is the employee's job function
+ * (drives JD assignment) and is stored in the DesignationMaster table (the old
+ * "Designation" concept, repurposed). Separate from the RBAC login roles above.
+ */
+const FUNCTIONAL_ROLES = [
+  'QA Auditor',
+  'Apprentice',
+  'Jr. Analyst',
+  'Analyst',
+  'Sr. Analyst',
+  'Group Leader',
+  'QC Personnel',
+  'Operation Head',
+  'QA Head',
+  'IT Personnel',
+  'HR Personnel',
+  'Quality Compliance Personnel',
+  'Corporate Personnel',
+  'Project Management Personnel',
+  'Admin Personnel',
+];
+
+function functionalRoleCode(name: string): string {
+  return name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * CR-58: editable Training Type master. `code` matches the TrainingType enum where
+ * one exists so topics referencing the enum stay consistent; the master is the
+ * admin-editable source for the picker. All seeded as built-in.
+ */
+const TRAINING_TYPES: { code: string; displayName: string }[] = [
+  { code: 'SELF_READ', displayName: 'Self-read' },
+  { code: 'SELF_READ_EVALUATION', displayName: 'Self-read with evaluation' },
+  { code: 'QUIZ', displayName: 'Quiz' },
+  { code: 'VIDEO', displayName: 'Video' },
+  { code: 'REMOTE', displayName: 'Remote' },
+  { code: 'SOP', displayName: 'SOP' },
+  { code: 'ONLINE', displayName: 'Online' },
+  { code: 'CLASSROOM', displayName: 'Classroom' },
+  { code: 'OJT', displayName: 'OJT' },
+  { code: 'INDUCTION', displayName: 'Induction' },
+  { code: 'REFRESHER', displayName: 'Refresher' },
+  { code: 'OFFLINE', displayName: 'Offline' },
 ];
 
 async function main() {
@@ -236,6 +221,27 @@ async function main() {
     roleIdByName.set(def.roleName, role.id);
   }
   console.log(`   ✓ ${ROLE_DEFINITIONS.length} roles`);
+
+  // 2b. Functional Roles (D-JD1) — stored in DesignationMaster ----------------
+  for (const name of FUNCTIONAL_ROLES) {
+    const code = functionalRoleCode(name);
+    await prisma.designationMaster.upsert({
+      where: { code },
+      update: { displayName: name },
+      create: { code, displayName: name, description: 'Functional Role', createdBy: SYSTEM },
+    });
+  }
+  console.log(`   ✓ ${FUNCTIONAL_ROLES.length} functional roles`);
+
+  // 2c. Training Type master (CR-58) -----------------------------------------
+  for (const t of TRAINING_TYPES) {
+    await prisma.trainingTypeMaster.upsert({
+      where: { code: t.code },
+      update: { displayName: t.displayName, isBuiltIn: true },
+      create: { code: t.code, displayName: t.displayName, isBuiltIn: true, createdBy: SYSTEM },
+    });
+  }
+  console.log(`   ✓ ${TRAINING_TYPES.length} training types`);
 
   // 3. Default location & department ----------------------------------------
   let location = await prisma.location.findFirst({ where: { name: 'Head Office' } });

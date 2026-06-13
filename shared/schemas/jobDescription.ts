@@ -26,11 +26,27 @@ export const jdTransitionSchema = z.object({
 });
 export type JDTransitionInput = z.infer<typeof jdTransitionSchema>;
 
-/** Master JD template keyed by department + role, used on transfer pre-fill. */
+/** Master JD template keyed by Functional Role (+ optional department) — D-JD1. */
 export const jdTemplateSchema = z.object({
-  departmentId: uuid,
-  roleId: uuid,
+  functionalRoleId: uuid,
+  departmentId: uuid.optional(),
   title: nonEmptyString,
   content: nonEmptyString,
 });
 export type JDTemplateInput = z.infer<typeof jdTemplateSchema>;
+
+/** CR-50 / D-JD1: assign a Functional Role to a user → auto-assigns the JD template. */
+export const assignFunctionalRoleSchema = z.object({
+  userId: uuid,
+  functionalRoleId: uuid,
+});
+export type AssignFunctionalRoleInput = z.infer<typeof assignFunctionalRoleSchema>;
+
+/** The exact sentence a user must type to acknowledge their JD (D-JD3). */
+export const JD_ACK_SENTENCE = 'I acknowledge/accept the assigned responsibilities.';
+
+/** CR-50 / D-JD3: acknowledge own JD — typed sentence + secondary-password e-signature. */
+export const acknowledgeJDSchema = z.object({
+  acknowledgementText: nonEmptyString,
+});
+export type AcknowledgeJDInput = z.infer<typeof acknowledgeJDSchema>;

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
-import { userType } from './enums';
+import { userType, releaseStage } from './enums';
+
+/** CR-16: move a user along the onboarding/release lifecycle (e-signed). */
+export const setReleaseStageSchema = z.object({
+  stage: releaseStage,
+  reasonForChange,
+});
+export type SetReleaseStageInput = z.infer<typeof setReleaseStageSchema>;
 
 export const createUserSchema = z.object({
   userType,

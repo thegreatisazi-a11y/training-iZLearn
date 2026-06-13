@@ -31,8 +31,45 @@ interface AuditEntry {
 const DIFF_IGNORE = new Set(['updatedAt', 'createdAt', 'passwordChangedAt', 'lastLoginAt', 'id']);
 const DIFF_REDACT = new Set(['passwordHash', 'signaturePasswordHash', 'refreshToken', 'password', 'signaturePassword']);
 
+// CR-8: friendly labels for the common audited fields; anything not listed is
+// de-camelCased automatically.
+const FIELD_LABELS: Record<string, string> = {
+  fullName: 'Full Name',
+  email: 'Email',
+  isActive: 'Active',
+  isDeleted: 'Deleted',
+  status: 'Status',
+  roleName: 'Role Name',
+  description: 'Description',
+  permissions: 'Permissions',
+  title: 'Title',
+  topicNumber: 'Topic Number',
+  sopNumber: 'SOP Number',
+  passingScorePercent: 'Passing Score (%)',
+  maxAttempts: 'Max Attempts',
+  durationMinutes: 'Duration (min)',
+  assessmentTimeMinutes: 'Assessment Time (min)',
+  requiresAssessment: 'Requires Assessment',
+  dueDate: 'Due Date',
+  refresherDueDate: 'Refresher Due',
+  effectiveDate: 'Effective Date',
+  reviewDate: 'Review Date',
+  supervisorId: 'Supervisor',
+  departmentId: 'Department',
+  locationId: 'Location',
+  userType: 'User Type',
+};
+
+function fieldLabel(k: string): string {
+  return FIELD_LABELS[k] ?? k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).replace(/\sId$/, '');
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
 function fmtVal(v: unknown): string {
   if (v === null || v === undefined) return '∅';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (typeof v === 'string' && ISO_DATE.test(v)) return formatDateTime(v);
   if (typeof v === 'object') {
     const s = JSON.stringify(v);
     return s.length > 60 ? `${s.slice(0, 57)}…` : s;
@@ -54,7 +91,7 @@ function changeSummary(entry: AuditEntry): string {
       if (DIFF_REDACT.has(k)) continue;
       const ov = (oldValue as Record<string, unknown>)[k];
       const nv = (newValue as Record<string, unknown>)[k];
-      if (JSON.stringify(ov) !== JSON.stringify(nv)) changes.push(`${k}: ${fmtVal(ov)} → ${fmtVal(nv)}`);
+      if (JSON.stringify(ov) !== JSON.stringify(nv)) changes.push(`${fieldLabel(k)}: ${fmtVal(ov)} → ${fmtVal(nv)}`);
     }
     if (!changes.length) return '—';
     return changes.slice(0, 8).join('; ') + (changes.length > 8 ? ` (+${changes.length - 8} more)` : '');
@@ -73,6 +110,9 @@ export default function AuditTrailPage() {
   const canExport = useAuthStore((s) => s.hasPermission)('auditTrail', 'export');
   const [page, setPage] = useState(1);
   const [signOpen, setSignOpen] = useState(false);
+  // CR-10: let the user pick the export format. Excel/CSV are generated server-side
+  // with no browser dependency; PDF needs headless Chrome and may be unavailable.
+  const [format, setFormat] = useState<'xlsx' | 'csv' | 'pdf'>('xlsx');
 
   // Applied filters (drive the query); the form mutates draft state then commits via Search.
   const [filters, setFilters] = useState({ from: '', to: '', userId: '', action: '', entityType: '', entityId: '' });
@@ -95,7 +135,7 @@ export default function AuditTrailPage() {
 
   const exportMutation = useMutation({
     mutationFn: async (sig: { windowsUsername: string; signaturePassword: string; meaning: string }) => {
-      const res = await svc.audit.export('pdf', {
+      const res = await svc.audit.export(format, {
         from: filters.from || undefined,
         to: filters.to || undefined,
         userId: filters.userId || undefined,
@@ -107,8 +147,22 @@ export default function AuditTrailPage() {
       return res.data as Blob;
     },
     onSuccess: (blob) => {
-      downloadBlob(blob, 'audit-trail.pdf');
+      downloadBlob(blob, `audit-trail.${format}`);
       toast.success('Audit trail exported.');
+    },
+    onError: async (e) => {
+      // A blob responseType means error bodies arrive as a Blob — read the JSON message out.
+      const blob = (e as { response?: { data?: unknown } })?.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await blob.text());
+          toast.error(parsed?.error?.message || 'Export failed.');
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      toast.error(apiError(e));
     },
   });
 
@@ -137,9 +191,21 @@ export default function AuditTrailPage() {
         description="Immutable record of all system actions (21 CFR Part 11)."
         actions={
           canExport && (
-            <Button variant="outline" onClick={() => setSignOpen(true)}>
-              <Download className="h-4 w-4" /> Export
-            </Button>
+            <div className="flex items-center gap-2">
+              <Select
+                className="w-32"
+                value={format}
+                onChange={(e) => setFormat(e.target.value as 'xlsx' | 'csv' | 'pdf')}
+                options={[
+                  { value: 'xlsx', label: 'Excel (.xlsx)' },
+                  { value: 'csv', label: 'CSV' },
+                  { value: 'pdf', label: 'PDF' },
+                ]}
+              />
+              <Button variant="outline" onClick={() => setSignOpen(true)}>
+                <Download className="h-4 w-4" /> Export
+              </Button>
+            </div>
           )
         }
       />

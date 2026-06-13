@@ -10,16 +10,16 @@ export function now(): Date {
   return new Date();
 }
 
-/** Display a date as DD/MM/YYYY in the configured timezone. */
+/** Display a date as DD/MM/YY in the configured timezone. */
 export function formatDate(date: Date | string | null | undefined, tz = 'UTC'): string {
   if (!date) return '';
-  return dayjs(date).tz(tz).format('DD/MM/YYYY');
+  return dayjs(date).tz(tz).format('DD/MM/YY');
 }
 
-/** Display a timestamp as DD/MM/YYYY HH:mm in the configured timezone. */
+/** Display a timestamp as DD/MM/YY HH:mm in the configured timezone. */
 export function formatDateTime(date: Date | string | null | undefined, tz = 'UTC'): string {
   if (!date) return '';
-  return dayjs(date).tz(tz).format('DD/MM/YYYY HH:mm');
+  return dayjs(date).tz(tz).format('DD/MM/YY HH:mm');
 }
 
 export function addMonths(date: Date, months: number): Date {

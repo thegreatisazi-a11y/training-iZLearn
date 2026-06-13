@@ -15,6 +15,12 @@ export const trainingType = z.enum([
   'INDUCTION',
   'REFRESHER',
   'WORKSHOP',
+  // CR-58: additional self-paced / delivery types
+  'SELF_READ',
+  'SELF_READ_EVALUATION',
+  'QUIZ',
+  'VIDEO',
+  'REMOTE',
 ]);
 export type TrainingType = z.infer<typeof trainingType>;
 
@@ -45,8 +51,13 @@ export const assignmentStatus = z.enum([
   'OVERDUE',
   'BLOCKED',
   'WAIVED',
+  'DEFERRED', // CR-57: assign-later — hidden from the trainee until activated
 ]);
 export type AssignmentStatus = z.infer<typeof assignmentStatus>;
+
+/** CR-15/16: user onboarding lifecycle / release stage. */
+export const releaseStage = z.enum(['ONBOARDING', 'READY_FOR_RELEASE', 'RELEASED']);
+export type ReleaseStage = z.infer<typeof releaseStage>;
 
 export const attendanceStatus = z.enum(['PRESENT', 'ABSENT']);
 export type AttendanceStatus = z.infer<typeof attendanceStatus>;
@@ -153,6 +164,7 @@ export const PERMISSION_MODULES = [
   'materialManagement',
   'jobDescription',
   'tni',
+  'cv',
   'scheduling',
   'attendance',
   'assessments',
@@ -184,6 +196,7 @@ export const AUDIT_ACTIONS = [
   'EXPORT',
   'PRINT',
   'ESIGN',
+  'ACKNOWLEDGE',
   'CONFIG_CHANGE',
   'PERMISSION_CHANGE',
   'FILE_UPLOAD',

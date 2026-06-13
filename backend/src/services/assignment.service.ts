@@ -4,8 +4,14 @@ import { AppError } from '../utils/response';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
+import { startOfDay } from '../utils/dateUtils';
 import type { Request } from 'express';
-import type { CreateAssignmentInput, UpdateAssignmentInput, PaginationQuery } from '@izlearn/shared';
+import type {
+  CreateAssignmentInput,
+  UpdateAssignmentInput,
+  SupervisorDecisionInput,
+  PaginationQuery,
+} from '@izlearn/shared';
 
 /** Resolve (userId, topicId) target pairs for the three assignment modes. */
 async function resolveTargets(input: CreateAssignmentInput): Promise<Array<{ userId: string; topicId: string }>> {
@@ -39,6 +45,14 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
     throw AppError.badRequest('One or more selected topics are not published and cannot be assigned.');
   }
 
+  // CR-56: never stamp an already-expired due date (e.g. a user added to a
+  // role-based course after the due date would have passed) — leave it open.
+  const today = startOfDay(new Date());
+  const safeDueDate = input.dueDate && input.dueDate >= today ? input.dueDate : null;
+  // CR-57: assign-later keeps the assignment DEFERRED (invisible to the trainee).
+  const deferred = !!input.activateLater;
+  const status = deferred ? 'DEFERRED' : 'PENDING';
+
   const created = await auditedTransaction(prisma, async (tx) => {
     const result = [];
     const audits = [];
@@ -49,20 +63,22 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
           topicId: t.topicId,
           assignmentType: input.assignmentType,
           scheduleId: input.scheduleId ?? null,
-          dueDate: input.dueDate ?? null,
+          dueDate: safeDueDate,
+          activateOn: deferred ? input.activateOn ?? null : null,
           tniId: input.tniId ?? null,
           assignedBy,
-          status: 'PENDING',
+          status,
           createdBy: assignedBy,
         },
       });
       result.push(a);
-      audits.push({ action: 'CREATE', entityType: 'TrainingAssignment', entityId: a.id, newValue: { userId: t.userId, topicId: t.topicId } });
+      audits.push({ action: 'CREATE', entityType: 'TrainingAssignment', entityId: a.id, newValue: { userId: t.userId, topicId: t.topicId, status } });
     }
     return { result, audits };
   });
 
-  for (const a of created) await notifyTrainingAssigned(a.userId, a.topicId, a.dueDate);
+  // Deferred assignments are silent until activated.
+  if (!deferred) for (const a of created) await notifyTrainingAssigned(a.userId, a.topicId, a.dueDate);
   return created;
 }
 
@@ -93,7 +109,8 @@ export async function getAssignment(id: string) {
  */
 export async function listMyTrainings(userId: string) {
   const assignments = await prisma.trainingAssignment.findMany({
-    where: { userId, isDeleted: false },
+    // CR-57: DEFERRED assignments are not yet visible to the trainee.
+    where: { userId, isDeleted: false, status: { not: 'DEFERRED' } },
     orderBy: { createdAt: 'desc' },
   });
   const topicIds = Array.from(new Set(assignments.map((a) => a.topicId)));
@@ -122,6 +139,8 @@ export async function listMyTrainings(userId: string) {
     dueDate: a.dueDate,
     refresherDueDate: a.refresherDueDate,
     assignmentType: a.assignmentType,
+    requiresSupervisorApproval: a.requiresSupervisorApproval,
+    supervisorApprovalStatus: a.supervisorApprovalStatus,
     topic: topicMap.get(a.topicId) ?? null,
     result: bestByTopic.get(a.topicId) ?? null,
   }));
@@ -134,6 +153,36 @@ export async function updateAssignment(id: string, input: UpdateAssignmentInput)
     data: {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
+    },
+  });
+}
+
+/** CR-57: activate a DEFERRED (assign-later) assignment so the trainee can begin. */
+export async function activateAssignment(id: string) {
+  const a = await getAssignment(id);
+  if (a.status !== 'DEFERRED') throw AppError.conflict('Only a deferred assignment can be activated.');
+  const updated = await prisma.trainingAssignment.update({
+    where: { id },
+    data: { status: 'PENDING', activateOn: null },
+  });
+  await notifyTrainingAssigned(updated.userId, updated.topicId, updated.dueDate);
+  return updated;
+}
+
+/**
+ * CR-56: a supervisor signs off on an assignment whose completion fell past the due
+ * date (requiresSupervisorApproval). Two-component e-signature; records the decision.
+ */
+export async function supervisorDecision(id: string, input: SupervisorDecisionInput, req: Request) {
+  await getAssignment(id);
+  const approved = input.decision === 'APPROVE';
+  await signFromRequest(req, 'TrainingAssignment', id, approved ? 'Approved' : 'Rejected');
+  return prisma.trainingAssignment.update({
+    where: { id },
+    data: {
+      supervisorApprovalStatus: approved ? 'APPROVED' : 'REJECTED',
+      supervisorApprovedBy: req.user!.id,
+      supervisorApprovedAt: new Date(),
     },
   });
 }

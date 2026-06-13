@@ -14,16 +14,16 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
-  const role = await svc.createRole(req.body, req.user!.id);
+  const role = await svc.createRole(req.body, req);
   sendCreated(res, role, 'Role created');
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
-  const role = await svc.updateRole(req.params.id, req.body);
+  const role = await svc.updateRole(req.params.id, req.body, req);
   sendSuccess(res, role, 'Role updated');
 });
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
-  const role = await svc.deactivateRole(req.params.id);
+  const role = await svc.deactivateRole(req.params.id, req);
   sendSuccess(res, role, 'Role deactivated');
 });

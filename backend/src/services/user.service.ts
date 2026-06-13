@@ -33,6 +33,22 @@ function tempPassword(): string {
   return `Iz!${rand}${Math.floor(Math.random() * 90 + 10)}A`;
 }
 
+/**
+ * CR-1(c): a role may only be assigned to a user while it is active and not deleted.
+ * Throws if any of the supplied roleIds is missing, inactive or soft-deleted.
+ */
+async function assertRolesActive(roleIds: string[]): Promise<void> {
+  const ids = Array.from(new Set(roleIds.filter(Boolean)));
+  if (!ids.length) return;
+  const active = await prisma.role.findMany({
+    where: { id: { in: ids }, isActive: true, isDeleted: false },
+    select: { id: true },
+  });
+  if (active.length !== ids.length) {
+    throw AppError.badRequest('One or more selected roles are inactive or no longer exist.');
+  }
+}
+
 /** Resolve department / location names for a set of users (UI convenience). */
 async function withNames<T extends { departmentId: string; locationId: string }>(rows: T[]) {
   const deptIds = Array.from(new Set(rows.map((r) => r.departmentId)));
@@ -48,6 +64,39 @@ async function withNames<T extends { departmentId: string; locationId: string }>
     departmentName: deptMap.get(r.departmentId) ?? null,
     locationName: locMap.get(r.locationId) ?? null,
   }));
+}
+
+/**
+ * CR-12: resolve each user's ACTIVE role names. Returns a map keyed by userId so
+ * a page of users can be annotated in a single round-trip to UserRole + Role.
+ */
+async function rolesByUser(userIds: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const ids = Array.from(new Set(userIds));
+  if (!ids.length) return map;
+  const userRoles = await prisma.userRole.findMany({
+    where: { userId: { in: ids }, isActive: true },
+    select: { userId: true, roleId: true },
+  });
+  const roleIds = Array.from(new Set(userRoles.map((ur) => ur.roleId)));
+  const roles = roleIds.length
+    ? await prisma.role.findMany({ where: { id: { in: roleIds } }, select: { id: true, roleName: true } })
+    : [];
+  const roleNameById = new Map(roles.map((r) => [r.id, r.roleName]));
+  for (const ur of userRoles) {
+    const name = roleNameById.get(ur.roleId);
+    if (!name) continue;
+    const list = map.get(ur.userId) ?? [];
+    list.push(name);
+    map.set(ur.userId, list);
+  }
+  return map;
+}
+
+/** CR-12: attach `roleNames: string[]` to a page of users (active roles only). */
+async function withRoleNames<T extends { id: string }>(rows: T[]) {
+  const roleMap = await rolesByUser(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...r, roleNames: roleMap.get(r.id) ?? [] }));
 }
 
 // ---- User-creation requests -------------------------------------------------
@@ -140,6 +189,8 @@ export async function decideRequest(
   }
 
   const roleIds = (request.roleIds as string[]) ?? [];
+  // CR-1(c): never provision a user against an inactive/deleted role.
+  await assertRolesActive(roleIds);
   const plainPassword = tempPassword();
   const passwordHash = await hashPassword(plainPassword);
 
@@ -227,7 +278,32 @@ export async function listUsers(q: PaginationQuery, locationId?: string) {
     }),
     prisma.user.count({ where }),
   ]);
-  return { data: await withNames(rows), total, page: q.page, pageSize: q.pageSize };
+  // CR-12: annotate with department/location names AND active role names.
+  return { data: await withRoleNames(await withNames(rows)), total, page: q.page, pageSize: q.pageSize };
+}
+
+/**
+ * CR-12: fetch ALL users matching the current filter (no pagination) annotated
+ * with department/location/role names — for the users-list export. `locationId`
+ * mirrors the same location scoping applied to `listUsers`.
+ */
+export async function listUsersForExport(q: PaginationQuery, locationId?: string) {
+  const where: Prisma.UserWhereInput = {
+    isDeleted: false,
+    ...(q.includeInactive ? {} : { isActive: true }),
+    ...(locationId ? { locationId } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { fullName: { contains: q.search, mode: 'insensitive' } },
+            { employeeId: { contains: q.search, mode: 'insensitive' } },
+            { windowsUsername: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  };
+  const rows = await prisma.user.findMany({ where, orderBy: { [q.sortBy || 'fullName']: q.sortDir } });
+  return withRoleNames(await withNames(rows));
 }
 
 export async function getUser(id: string) {
@@ -238,9 +314,15 @@ export async function getUser(id: string) {
   return { ...withName, roleIds: roles.map((r) => r.roleId) };
 }
 
-export async function updateUser(id: string, input: UpdateUserInput, actorId?: string) {
+export async function updateUser(id: string, input: UpdateUserInput, req: Request) {
   const existing = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!existing) throw AppError.notFound('User not found');
+
+  // CR-14: editing a user is a controlled action and requires a two-component
+  // electronic signature (verified against req.body.signature).
+  await signFromRequest(req, 'User', id, 'Approved');
+  auditContext.setActionOverride('UPDATE');
+  const actorId = req.user?.id;
 
   const updated = await prisma.user.update({
     where: { id },
@@ -285,6 +367,9 @@ async function provisionJdFromTemplate(userId: string, departmentId: string, cre
 export async function changeRoles(id: string, roleIds: string[], req: Request) {
   const user = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
+
+  // CR-1(c): role-change requests may only reference active, non-deleted roles.
+  await assertRolesActive(roleIds);
 
   await signFromRequest(req, 'User', id, 'Approved');
   auditContext.setActionOverride('PERMISSION_CHANGE');
@@ -335,12 +420,18 @@ export async function resetPassword(id: string, req: Request) {
   const updated = await auditedTransaction(prisma, async (tx) => {
     const u = await tx.user.update({
       where: { id },
-      data: { passwordHash, mustChangePassword: true, passwordChangedAt: new Date() },
+      data: {
+        passwordHash,
+        // CR-17: reset BOTH the login and signature passwords to the same temp value.
+        signaturePasswordHash: passwordHash,
+        mustChangePassword: true,
+        passwordChangedAt: new Date(),
+      },
     });
     await tx.passwordHistory.create({ data: { userId: id, passwordHash } });
     return {
       result: u,
-      audits: [{ action: 'UPDATE', entityType: 'User', entityId: id, newValue: { passwordReset: true } }],
+      audits: [{ action: 'UPDATE', entityType: 'User', entityId: id, newValue: { passwordReset: true, signaturePasswordReset: true } }],
     };
   });
   await notifyPasswordReset(id, plainPassword);
@@ -443,4 +534,55 @@ export async function bulkCommit(rows: CreateUserInput[], createdBy: string) {
     }
   }
   return { created, failed };
+}
+
+// ---- User lifecycle / release stage (CR-15 / CR-16) -------------------------
+
+/**
+ * Aggregate a user's onboarding lifecycle: JD acknowledgement, CV completeness,
+ * TNI status, training completion, and the stored release stage. Read-only — the
+ * UI uses it to show the user's onboarding/release readiness.
+ */
+export async function getUserLifecycle(userId: string) {
+  const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
+  if (!user) throw AppError.notFound('User not found');
+
+  const [jd, cv, tnis, assignments] = await Promise.all([
+    prisma.jobDescription.findFirst({ where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } }, orderBy: { version: 'desc' } }),
+    prisma.curriculumVitae.findFirst({ where: { userId, isDeleted: false } }),
+    prisma.tNI.findMany({ where: { userId, isDeleted: false } }),
+    prisma.trainingAssignment.findMany({ where: { userId, isDeleted: false, status: { not: 'DEFERRED' } } }),
+  ]);
+
+  const trainingTotal = assignments.length;
+  const trainingCompleted = assignments.filter((a) => a.status === 'COMPLETED' || a.status === 'WAIVED').length;
+  const trainingComplete = trainingTotal === 0 || trainingCompleted === trainingTotal;
+
+  return {
+    userId,
+    releaseStage: user.releaseStage,
+    releasedAt: user.releasedAt,
+    jd: jd ? { id: jd.id, title: jd.title, acknowledged: !!jd.acknowledgedAt, acknowledgedAt: jd.acknowledgedAt } : null,
+    jdAcknowledged: !!jd?.acknowledgedAt,
+    cvCompleted: !!cv,
+    tni: { total: tnis.length, approved: tnis.filter((t) => t.status === 'APPROVED').length, pending: tnis.filter((t) => t.status === 'PENDING').length },
+    training: { total: trainingTotal, completed: trainingCompleted, complete: trainingComplete },
+    // Eligible to release once JD is acknowledged and all assigned training is complete.
+    eligibleForRelease: !!jd?.acknowledgedAt && trainingComplete,
+  };
+}
+
+/** CR-16: move a user along the release lifecycle. Controlled action — e-signed. */
+export async function setReleaseStage(userId: string, stage: 'ONBOARDING' | 'READY_FOR_RELEASE' | 'RELEASED', req: Request) {
+  const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
+  if (!user) throw AppError.notFound('User not found');
+  await signFromRequest(req, 'User', userId, 'Approved');
+  auditContext.setActionOverride('UPDATE');
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      releaseStage: stage,
+      ...(stage === 'RELEASED' ? { releasedAt: new Date(), releasedBy: req.user!.id } : {}),
+    },
+  });
 }

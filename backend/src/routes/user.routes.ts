@@ -5,7 +5,7 @@ import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
 import { uploadExcel } from '../middlewares/upload.middleware';
-import { createUserSchema, updateUserSchema, changeUserRolesSchema } from '@izlearn/shared';
+import { createUserSchema, updateUserSchema, changeUserRolesSchema, setReleaseStageSchema } from '@izlearn/shared';
 
 /**
  * @openapi
@@ -18,6 +18,8 @@ router.use(authenticate);
 
 // Users
 router.get('/', requirePermission('userManagement', 'read'), c.list);
+// CR-12: export the (filtered) users list. Must precede '/:id' so it is not captured as an id.
+router.get('/export', requirePermission('userManagement', 'export'), c.exportUsers);
 
 // Creation requests (specific routes before '/:id')
 router.get('/requests', requirePermission('userManagement', 'read'), c.listRequests);
@@ -77,6 +79,16 @@ router.post(
   requirePermission('userManagement', 'write'),
   requireReasonForChange,
   c.resetPassword,
+);
+
+// CR-15/16: user lifecycle aggregate (read) + release-stage transition (approve + e-sign).
+router.get('/:id/lifecycle', requirePermission('userManagement', 'read'), c.lifecycle);
+router.post(
+  '/:id/release-stage',
+  requirePermission('userManagement', 'approve'),
+  requireReasonForChange,
+  validate(setReleaseStageSchema),
+  c.setReleaseStage,
 );
 
 export default router;

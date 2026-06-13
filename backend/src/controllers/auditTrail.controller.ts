@@ -34,9 +34,36 @@ const COLUMNS = [
   { header: 'Action', key: 'action' },
   { header: 'Entity Type', key: 'entityType' },
   { header: 'Entity ID', key: 'entityId' },
+  { header: 'Changes (old → new)', key: 'changes' },
   { header: 'Reason For Change', key: 'reasonForChange' },
   { header: 'IP Address', key: 'ipAddress' },
 ];
+
+const DIFF_IGNORE = new Set(['updatedAt', 'createdAt', 'passwordChangedAt', 'lastLoginAt', 'id']);
+
+function fmtVal(v: unknown): string {
+  if (v === null || v === undefined) return '∅';
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+}
+
+/** CR-9: a human-readable old→new field diff for the export "Changes" column. */
+function buildChangeSummary(action: string, oldVal: unknown, newVal: unknown): string {
+  if (action === 'CREATE') return 'Record created';
+  if (action === 'SOFT_DELETE') return 'Record removed (soft-delete)';
+  if (oldVal && newVal && typeof oldVal === 'object' && typeof newVal === 'object') {
+    const o = oldVal as Record<string, unknown>;
+    const n = newVal as Record<string, unknown>;
+    const keys = new Set([...Object.keys(o), ...Object.keys(n)]);
+    const changes: string[] = [];
+    for (const k of keys) {
+      if (DIFF_IGNORE.has(k)) continue;
+      if (JSON.stringify(o[k]) !== JSON.stringify(n[k])) changes.push(`${k}: ${fmtVal(o[k])} → ${fmtVal(n[k])}`);
+    }
+    return changes.slice(0, 12).join('; ');
+  }
+  return '';
+}
 
 /** Export the audit trail (PDF/CSV/XLS). Exporting is e-signed and itself audited. */
 export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
@@ -52,6 +79,7 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
     action: d.action,
     entityType: d.entityType,
     entityId: d.entityId ?? '',
+    changes: buildChangeSummary(d.action, d.oldValue, d.newValue),
     reasonForChange: d.reasonForChange ?? '',
     ipAddress: d.ipAddress ?? '',
   }));
@@ -85,7 +113,15 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
   const body = `<html><head><style>body{font-family:Arial;font-size:10px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ccc;padding:4px;text-align:left;}th{background:#f0f0f0;}</style></head><body>
     <table><thead><tr>${COLUMNS.map((c) => `<th>${c.header}</th>`).join('')}</tr></thead>
     <tbody>${rows.map((row) => `<tr>${COLUMNS.map((c) => `<td>${escapeHtml(String((row as Record<string, unknown>)[c.key] ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
-  const pdf = await renderPdfFromHtml(body, { headerHtml: buildHeaderTemplate(cfg), footerHtml: buildFooterTemplate(cfg) });
+  // CR-10: PDF generation depends on a headless Chrome (Puppeteer) which is not
+  // available on every host (e.g. the free demo tier). Fail with a clear,
+  // actionable message instead of an opaque 500 so the user can pick CSV/Excel.
+  let pdf: Buffer;
+  try {
+    pdf = await renderPdfFromHtml(body, { headerHtml: buildHeaderTemplate(cfg), footerHtml: buildFooterTemplate(cfg) });
+  } catch {
+    throw new AppError(503, 'PDF_UNAVAILABLE', 'PDF export is unavailable on this server. Please export as Excel or CSV instead.');
+  }
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.pdf"');
   return res.send(pdf);

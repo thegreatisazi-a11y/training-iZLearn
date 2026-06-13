@@ -1,16 +1,63 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
 import { paginationQuery, userRequestDecisionSchema } from '@izlearn/shared';
+import { exportToCsv } from '../utils/csvExporter';
+import { exportToExcel } from '../utils/excelExporter';
+import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/user.service';
+
+/** UR-85: full-location visibility requires userManagement:approve; otherwise scope to own location. */
+function locationScope(req: Request): string | undefined {
+  const canViewAll = req.user!.permissions['userManagement']?.approve === true;
+  return canViewAll ? undefined : req.user!.locationId;
+}
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
   // UR-85: users with userManagement:approve can view all locations;
   // those with only userManagement:read see only their own location.
-  const canViewAll = req.user!.permissions['userManagement']?.approve === true;
-  const locationFilter = canViewAll ? undefined : req.user!.locationId;
-  const r = await svc.listUsers(q, locationFilter);
+  const r = await svc.listUsers(q, locationScope(req));
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
+});
+
+const EXPORT_COLUMNS = [
+  { header: 'Employee ID', key: 'employeeId' },
+  { header: 'Full Name', key: 'fullName' },
+  { header: 'Username', key: 'username' },
+  { header: 'Email', key: 'email' },
+  { header: 'Department', key: 'department' },
+  { header: 'Location', key: 'location' },
+  { header: 'Roles', key: 'roles' },
+  { header: 'Status', key: 'status' },
+];
+
+/** CR-12: export the (filtered, all-rows) users list as Excel or CSV. */
+export const exportUsers = asyncHandler(async (req: Request, res: Response) => {
+  const format = String(req.query.format || 'xlsx').toLowerCase();
+  const q = paginationQuery.parse(req.query);
+  const users = await svc.listUsersForExport(q, locationScope(req));
+  const rows = users.map((u) => ({
+    employeeId: u.employeeId,
+    fullName: u.fullName,
+    username: u.windowsUsername,
+    email: u.email ?? '',
+    department: u.departmentName ?? '',
+    location: u.locationName ?? '',
+    roles: u.roleNames.join(', '),
+    status: u.isActive ? 'Active' : 'Inactive',
+  }));
+
+  await recordEvent({ action: 'EXPORT', entityType: 'User', entityId: 'list', newValue: { format, count: rows.length } });
+
+  if (format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
+    return res.send(exportToCsv(EXPORT_COLUMNS, rows));
+  }
+  const buf = await exportToExcel(EXPORT_COLUMNS, rows, 'Users');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="users.xlsx"');
+  return res.send(buf);
 });
 
 export const listRequests = asyncHandler(async (req: Request, res: Response) => {
@@ -39,7 +86,7 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.updateUser(req.params.id, req.body, req.user!.id), 'User updated');
+  sendSuccess(res, await svc.updateUser(req.params.id, req.body, req), 'User updated');
 });
 
 export const changeRoles = asyncHandler(async (req: Request, res: Response) => {
@@ -57,6 +104,15 @@ export const deactivate = asyncHandler(async (req: Request, res: Response) => {
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
+});
+
+// CR-15/16: user lifecycle aggregate + release-stage transition.
+export const lifecycle = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.getUserLifecycle(req.params.id));
+});
+
+export const setReleaseStage = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.setReleaseStage(req.params.id, req.body.stage, req), 'Release stage updated');
 });
 
 export const bulkPreview = asyncHandler(async (req: Request, res: Response) => {

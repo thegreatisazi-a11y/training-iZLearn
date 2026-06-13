@@ -54,6 +54,8 @@ export const svc = {
       return api.post('/users/bulk/preview', fd).then((r) => r.data.data);
     },
     bulkCommit: (rows: unknown) => api.post('/users/bulk/commit', { rows }).then((r) => r.data.data),
+    lifecycle: (id: string) => data(api.get(`/users/${id}/lifecycle`)),
+    setReleaseStage: (id: string, body: unknown) => data(api.post(`/users/${id}/release-stage`, body)),
   },
 
   roles: createCrud('/roles'),
@@ -119,6 +121,8 @@ export const svc = {
     ...createCrud('/assignments'),
     mine: () => data(api.get('/assignments/mine')),
     waive: (id: string, body: unknown) => data(api.post(`/assignments/${id}/waive`, body)),
+    activate: (id: string) => data(api.post(`/assignments/${id}/activate`, {})),
+    supervisorDecision: (id: string, body: unknown) => data(api.post(`/assignments/${id}/supervisor-decision`, body)),
   },
 
   attendance: {
@@ -140,6 +144,7 @@ export const svc = {
   assessments: {
     start: (body: unknown) => data(api.post('/assessments/start', body)),
     submit: (body: unknown) => data(api.post('/assessments/submit', body)),
+    acknowledgeRead: (body: unknown) => data(api.post('/assessments/acknowledge-read', body)),
     listMine: (params?: ListParams) => data(api.get('/assessments/mine', { params })),
     list: (params?: ListParams) => data(api.get('/assessments', { params })),
     get: (id: string) => data(api.get(`/assessments/${id}`)),
@@ -161,12 +166,26 @@ export const svc = {
     history: (userId: string) => data(api.get(`/job-descriptions/user/${userId}/history`)),
     listTemplates: (params?: ListParams) => api.get('/job-descriptions/templates', { params }).then((r) => r.data),
     createTemplate: (body: unknown) => data(api.post('/job-descriptions/templates', body)),
+    updateTemplate: (id: string, body: unknown) => data(api.patch(`/job-descriptions/templates/${id}`, body)),
     fromTemplate: (body: unknown) => data(api.post('/job-descriptions/from-template', body)),
+    mine: () => data(api.get('/job-descriptions/mine')),
+    acknowledge: (id: string, body: unknown) => data(api.post(`/job-descriptions/${id}/acknowledge`, body)),
+    assignFunctionalRole: (body: unknown) => data(api.post('/job-descriptions/assign-functional-role', body)),
+  },
+
+  cv: {
+    mine: () => data(api.get('/cv/mine')),
+    save: (body: unknown) => data(api.post('/cv/mine', body)),
+    team: (params?: ListParams) => api.get('/cv/team', { params }).then((r) => r.data),
+    user: (userId: string) => data(api.get(`/cv/user/${userId}`)),
   },
 
   tni: {
     ...createCrud('/tni'),
     decide: (id: string, body: unknown) => data(api.post(`/tni/${id}/decision`, body)),
+    matrix: () => data(api.get('/tni/requirements/matrix')),
+    setRequirement: (body: unknown) => data(api.post('/tni/requirements', body)),
+    applyMatrix: (body: unknown) => data(api.post('/tni/requirements/apply', body)),
   },
 
   feedback: {

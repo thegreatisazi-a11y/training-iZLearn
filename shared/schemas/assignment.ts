@@ -13,6 +13,10 @@ export const createAssignmentSchema = z
     scheduleId: uuid.optional(),
     dueDate: z.coerce.date().optional(),
     tniId: uuid.optional(),
+    // CR-57: assign-later — create the assignment now but keep it DEFERRED
+    // (hidden from the trainee) until `activateOn` arrives or it is activated.
+    activateLater: z.boolean().optional(),
+    activateOn: z.coerce.date().optional(),
   })
   .superRefine((a, ctx) => {
     if (a.assignmentType === 'COURSE_SPECIFIC' && !a.topicId) {
@@ -38,3 +42,10 @@ export const waiveAssignmentSchema = z.object({
   reasonForChange,
 });
 export type WaiveAssignmentInput = z.infer<typeof waiveAssignmentSchema>;
+
+/** CR-56: supervisor sign-off on a completion/late assignment. */
+export const supervisorDecisionSchema = z.object({
+  decision: z.enum(['APPROVE', 'REJECT']),
+  reasonForChange,
+});
+export type SupervisorDecisionInput = z.infer<typeof supervisorDecisionSchema>;

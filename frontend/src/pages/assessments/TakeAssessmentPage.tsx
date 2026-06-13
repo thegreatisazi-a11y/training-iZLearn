@@ -26,21 +26,27 @@ interface QuestionOption {
   id: string;
   text: string;
 }
-interface MatchPair {
-  left: string;
-  right: string;
+interface MatchData {
+  lefts: string[];
+  rights: string[];
 }
 interface AssessmentQuestion {
   id: string;
   questionText: string;
   questionType: string;
-  options?: QuestionOption[] | MatchPair[] | null;
+  options?: unknown;
+  helpText?: string | null;
 }
 interface StartResult {
   attemptId: string;
   attemptNumber: number;
   maxAttempts: number;
   topicTitle?: string;
+  topicNumber?: string;
+  topicCode?: string;
+  topicVersion?: number;
+  assessmentTimeMinutes?: number | null;
+  expiresAt?: string | null;
   questions: AssessmentQuestion[];
 }
 interface IncorrectDetail {
@@ -63,13 +69,54 @@ interface SubmitResult {
   certificateId?: string;
 }
 
-type Answer = string | string[];
+type Answer = string | string[] | Record<string, string>;
+
+/**
+ * CR-40: single-tab guard. While an assessment is in progress, a newly-opened tab
+ * detects an existing active tab (via BroadcastChannel ping/pong) and blocks itself,
+ * so the assessment can only be taken in one tab.
+ */
+function useSingleTabGuard(active: boolean): boolean {
+  const [blocked, setBlocked] = useState(false);
+  useEffect(() => {
+    if (!active || typeof BroadcastChannel === 'undefined') return;
+    const bc = new BroadcastChannel('izlearn-assessment');
+    const tabId = Math.random().toString(36).slice(2);
+    let isBlocked = false;
+    bc.onmessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string; tabId?: string };
+      if (!msg || msg.tabId === tabId) return;
+      if (msg.type === 'ping' && !isBlocked) bc.postMessage({ type: 'pong', tabId });
+      if (msg.type === 'pong') {
+        isBlocked = true;
+        setBlocked(true);
+      }
+    };
+    bc.postMessage({ type: 'ping', tabId });
+    return () => bc.close();
+  }, [active]);
+  return blocked;
+}
 
 function asOptions(q: AssessmentQuestion): QuestionOption[] {
   return Array.isArray(q.options) ? (q.options as QuestionOption[]).filter((o) => o && 'id' in o) : [];
 }
-function asPairs(q: AssessmentQuestion): MatchPair[] {
-  return Array.isArray(q.options) ? (q.options as MatchPair[]).filter((o) => o && 'left' in o) : [];
+function asMatch(q: AssessmentQuestion): MatchData {
+  const o = q.options as { lefts?: unknown; rights?: unknown } | null | undefined;
+  return {
+    lefts: Array.isArray(o?.lefts) ? (o!.lefts as string[]) : [],
+    rights: Array.isArray(o?.rights) ? (o!.rights as string[]) : [],
+  };
+}
+/** Pretty-print a stored correct answer (handles MATCH pair arrays). */
+function formatCorrect(c: unknown): string {
+  if (Array.isArray(c)) {
+    if (c.length && typeof c[0] === 'object' && c[0] && 'left' in (c[0] as object)) {
+      return (c as Array<{ left: string; right: string }>).map((p) => `${p.left} → ${p.right}`).join(', ');
+    }
+    return (c as unknown[]).join(', ');
+  }
+  return String(c ?? '');
 }
 
 function QuestionCard({ index, question, answer, onChange }: { index: number; question: AssessmentQuestion; answer: Answer | undefined; onChange: (a: Answer) => void }) {
@@ -95,6 +142,7 @@ function QuestionCard({ index, question, answer, onChange }: { index: number; qu
       const current = Array.isArray(answer) ? answer : [];
       return (
         <div className="space-y-2">
+          <p className="text-xs italic text-slate-500">Select all that apply — multiple options can be selected.</p>
           {asOptions(question).map((o) => (
             <label key={o.id} className="flex items-center gap-2 text-sm">
               <input
@@ -112,22 +160,22 @@ function QuestionCard({ index, question, answer, onChange }: { index: number; qu
       return <Input value={typeof answer === 'string' ? answer : ''} onChange={(e) => onChange(e.target.value)} placeholder="Type your answer…" />;
     }
     if (questionType === 'MATCH_THE_WORDS') {
-      const pairs = asPairs(question);
-      const rights = pairs.map((p) => p.right);
-      const rightOpts = [...new Set(rights)].map((r) => ({ value: r, label: r }));
-      // Answer is encoded as "left=>right" tokens.
-      const current = Array.isArray(answer) ? answer : [];
-      const getRight = (left: string) => current.find((c) => c.startsWith(`${left}=>`))?.split('=>')[1] ?? '';
+      const { lefts, rights } = asMatch(question);
+      const rightOpts = rights.map((r) => ({ value: r, label: r }));
+      // CR-36: the answer is a { left: right } map.
+      const current = answer && typeof answer === 'object' && !Array.isArray(answer) ? (answer as Record<string, string>) : {};
       function setRight(left: string, right: string) {
-        const without = current.filter((c) => !c.startsWith(`${left}=>`));
-        onChange(right ? [...without, `${left}=>${right}`] : without);
+        const next = { ...current };
+        if (right) next[left] = right;
+        else delete next[left];
+        onChange(next);
       }
       return (
         <div className="space-y-2">
-          {pairs.map((p) => (
-            <div key={p.left} className="grid grid-cols-2 items-center gap-3">
-              <span className="text-sm text-slate-700">{p.left}</span>
-              <Select options={rightOpts} value={getRight(p.left)} onChange={(e) => setRight(p.left, e.target.value)} placeholder="Match…" />
+          {lefts.map((left) => (
+            <div key={left} className="grid grid-cols-2 items-center gap-3">
+              <span className="text-sm text-slate-700">{left}</span>
+              <Select options={rightOpts} value={current[left] ?? ''} onChange={(e) => setRight(left, e.target.value)} placeholder="Match…" />
             </div>
           ))}
         </div>
@@ -139,9 +187,10 @@ function QuestionCard({ index, question, answer, onChange }: { index: number; qu
   return (
     <Card>
       <CardContent>
-        <p className="mb-3 font-medium text-slate-800">
+        <p className="mb-1 font-medium text-slate-800">
           {index + 1}. {question.questionText}
         </p>
+        {question.helpText && <p className="mb-3 text-xs italic text-slate-500">{question.helpText}</p>}
         {renderBody()}
       </CardContent>
     </Card>
@@ -156,11 +205,21 @@ export default function TakeAssessmentPage() {
   // Phase 6 / reading-gate: questions are gated behind per-material timed reading,
   // and the attempt is only STARTED once the server confirms reading is complete.
   const [phase, setPhase] = useState<'material' | 'assessment'>('material');
+  // CR-38: one question at a time + countdown.
+  const [current, setCurrent] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [tcChecked, setTcChecked] = useState(false); // CR-41: SOP T&C acknowledgement
+  const answersRef = useRef<Record<string, Answer>>({});
+  const submittedRef = useRef(false);
+  const liveRef = useRef({ started: false, hasResult: false });
+  const submitFnRef = useRef<(auto: boolean) => void>(() => {});
   const [activeMaterialIdx, setActiveMaterialIdx] = useState(0);
   const [secsLeft, setSecsLeft] = useState<Record<string, number>>({});
   const [done, setDone] = useState<Set<string>>(new Set());
   const startedRef = useRef<Set<string>>(new Set());
   const completedRef = useRef<Set<string>>(new Set());
+
+  const tabBlocked = useSingleTabGuard(phase === 'assessment' && !result);
 
   const start = useMutation({
     mutationFn: () => svc.assessments.start({ topicId }) as unknown as Promise<StartResult>,
@@ -168,7 +227,21 @@ export default function TakeAssessmentPage() {
     onError: (e) => toast.error(apiError(e)),
   });
   const submit = useMutation({
-    mutationFn: () => svc.assessments.submit({ attemptId: start.data?.attemptId, answers }) as unknown as Promise<SubmitResult>,
+    mutationFn: (opts?: { auto?: boolean }) =>
+      svc.assessments.submit({
+        attemptId: start.data?.attemptId,
+        answers: answersRef.current,
+        autoSubmitted: opts?.auto ?? false,
+      }) as unknown as Promise<SubmitResult>,
+    onSuccess: (r) => setResult(r),
+    onError: (e) => {
+      submittedRef.current = false; // allow a manual retry on transient failure
+      toast.error(apiError(e));
+    },
+  });
+  // CR-41: SOP / no-assessment topics complete via read + T&C acknowledgement.
+  const ackComplete = useMutation({
+    mutationFn: () => svc.assessments.acknowledgeRead({ topicId }) as unknown as Promise<SubmitResult>,
     onSuccess: (r) => setResult(r),
     onError: (e) => toast.error(apiError(e)),
   });
@@ -223,6 +296,47 @@ export default function TakeAssessmentPage() {
   }, [phase, active, done]);
 
   const questions = useMemo(() => start.data?.questions ?? [], [start.data]);
+
+  // Keep the latest answers and lifecycle flags reachable from event handlers.
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+  liveRef.current = { started: !!start.data, hasResult: !!result };
+  submitFnRef.current = (auto: boolean) => {
+    if (submittedRef.current || !start.data || result) return;
+    submittedRef.current = true;
+    submit.mutate({ auto });
+  };
+
+  // CR-38: server-stamped countdown; auto-submit when it reaches zero.
+  useEffect(() => {
+    if (phase !== 'assessment' || !start.data?.expiresAt || result) return;
+    const deadline = new Date(start.data.expiresAt).getTime();
+    const tick = () => {
+      const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+      setTimeLeft(left);
+      if (left <= 0) submitFnRef.current(true);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [phase, start.data?.expiresAt, result]);
+
+  // CR-38/39: leaving or closing a started assessment auto-submits it (one go, no resume).
+  useEffect(() => {
+    if (phase !== 'assessment') return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!submittedRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      if (!submittedRef.current && liveRef.current.started && !liveRef.current.hasResult) submitFnRef.current(true);
+    };
+  }, [phase]);
 
   // Assessment-phase guards (start runs only after reading is complete).
   if (phase === 'assessment' && start.isPending) return <PageLoader />;
@@ -288,7 +402,7 @@ export default function TakeAssessmentPage() {
               <Card key={d.questionId}>
                 <CardContent>
                   <p className="font-medium text-slate-800">{d.questionText}</p>
-                  <p className="mt-1 text-sm text-green-700">Correct answer: {Array.isArray(d.correctAnswer) ? d.correctAnswer.join(', ') : String(d.correctAnswer)}</p>
+                  <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>
                   {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
                 </CardContent>
               </Card>
@@ -347,21 +461,38 @@ export default function TakeAssessmentPage() {
             )}
           </>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <Clock className="h-4 w-4" />
-            {mats.length === 0 || allDone ? (
-              <span>Reading complete. You may start the assessment.</span>
-            ) : activeDone ? (
-              <span>This material is read. Open the remaining material(s) to finish.</span>
-            ) : (
-              <span>Keep this material open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".</span>
-            )}
-          </div>
-          <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
-            {start.isPending ? 'Starting…' : 'Continue to assessment'}
-          </Button>
-        </div>
+        {(() => {
+          const requiresAssessment = (topicQ.data as { requiresAssessment?: boolean } | undefined)?.requiresAssessment !== false;
+          return (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <Clock className="h-4 w-4" />
+                {mats.length === 0 || allDone ? (
+                  <span>Reading complete. {requiresAssessment ? 'You may start the assessment.' : 'Please confirm the acknowledgement to complete.'}</span>
+                ) : activeDone ? (
+                  <span>This material is read. Open the remaining material(s) to finish.</span>
+                ) : (
+                  <span>Keep this material open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".</span>
+                )}
+              </div>
+              {requiresAssessment ? (
+                <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
+                  {start.isPending ? 'Starting…' : 'Continue to assessment'}
+                </Button>
+              ) : (
+                <div className="flex flex-col items-end gap-2">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" disabled={!allDone} checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
+                    I have read &amp; understood (I accept the Terms &amp; Conditions).
+                  </label>
+                  <Button disabled={!allDone || !tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
+                    {ackComplete.isPending ? 'Completing…' : 'Mark as read &amp; complete'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -369,26 +500,104 @@ export default function TakeAssessmentPage() {
   // Assessment phase — the attempt has been started (reading confirmed server-side).
   if (!start.data) return <PageLoader />;
 
+  // CR-40: this assessment is already open in another tab.
+  if (tabBlocked) {
+    return (
+      <div>
+        <PageHeader title="Assessment" />
+        <Card>
+          <CardContent>
+            <p className="text-sm text-red-600">
+              This assessment is already open in another tab or window. To protect assessment integrity, it can only be taken in one place at a time. Close this tab and continue in the original one.
+            </p>
+            <Link to="/assessments" className="mt-3 inline-block">
+              <Button variant="outline">
+                <ArrowLeft className="h-4 w-4" /> Back to Assessments
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const total = questions.length;
+  const idx = Math.min(current, Math.max(0, total - 1));
+  const q = questions[idx];
+  const timed = !!start.data.assessmentTimeMinutes;
+  const mm = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+  const ss = String(timeLeft % 60).padStart(2, '0');
+  const isAnswered = (qid: string) => {
+    const a = answers[qid];
+    if (a === undefined || a === '') return false;
+    if (Array.isArray(a)) return a.length > 0;
+    if (typeof a === 'object') return Object.keys(a).length > 0;
+    return true;
+  };
+  const answeredCount = questions.filter((qq) => isAnswered(qq.id)).length;
+  const isLast = idx >= total - 1;
+
+  function handleManualSubmit() {
+    if (answeredCount < total && !window.confirm(`You have answered ${answeredCount} of ${total} questions. Submit now? This assessment cannot be resumed.`)) return;
+    submitFnRef.current(false);
+  }
+
+  const topicMeta = [start.data.topicNumber ?? start.data.topicCode, start.data.topicVersion ? `v${start.data.topicVersion}` : '']
+    .filter(Boolean)
+    .join(' • ');
+
   return (
     <div>
       <PageHeader
         title={start.data.topicTitle ? `Assessment: ${start.data.topicTitle}` : 'Assessment'}
-        description={`Attempt ${start.data.attemptNumber} of ${start.data.maxAttempts}`}
+        description={`${topicMeta ? `${topicMeta} • ` : ''}Attempt ${start.data.attemptNumber} of ${start.data.maxAttempts}`}
         actions={
-          <Button variant="ghost" onClick={() => navigate('/assessments')}>
-            Cancel
-          </Button>
+          timed ? (
+            <div className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold ${timeLeft <= 30 ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-700'}`}>
+              <Clock className="h-4 w-4" /> {mm}:{ss}
+            </div>
+          ) : undefined
         }
       />
-      <div className="space-y-4">
-        {questions.map((q, i) => (
-          <QuestionCard key={q.id} index={i} question={q} answer={answers[q.id]} onChange={(a) => setAnswers((prev) => ({ ...prev, [q.id]: a }))} />
+
+      <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        This is a single continuous attempt. Leaving this page{timed ? ' or letting the timer run out' : ''} will submit it automatically — you cannot resume.
+      </div>
+
+      <div className="mb-3 flex items-center justify-between text-sm text-slate-600">
+        <span>
+          Question {idx + 1} of {total}
+        </span>
+        <span>{answeredCount} answered</span>
+      </div>
+
+      {/* one-question-at-a-time navigator */}
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {questions.map((qq, i) => (
+          <button
+            key={qq.id}
+            type="button"
+            onClick={() => setCurrent(i)}
+            className={`h-7 w-7 rounded text-xs font-medium ${i === idx ? 'bg-primary text-white' : isAnswered(qq.id) ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}
+          >
+            {i + 1}
+          </button>
         ))}
       </div>
-      <div className="mt-6">
-        <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
-          {submit.isPending ? 'Submitting…' : 'Submit Assessment'}
+
+      {q && <QuestionCard index={idx} question={q} answer={answers[q.id]} onChange={(a) => setAnswers((prev) => ({ ...prev, [q.id]: a }))} />}
+
+      <div className="mt-6 flex items-center justify-between">
+        <Button variant="outline" disabled={idx === 0} onClick={() => setCurrent((c) => Math.max(0, c - 1))}>
+          Previous
         </Button>
+        {isLast ? (
+          <Button onClick={handleManualSubmit} disabled={submit.isPending}>
+            {submit.isPending ? 'Submitting…' : 'Submit Assessment'}
+          </Button>
+        ) : (
+          <Button onClick={() => setCurrent((c) => Math.min(total - 1, c + 1))}>Next</Button>
+        )}
       </div>
     </div>
   );

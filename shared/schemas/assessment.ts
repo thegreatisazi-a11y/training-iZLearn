@@ -4,7 +4,11 @@ import { uuid } from './common';
 /** Submit answers for a started attempt: { questionId: answer }. */
 export const submitAssessmentSchema = z.object({
   attemptId: uuid,
-  answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
+  // A single value (true/false, fill-in, single choice), an array (multi-choice),
+  // or a { left: right } map (CR-36, MATCH_THE_WORDS).
+  answers: z.record(z.string(), z.union([z.string(), z.array(z.string()), z.record(z.string(), z.string())])),
+  /** CR-38: set when the attempt was force-submitted on timeout or leaving the page. */
+  autoSubmitted: z.boolean().optional(),
 });
 export type SubmitAssessmentInput = z.infer<typeof submitAssessmentSchema>;
 

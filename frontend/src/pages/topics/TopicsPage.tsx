@@ -6,6 +6,7 @@ import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
+import { MultiSelect } from '@/components/common/MultiSelect';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Field } from '@/components/ui/input';
@@ -64,6 +65,8 @@ const emptyForm = {
   materialViewSeconds: '',
   effectiveDate: '',
   reviewDate: '',
+  sequenceIndex: '', // CR-29
+  signatoryUserIds: [] as string[], // CR-51
   randomizeQuestions: true,
   showExplanations: true,
   blockAfterMaxAttempts: true,
@@ -98,6 +101,8 @@ export default function TopicsPage() {
   const deptOptions = ((departments.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const roleOptions = ((roles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
+  const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
+  const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
 
   const createMut = useMutation({
     mutationFn: (status: 'DRAFT' | 'PUBLISHED') =>
@@ -122,6 +127,8 @@ export default function TopicsPage() {
         materialViewSeconds: form.materialViewSeconds ? Number(form.materialViewSeconds) : undefined,
         effectiveDate: form.effectiveDate || undefined,
         reviewDate: form.reviewDate || undefined,
+        sequenceIndex: form.sequenceIndex ? Number(form.sequenceIndex) : undefined,
+        signatoryUserIds: form.signatoryUserIds.length ? form.signatoryUserIds : undefined,
       }),
     onSuccess: (_d, status) => {
       toast.success(status === 'PUBLISHED' ? 'Topic created & published' : 'Draft topic created');
@@ -393,6 +400,26 @@ export default function TopicsPage() {
           </Field>
           <Field label="Next Review Date (optional)">
             <Input type="date" value={form.reviewDate} onChange={(e) => setForm({ ...form, reviewDate: e.target.value })} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Sequence order (optional)">
+            <Input
+              type="number"
+              min={1}
+              value={form.sequenceIndex}
+              onChange={(e) => setForm({ ...form, sequenceIndex: e.target.value })}
+              placeholder="e.g. 1 — must be completed before higher numbers"
+            />
+          </Field>
+          <Field label="Signatories — prepared / reviewed / approved (optional)">
+            <MultiSelect
+              options={signatoryOptions}
+              value={form.signatoryUserIds}
+              onChange={(ids) => setForm({ ...form, signatoryUserIds: ids })}
+              placeholder="Search users…"
+              heightClass="h-32"
+            />
           </Field>
         </div>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">

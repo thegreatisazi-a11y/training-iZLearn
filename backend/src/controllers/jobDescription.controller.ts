@@ -23,6 +23,16 @@ export const transition = asyncHandler(async (req, res) =>
   sendSuccess(res, await svc.transitionJD(req.params.id, req.body, req), 'Job description updated'),
 );
 
+export const mine = asyncHandler(async (req, res) => sendSuccess(res, await svc.getMyJD(req.user!.id)));
+
+export const assignFunctionalRole = asyncHandler(async (req, res) =>
+  sendCreated(res, await svc.assignFunctionalRole(req.body.userId, req.body.functionalRoleId, req), 'Functional role assigned'),
+);
+
+export const acknowledge = asyncHandler(async (req, res) =>
+  sendSuccess(res, await svc.acknowledgeJD(req.params.id, req.body, req), 'Job description acknowledged'),
+);
+
 export const fromTemplate = asyncHandler(async (req, res) => {
   const { userId, departmentId, roleId } = req.body;
   sendCreated(res, await svc.createFromTemplate(userId, departmentId, roleId, req.user!.id), 'Job description created from template');

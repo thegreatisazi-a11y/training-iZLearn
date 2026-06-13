@@ -43,7 +43,12 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const setSignaturePassword = asyncHandler(async (req: Request, res: Response) => {
-  const result = await svc.setSignaturePassword(req.user!.id, req.body.loginPassword, req.body.signaturePassword);
+  const result = await svc.setSignaturePassword(
+    req.user!.id,
+    req.body.loginPassword,
+    req.body.signaturePassword,
+    req.body.oldSignaturePassword,
+  );
   sendSuccess(res, result, 'Signature password set');
 });
 

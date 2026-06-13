@@ -23,14 +23,129 @@ interface TNI {
   status: string;
 }
 
+interface MatrixData {
+  roles: { id: string; roleName: string }[];
+  topics: { id: string; title: string; topicCode: string; topicNumber?: string | null }[];
+  cells: { roleId: string; topicId: string; isRequired: boolean }[];
+}
+
 const STATUS_OPTIONS = tniStatus.options.map((s) => ({ value: s, label: s }));
 const emptyForm = { userId: '', topicId: '', justification: '' };
+
+/**
+ * CR-46/47/49: the role × topic requirement matrix. Toggling a cell saves the
+ * Required flag; "Assign from matrix" e-signs and creates assignments for every
+ * required (role, topic) pair. TNI is the primary assignment workflow.
+ */
+function RequirementMatrix() {
+  const qc = useQueryClient();
+  const canEdit = useAuthStore((s) => s.hasPermission)('tni', 'edit');
+  const canAssign = useAuthStore((s) => s.hasPermission)('tni', 'assign');
+  const [signOpen, setSignOpen] = useState(false);
+  const [assignLater, setAssignLater] = useState(false);
+  const [activateOn, setActivateOn] = useState('');
+  const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
+
+  const setMut = useMutation({
+    mutationFn: (body: { roleId: string; topicId: string; isRequired: boolean }) => svc.tni.setRequirement(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tni-matrix'] }),
+    onError: (e) => toast.error(apiError(e)),
+  });
+  const applyMut = useMutation({
+    mutationFn: (sig: ESignaturePayload) => {
+      const { reason, ...signature } = sig;
+      return svc.tni.applyMatrix({
+        reasonForChange: (reason ?? '').trim(),
+        activateLater: assignLater || undefined,
+        activateOn: assignLater && activateOn ? activateOn : undefined,
+        signature,
+      });
+    },
+    onSuccess: (r) => {
+      const count = (r as { created?: number })?.created ?? 0;
+      toast.success(`${count} assignment(s) created from the matrix.`);
+      setSignOpen(false);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  if (isLoading || !data) return <div className="py-8 text-center text-sm text-slate-500">Loading matrix…</div>;
+  const isRequired = (roleId: string, topicId: string) =>
+    data.cells.some((c) => c.roleId === roleId && c.topicId === topicId && c.isRequired);
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm text-slate-600">Mark which published topics are <strong>Required</strong> for each role, then assign.</p>
+        {canAssign && (
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5 text-sm text-slate-600">
+              <input type="checkbox" checked={assignLater} onChange={(e) => setAssignLater(e.target.checked)} />
+              Assign later
+            </label>
+            {assignLater && (
+              <Input type="date" className="max-w-[150px]" value={activateOn} onChange={(e) => setActivateOn(e.target.value)} title="Activate on (optional)" />
+            )}
+            <Button onClick={() => setSignOpen(true)} disabled={data.topics.length === 0}>
+              {assignLater ? 'Schedule assignment' : 'Assign from matrix'}
+            </Button>
+          </div>
+        )}
+      </div>
+      {data.topics.length === 0 ? (
+        <p className="py-8 text-center text-sm text-slate-500">No published topics yet.</p>
+      ) : (
+        <div className="overflow-x-auto rounded border border-slate-200">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Topic</th>
+                {data.roles.map((r) => (
+                  <th key={r.id} className="px-3 py-2 text-center font-medium">{r.roleName}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.topics.map((t) => (
+                <tr key={t.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-2 text-slate-700">
+                    <span className="font-mono text-xs text-slate-400">{t.topicNumber || t.topicCode}</span> {t.title}
+                  </td>
+                  {data.roles.map((r) => (
+                    <td key={r.id} className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        disabled={!canEdit || setMut.isPending}
+                        checked={isRequired(r.id, t.id)}
+                        onChange={(e) => setMut.mutate({ roleId: r.id, topicId: t.id, isRequired: e.target.checked })}
+                        title="Required for this role"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ESignatureModal
+        open={signOpen}
+        onClose={() => setSignOpen(false)}
+        title="Sign — assign training from matrix"
+        defaultMeaning="Approved"
+        requireReason
+        onConfirm={async (sig) => { await applyMut.mutateAsync(sig); }}
+      />
+    </div>
+  );
+}
 
 export default function TNIPage() {
   const qc = useQueryClient();
   const canWrite = useAuthStore((s) => s.hasPermission)('tni', 'write');
   const canApprove = useAuthStore((s) => s.hasPermission)('tni', 'approve');
 
+  const [view, setView] = useState<'requests' | 'matrix'>('requests');
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('');
   const [creating, setCreating] = useState(false);
@@ -114,9 +229,9 @@ export default function TNIPage() {
     <div>
       <PageHeader
         title="Training Needs Identification"
-        description="Identify and approve role-based training needs"
+        description="Identify and approve role-based training needs — the primary assignment workflow"
         actions={
-          canWrite && (
+          canWrite && view === 'requests' && (
             <Button onClick={() => setCreating(true)}>
               <Plus className="h-4 w-4" /> New TNI
             </Button>
@@ -124,6 +239,25 @@ export default function TNIPage() {
         }
       />
 
+      <div className="mb-4 flex gap-2 border-b border-slate-200">
+        <button
+          className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${view === 'requests' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          onClick={() => setView('requests')}
+        >
+          Requests
+        </button>
+        <button
+          className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${view === 'matrix' ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+          onClick={() => setView('matrix')}
+        >
+          Requirement Matrix
+        </button>
+      </div>
+
+      {view === 'matrix' && <RequirementMatrix />}
+
+      {view === 'requests' && (
+      <>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           className="max-w-[180px]"
@@ -204,6 +338,8 @@ export default function TNIPage() {
         title={decision?.type === 'REJECT' ? 'Sign — Reject TNI' : 'Sign — Approve TNI'}
         onConfirm={async (sig) => { await decideMut.mutateAsync(sig); }}
       />
+      </>
+      )}
     </div>
   );
 }

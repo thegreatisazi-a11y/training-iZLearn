@@ -15,11 +15,29 @@ export function Label({ className, ...props }: LabelHTMLAttributes<HTMLLabelElem
   return <label className={cn('iz-label', className)} {...props} />;
 }
 
-export function Field({ label, error, children }: { label?: string; error?: string; children: React.ReactNode }) {
+export function Field({
+  label,
+  error,
+  required,
+  hint,
+  children,
+}: {
+  label?: string;
+  error?: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="mb-3">
-      {label && <Label>{label}</Label>}
+      {label && (
+        <Label>
+          {label}
+          {required && <span className="ml-0.5 text-red-600" aria-hidden="true">*</span>}
+        </Label>
+      )}
       {children}
+      {hint && !error && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );

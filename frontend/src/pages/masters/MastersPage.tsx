@@ -41,6 +41,15 @@ const TABS = [
   { key: 'document-types', label: 'Document Types' },
 ];
 
+/** Active/Inactive toggle shown per row. Deactivating is the soft-delete replacement (CR-44). */
+function StatusToggleButton({ isActive, onClick }: { isActive: boolean; onClick: () => void }) {
+  return (
+    <Button size="sm" variant="outline" onClick={onClick}>
+      {isActive ? 'Deactivate' : 'Activate'}
+    </Button>
+  );
+}
+
 function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
@@ -48,7 +57,8 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
   const [form, setForm] = useState({ name: '', description: '' });
   const [edit, setEdit] = useState<MasterRow | null>(null);
   const [editForm, setEditForm] = useState({ name: '', description: '' });
-  const [reasonRow, setReasonRow] = useState<MasterRow | null>(null);
+  // Both editing and toggling active status require a reason for change (21 CFR Part 11).
+  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: MasterRow } | null>(null);
 
   const params = { page, pageSize: 50, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['locations', params], queryFn: () => svc.locations.list(params) });
@@ -69,7 +79,7 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['locations'] });
       toast.success('Location updated.');
-      setReasonRow(null);
+      setReasonAction(null);
       setEdit(null);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -89,9 +99,12 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
       header: 'Actions',
       render: (r) =>
         canWrite ? (
-          <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
-            Edit
-          </Button>
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
+              Edit
+            </Button>
+            <StatusToggleButton isActive={r.isActive} onClick={() => setReasonAction({ type: 'toggle', row: r })} />
+          </div>
         ) : (
           '—'
         ),
@@ -133,7 +146,7 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
           </>
         }
       >
-        <Field label="Name">
+        <Field label="Name" required>
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         </Field>
         <Field label="Description">
@@ -150,13 +163,13 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
             <Button variant="outline" onClick={() => setEdit(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.name} onClick={() => edit && setReasonRow(edit)}>
+            <Button disabled={!editForm.name} onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}>
               Save…
             </Button>
           </>
         }
       >
-        <Field label="Name">
+        <Field label="Name" required>
           <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
         </Field>
         <Field label="Description">
@@ -165,14 +178,23 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
       </Dialog>
 
       <ReasonForChangeDialog
-        open={!!reasonRow}
-        onClose={() => setReasonRow(null)}
+        open={!!reasonAction}
+        title={reasonAction?.type === 'toggle' ? (reasonAction.row.isActive ? 'Reason for Deactivation' : 'Reason for Activation') : 'Reason for Change'}
+        onClose={() => setReasonAction(null)}
         onConfirm={async (reasonForChange) => {
-          if (!reasonRow) return;
-          await updateMutation.mutateAsync({
-            id: reasonRow.id,
-            body: { name: editForm.name, description: editForm.description || undefined, isActive: reasonRow.isActive, reasonForChange },
-          });
+          if (!reasonAction) return;
+          if (reasonAction.type === 'toggle') {
+            const r = reasonAction.row;
+            await updateMutation.mutateAsync({
+              id: r.id,
+              body: { name: r.name, description: r.description || undefined, isActive: !r.isActive, reasonForChange },
+            });
+          } else {
+            await updateMutation.mutateAsync({
+              id: reasonAction.row.id,
+              body: { name: editForm.name, description: editForm.description || undefined, isActive: reasonAction.row.isActive, reasonForChange },
+            });
+          }
         }}
       />
     </>
@@ -186,7 +208,8 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
   const [form, setForm] = useState({ name: '', locationId: '' });
   const [edit, setEdit] = useState<MasterRow | null>(null);
   const [editForm, setEditForm] = useState({ name: '', locationId: '' });
-  const [reasonRow, setReasonRow] = useState<MasterRow | null>(null);
+  // Both editing and toggling active status require a reason for change (21 CFR Part 11).
+  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: MasterRow } | null>(null);
 
   const params = { page, pageSize: 50, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['departments', params], queryFn: () => svc.departments.list(params) });
@@ -211,7 +234,7 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['departments'] });
       toast.success('Department updated.');
-      setReasonRow(null);
+      setReasonAction(null);
       setEdit(null);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -231,9 +254,12 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
       header: 'Actions',
       render: (r) =>
         canWrite ? (
-          <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
-            Edit
-          </Button>
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
+              Edit
+            </Button>
+            <StatusToggleButton isActive={r.isActive} onClick={() => setReasonAction({ type: 'toggle', row: r })} />
+          </div>
         ) : (
           '—'
         ),
@@ -275,10 +301,10 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
           </>
         }
       >
-        <Field label="Name">
+        <Field label="Name" required>
           <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
         </Field>
-        <Field label="Location">
+        <Field label="Location" required>
           <Select placeholder="Select location…" options={locationOptions} value={form.locationId} onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))} />
         </Field>
       </Dialog>
@@ -292,29 +318,38 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
             <Button variant="outline" onClick={() => setEdit(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.name || !editForm.locationId} onClick={() => edit && setReasonRow(edit)}>
+            <Button disabled={!editForm.name || !editForm.locationId} onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}>
               Save…
             </Button>
           </>
         }
       >
-        <Field label="Name">
+        <Field label="Name" required>
           <Input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
         </Field>
-        <Field label="Location">
+        <Field label="Location" required>
           <Select placeholder="Select location…" options={locationOptions} value={editForm.locationId} onChange={(e) => setEditForm((f) => ({ ...f, locationId: e.target.value }))} />
         </Field>
       </Dialog>
 
       <ReasonForChangeDialog
-        open={!!reasonRow}
-        onClose={() => setReasonRow(null)}
+        open={!!reasonAction}
+        title={reasonAction?.type === 'toggle' ? (reasonAction.row.isActive ? 'Reason for Deactivation' : 'Reason for Activation') : 'Reason for Change'}
+        onClose={() => setReasonAction(null)}
         onConfirm={async (reasonForChange) => {
-          if (!reasonRow) return;
-          await updateMutation.mutateAsync({
-            id: reasonRow.id,
-            body: { name: editForm.name, locationId: editForm.locationId, isActive: reasonRow.isActive, reasonForChange },
-          });
+          if (!reasonAction) return;
+          if (reasonAction.type === 'toggle') {
+            const r = reasonAction.row;
+            await updateMutation.mutateAsync({
+              id: r.id,
+              body: { name: r.name, locationId: r.locationId, isActive: !r.isActive, reasonForChange },
+            });
+          } else {
+            await updateMutation.mutateAsync({
+              id: reasonAction.row.id,
+              body: { name: editForm.name, locationId: editForm.locationId, isActive: reasonAction.row.isActive, reasonForChange },
+            });
+          }
         }}
       />
     </>
@@ -328,7 +363,8 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [form, setForm] = useState({ code: '', displayName: '', description: '' });
   const [edit, setEdit] = useState<TypeRow | null>(null);
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
-  const [deleteRow, setDeleteRow] = useState<TypeRow | null>(null);
+  // Both editing and toggling active status require a reason for change (21 CFR Part 11).
+  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
 
   const params = { page, pageSize: 50, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['training-types', params], queryFn: () => svc.master.listTrainingTypes(params) });
@@ -349,17 +385,8 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['training-types'] });
       toast.success('Training type updated.');
+      setReasonAction(null);
       setEdit(null);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: ({ id, reasonForChange }: { id: string; reasonForChange: string }) => svc.master.deleteTrainingType(id, reasonForChange),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['training-types'] });
-      toast.success('Training type removed.');
-      setDeleteRow(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -382,11 +409,7 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
         canWrite ? (
           <div className="flex gap-1">
             <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit</Button>
-            {!r.isBuiltIn && (
-              <Button size="sm" variant="outline" onClick={() => setDeleteRow(r)}>
-                Remove
-              </Button>
-            )}
+            <StatusToggleButton isActive={r.isActive} onClick={() => setReasonAction({ type: 'toggle', row: r })} />
           </div>
         ) : '—',
     },
@@ -428,10 +451,10 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           </>
         }
       >
-        <Field label="Code (unique, e.g. SIMULATION)">
+        <Field label="Code (unique, e.g. SIMULATION)" required>
           <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="SIMULATION" />
         </Field>
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
@@ -447,35 +470,40 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           <>
             <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
             <Button
-              disabled={!editForm.displayName || updateMutation.isPending}
-              onClick={() => edit && updateMutation.mutate({ id: edit.id, body: { displayName: editForm.displayName, description: editForm.description || undefined, isActive: editForm.isActive } })}
+              disabled={!editForm.displayName}
+              onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}
             >
-              {updateMutation.isPending ? 'Saving…' : 'Save'}
+              Save…
             </Button>
           </>
         }
       >
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={editForm.displayName} onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
           <Input value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
         </Field>
-        <Field label="Active">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={editForm.isActive} onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))} />
-            Active
-          </label>
-        </Field>
       </Dialog>
 
       <ReasonForChangeDialog
-        open={!!deleteRow}
-        title="Reason for Removal"
-        onClose={() => setDeleteRow(null)}
+        open={!!reasonAction}
+        title={reasonAction?.type === 'toggle' ? (reasonAction.row.isActive ? 'Reason for Deactivation' : 'Reason for Activation') : 'Reason for Change'}
+        onClose={() => setReasonAction(null)}
         onConfirm={async (reasonForChange) => {
-          if (!deleteRow) return;
-          await deleteMutation.mutateAsync({ id: deleteRow.id, reasonForChange });
+          if (!reasonAction) return;
+          if (reasonAction.type === 'toggle') {
+            const r = reasonAction.row;
+            await updateMutation.mutateAsync({
+              id: r.id,
+              body: { displayName: r.displayName, description: r.description || undefined, isActive: !r.isActive, reasonForChange },
+            });
+          } else {
+            await updateMutation.mutateAsync({
+              id: reasonAction.row.id,
+              body: { displayName: editForm.displayName, description: editForm.description || undefined, isActive: editForm.isActive, reasonForChange },
+            });
+          }
         }}
       />
     </>
@@ -489,7 +517,8 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [form, setForm] = useState({ code: '', displayName: '', description: '' });
   const [edit, setEdit] = useState<TypeRow | null>(null);
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
-  const [deleteRow, setDeleteRow] = useState<TypeRow | null>(null);
+  // Both editing and toggling active status require a reason for change (21 CFR Part 11).
+  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
 
   const params = { page, pageSize: 50, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['document-types', params], queryFn: () => svc.master.listDocumentTypes(params) });
@@ -510,17 +539,8 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['document-types'] });
       toast.success('Document type updated.');
+      setReasonAction(null);
       setEdit(null);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: ({ id, reasonForChange }: { id: string; reasonForChange: string }) => svc.master.deleteDocumentType(id, reasonForChange),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['document-types'] });
-      toast.success('Document type removed.');
-      setDeleteRow(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -542,9 +562,7 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
         canWrite ? (
           <div className="flex gap-1">
             <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit</Button>
-            <Button size="sm" variant="outline" onClick={() => setDeleteRow(r)}>
-              Remove
-            </Button>
+            <StatusToggleButton isActive={r.isActive} onClick={() => setReasonAction({ type: 'toggle', row: r })} />
           </div>
         ) : '—',
     },
@@ -586,10 +604,10 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           </>
         }
       >
-        <Field label="Code (unique, e.g. TRAINING_RECORD)">
+        <Field label="Code (unique, e.g. TRAINING_RECORD)" required>
           <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="TRAINING_RECORD" />
         </Field>
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
@@ -605,35 +623,40 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           <>
             <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
             <Button
-              disabled={!editForm.displayName || updateMutation.isPending}
-              onClick={() => edit && updateMutation.mutate({ id: edit.id, body: { displayName: editForm.displayName, description: editForm.description || undefined, isActive: editForm.isActive } })}
+              disabled={!editForm.displayName}
+              onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}
             >
-              {updateMutation.isPending ? 'Saving…' : 'Save'}
+              Save…
             </Button>
           </>
         }
       >
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={editForm.displayName} onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
           <Input value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
         </Field>
-        <Field label="Active">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={editForm.isActive} onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))} />
-            Active
-          </label>
-        </Field>
       </Dialog>
 
       <ReasonForChangeDialog
-        open={!!deleteRow}
-        title="Reason for Removal"
-        onClose={() => setDeleteRow(null)}
+        open={!!reasonAction}
+        title={reasonAction?.type === 'toggle' ? (reasonAction.row.isActive ? 'Reason for Deactivation' : 'Reason for Activation') : 'Reason for Change'}
+        onClose={() => setReasonAction(null)}
         onConfirm={async (reasonForChange) => {
-          if (!deleteRow) return;
-          await deleteMutation.mutateAsync({ id: deleteRow.id, reasonForChange });
+          if (!reasonAction) return;
+          if (reasonAction.type === 'toggle') {
+            const r = reasonAction.row;
+            await updateMutation.mutateAsync({
+              id: r.id,
+              body: { displayName: r.displayName, description: r.description || undefined, isActive: !r.isActive, reasonForChange },
+            });
+          } else {
+            await updateMutation.mutateAsync({
+              id: reasonAction.row.id,
+              body: { displayName: editForm.displayName, description: editForm.description || undefined, isActive: editForm.isActive, reasonForChange },
+            });
+          }
         }}
       />
     </>
@@ -647,8 +670,8 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
   const [form, setForm] = useState({ code: '', displayName: '', description: '' });
   const [edit, setEdit] = useState<TypeRow | null>(null);
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
-  // Designation update + delete both require a reason for change (21 CFR Part 11).
-  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'delete'; row: TypeRow } | null>(null);
+  // Both editing and toggling active status require a reason for change (21 CFR Part 11).
+  const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
 
   const params = { page, pageSize: 50, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['designations', params], queryFn: () => svc.master.listDesignations(params) });
@@ -675,16 +698,6 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
     onError: (e) => toast.error(apiError(e)),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: ({ id, reasonForChange }: { id: string; reasonForChange: string }) => svc.master.deleteDesignation(id, reasonForChange),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['designations'] });
-      toast.success('Designation removed.');
-      setReasonAction(null);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
   function openEdit(row: TypeRow) {
     setEdit(row);
     setEditForm({ displayName: row.displayName, description: row.description ?? '', isActive: row.isActive });
@@ -702,9 +715,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
         canWrite ? (
           <div className="flex gap-1">
             <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit</Button>
-            <Button size="sm" variant="outline" onClick={() => setReasonAction({ type: 'delete', row: r })}>
-              Remove
-            </Button>
+            <StatusToggleButton isActive={r.isActive} onClick={() => setReasonAction({ type: 'toggle', row: r })} />
           </div>
         ) : '—',
     },
@@ -746,10 +757,10 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
           </>
         }
       >
-        <Field label="Code (unique, e.g. SR_MANAGER)">
+        <Field label="Code (unique, e.g. SR_MANAGER)" required>
           <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="SR_MANAGER" />
         </Field>
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
@@ -770,28 +781,26 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
           </>
         }
       >
-        <Field label="Display Name">
+        <Field label="Display Name" required>
           <Input value={editForm.displayName} onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
         <Field label="Description">
           <Input value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
         </Field>
-        <Field label="Active">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={editForm.isActive} onChange={(e) => setEditForm((f) => ({ ...f, isActive: e.target.checked }))} />
-            Active
-          </label>
-        </Field>
       </Dialog>
 
       <ReasonForChangeDialog
         open={!!reasonAction}
-        title={reasonAction?.type === 'delete' ? 'Reason for Removal' : 'Reason for Change'}
+        title={reasonAction?.type === 'toggle' ? (reasonAction.row.isActive ? 'Reason for Deactivation' : 'Reason for Activation') : 'Reason for Change'}
         onClose={() => setReasonAction(null)}
         onConfirm={async (reasonForChange) => {
           if (!reasonAction) return;
-          if (reasonAction.type === 'delete') {
-            await deleteMutation.mutateAsync({ id: reasonAction.row.id, reasonForChange });
+          if (reasonAction.type === 'toggle') {
+            const r = reasonAction.row;
+            await updateMutation.mutateAsync({
+              id: r.id,
+              body: { displayName: r.displayName, description: r.description || undefined, isActive: !r.isActive, reasonForChange },
+            });
           } else {
             await updateMutation.mutateAsync({
               id: reasonAction.row.id,

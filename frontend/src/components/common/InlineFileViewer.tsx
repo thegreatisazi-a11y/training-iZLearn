@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
+import type { MouseEvent } from 'react';
 import { api, apiError } from '@/lib/axios';
-import { Button } from '../ui/button';
-import { svc } from '@/services';
 
 /**
- * In-app file viewer. Fetches the protected material as a blob (so the JWT auth
- * header is sent) and renders it inline: PDFs/images in-page, video with a player,
- * and a download fallback for types the browser cannot preview. Used by the timed
+ * In-app LOCKED file viewer (CR-32). Fetches the protected material as a blob (so
+ * the JWT auth header is sent) and renders it inline as a controlled, view-only
+ * surface for ALL roles: PDFs/images/video are shown without any download, print,
+ * open-in-Drive, save, or text-selection affordance. Unsupported types show an
+ * informational message rather than a download fallback. Used by the timed
  * training-material step (Phase 6) and the materials "View" action (Phase 7.1).
  */
 export function InlineFileViewer({
@@ -54,16 +54,60 @@ export function InlineFileViewer({
   if (error) return <div className="text-sm text-red-600">{error}</div>;
   if (!url) return null;
 
-  if (isPdf) return <iframe title={fileName} src={url} className={`w-full rounded border border-slate-200 ${heightClass}`} />;
-  if (isImage) return <img alt={fileName} src={url} className={`mx-auto max-w-full rounded border border-slate-200 ${heightClass} object-contain`} />;
-  if (isVideo) return <video src={url} controls className={`w-full rounded border border-slate-200 ${heightClass}`} />;
+  // Locked container: blocks the context menu (Save/Print/etc.) and disables
+  // text highlighting/selection for the rendered material.
+  const lockProps = {
+    onContextMenu: (e: MouseEvent) => e.preventDefault(),
+    className: 'select-none',
+    style: { userSelect: 'none' as const },
+  };
+
+  if (isPdf) {
+    // Append viewer params so the native PDF toolbar (download/print/open-in-Drive) is hidden.
+    return (
+      <div {...lockProps}>
+        <iframe
+          title={fileName}
+          src={`${url}#toolbar=0&navpanes=0&scrollbar=0`}
+          className={`w-full rounded border border-slate-200 ${heightClass}`}
+        />
+      </div>
+    );
+  }
+
+  if (isImage) {
+    return (
+      <div {...lockProps}>
+        <img
+          alt={fileName}
+          src={url}
+          draggable={false}
+          className={`mx-auto max-w-full rounded border border-slate-200 ${heightClass} object-contain`}
+        />
+      </div>
+    );
+  }
+
+  if (isVideo) {
+    return (
+      <div {...lockProps}>
+        <video
+          src={url}
+          controls
+          controlsList="nodownload noplaybackrate"
+          disablePictureInPicture
+          onContextMenu={(e) => e.preventDefault()}
+          className={`w-full rounded border border-slate-200 ${heightClass}`}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="rounded border border-slate-200 bg-slate-50 p-6 text-center">
-      <p className="mb-3 text-sm text-slate-600">This file type ({ext || 'unknown'}) cannot be previewed in the browser.</p>
-      <Button variant="outline" onClick={() => svc.materials.download(materialId, fileName)}>
-        <Download className="h-4 w-4" /> Download to view
-      </Button>
+      <p className="text-sm text-slate-600">
+        This file can only be viewed in the controlled viewer and cannot be downloaded.
+      </p>
     </div>
   );
 }

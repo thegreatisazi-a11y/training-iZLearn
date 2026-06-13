@@ -132,6 +132,11 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       departmentId: input.departmentId ?? null,
       designationId: input.designationId ?? null,
       roleId: input.roleId ?? null,
+      roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue,
+      requiresAssessment: input.requiresAssessment ?? true,
+      assessmentTimeMinutes: input.assessmentTimeMinutes ?? null,
+      signatoryUserIds: (input.signatoryUserIds ?? []) as Prisma.InputJsonValue,
+      sequenceIndex: input.sequenceIndex ?? null,
       durationMinutes: input.durationMinutes,
       passingScorePercent: input.passingScorePercent,
       maxAttempts: input.maxAttempts,
@@ -166,6 +171,11 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId ?? null } : {}),
       ...(input.designationId !== undefined ? { designationId: input.designationId ?? null } : {}),
       ...(input.roleId !== undefined ? { roleId: input.roleId ?? null } : {}),
+      ...(input.roleIds !== undefined ? { roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue } : {}),
+      ...(input.requiresAssessment !== undefined ? { requiresAssessment: input.requiresAssessment } : {}),
+      ...(input.assessmentTimeMinutes !== undefined ? { assessmentTimeMinutes: input.assessmentTimeMinutes ?? null } : {}),
+      ...(input.signatoryUserIds !== undefined ? { signatoryUserIds: (input.signatoryUserIds ?? []) as Prisma.InputJsonValue } : {}),
+      ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex ?? null } : {}),
       ...(input.durationMinutes !== undefined ? { durationMinutes: input.durationMinutes } : {}),
       ...(input.refresherIntervalMonths !== undefined
         ? { refresherIntervalMonths: input.refresherIntervalMonths }
@@ -191,17 +201,57 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
  */
 export async function updateTopicStatus(id: string, status: TopicStatus, req: Request) {
   const topic = await getTopic(id);
-  if (status === 'PUBLISHED' || status === 'ARCHIVED') {
-    await signFromRequest(req, 'TrainingTopic', id, status === 'PUBLISHED' ? 'Approved' : 'Performed');
-  }
-  return prisma.trainingTopic.update({
+  // Every controlled lifecycle transition is e-signed (publish / unpublish / archive).
+  const meaning = status === 'PUBLISHED' ? 'Approved' : status === 'ARCHIVED' ? 'Performed' : 'Reviewed';
+  await signFromRequest(req, 'TrainingTopic', id, meaning);
+  const updated = await prisma.trainingTopic.update({
     where: { id },
     data: {
       status,
       ...(status === 'PUBLISHED' && !topic.effectiveDate ? { effectiveDate: new Date() } : {}),
-      ...(status === 'ARCHIVED' ? { isActive: false } : {}),
+      // CR-26: Unpublish (→ DRAFT / UNDER_REVIEW) must NOT archive — it returns the
+      // topic to an editable, active state. Only an explicit Archive deactivates it.
+      isActive: status !== 'ARCHIVED',
     },
   });
+  // CR-51: on publish, the prepared/reviewed/approved signatories are deemed trained
+  // on this course — record a COMPLETED assignment so it shows in their records.
+  if (status === 'PUBLISHED') await markSignatoriesComplete(updated.id, req.user!.id);
+  return updated;
+}
+
+/**
+ * CR-51: ensure each signatory user has a COMPLETED training record for this topic.
+ * Best-effort — never blocks the publish transition.
+ */
+async function markSignatoriesComplete(topicId: string, actorId: string) {
+  try {
+    const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId } });
+    const signatoryIds = Array.from(new Set(((topic?.signatoryUserIds as string[]) ?? []).filter(Boolean)));
+    if (!signatoryIds.length) return;
+    const now = new Date();
+    for (const userId of signatoryIds) {
+      const existing = await prisma.trainingAssignment.findFirst({ where: { userId, topicId, isDeleted: false } });
+      if (existing) {
+        if (existing.status !== 'COMPLETED') {
+          await prisma.trainingAssignment.update({ where: { id: existing.id }, data: { status: 'COMPLETED' } });
+        }
+      } else {
+        await prisma.trainingAssignment.create({
+          data: {
+            userId,
+            topicId,
+            assignmentType: 'PERSON_SPECIFIC',
+            status: 'COMPLETED',
+            assignedBy: actorId,
+            createdBy: actorId,
+          },
+        });
+      }
+    }
+  } catch {
+    /* signatory auto-completion is best-effort */
+  }
 }
 
 /** Controlled change — changing the passing score requires an e-signature. */
@@ -256,6 +306,11 @@ export async function reviseTopic(id: string, req: Request) {
       departmentId: old.departmentId,
       designationId: old.designationId,
       roleId: old.roleId,
+      roleIds: old.roleIds as Prisma.InputJsonValue,
+      requiresAssessment: old.requiresAssessment,
+      assessmentTimeMinutes: old.assessmentTimeMinutes,
+      signatoryUserIds: old.signatoryUserIds as Prisma.InputJsonValue,
+      sequenceIndex: old.sequenceIndex,
       durationMinutes: old.durationMinutes,
       passingScorePercent: old.passingScorePercent,
       maxAttempts: old.maxAttempts,
@@ -324,6 +379,7 @@ export async function reviseTopic(id: string, req: Request) {
         options: q.options === null ? null : (q.options as Prisma.InputJsonValue),
         correctAnswer: q.correctAnswer as Prisma.InputJsonValue,
         explanation: q.explanation,
+        helpText: q.helpText,
         isMandatory: q.isMandatory,
         createdBy: actorId,
       },

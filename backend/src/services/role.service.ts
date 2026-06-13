@@ -1,7 +1,9 @@
+import { Request } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
+import { signFromRequest } from './eSignature.service';
 import { deriveLegacyFlags } from '@izlearn/shared';
 import type { CreateRoleInput, UpdateRoleInput, PaginationQuery, PermissionMatrix } from '@izlearn/shared';
 
@@ -29,7 +31,15 @@ export async function listRoles(q: PaginationQuery) {
   const where: Prisma.RoleWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
-    ...(q.search ? { roleName: { contains: q.search, mode: 'insensitive' } } : {}),
+    // CR-4: search matches the role name OR its description.
+    ...(q.search
+      ? {
+          OR: [
+            { roleName: { contains: q.search, mode: 'insensitive' } },
+            { description: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
   const [data, total] = await Promise.all([
     prisma.role.findMany({
@@ -49,19 +59,24 @@ export async function getRole(id: string) {
   return role;
 }
 
-export async function createRole(input: CreateRoleInput, createdBy: string) {
+export async function createRole(input: CreateRoleInput, req: Request) {
+  // CR-6: creating a role is a controlled action — two-component e-signature.
+  await signFromRequest(req, 'Role', 'new', 'Approved');
   return prisma.role.create({
     data: {
       roleName: input.roleName,
       description: input.description ?? null,
       permissions: normalizePermissions(input.permissions),
-      createdBy,
+      createdBy: req.user!.id,
     },
   });
 }
 
-export async function updateRole(id: string, input: UpdateRoleInput) {
+export async function updateRole(id: string, input: UpdateRoleInput, req: Request) {
   await getRole(id);
+  // CR-6: role/permission edits require an electronic signature (username +
+  // signature password + confirm + reason), captured here before the write.
+  await signFromRequest(req, 'Role', id, 'Approved');
   if (input.permissions !== undefined) {
     auditContext.setActionOverride('PERMISSION_CHANGE');
   }
@@ -75,8 +90,9 @@ export async function updateRole(id: string, input: UpdateRoleInput) {
   });
 }
 
-/** Soft-delete (deactivate) — the only kind of delete for roles. */
-export async function deactivateRole(id: string) {
+/** Soft-delete (deactivate) — the only kind of delete for roles. CR-6: e-signed. */
+export async function deactivateRole(id: string, req: Request) {
   await getRole(id);
+  await signFromRequest(req, 'Role', id, 'Approved');
   return prisma.role.update({ where: { id }, data: { isActive: false, isDeleted: true } });
 }

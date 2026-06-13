@@ -17,6 +17,9 @@ export interface NavItem {
 export const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: Home },
   { to: '/my-trainings', label: 'My Trainings', icon: GraduationCap },
+  { to: '/my-jd', label: 'My Job Description', icon: FileText },
+  { to: '/my-cv', label: 'My CV', icon: UserCircle },
+  { to: '/team-cvs', label: 'Team CVs', icon: Users, module: 'userManagement', action: 'read' },
   { to: '/users', label: 'Users', icon: Users, module: 'userManagement', action: 'read' },
   { to: '/roles', label: 'Roles & Permissions', icon: Shield, module: 'roleManagement', action: 'read' },
   { to: '/masters', label: 'Master Setup', icon: MapPin, module: 'masterSetup', action: 'read' },

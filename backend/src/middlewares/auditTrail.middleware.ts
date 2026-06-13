@@ -48,6 +48,8 @@ const AUDITED_MODELS = new Set<string>([
   'TopicVersionHistory',
   'TopicBundle',
   'BundleTopic',
+  'TniRequirement',
+  'CurriculumVitae',
 ]);
 
 const MUTATING = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
@@ -147,19 +149,29 @@ export function createAuditTrailMiddleware(prisma: PrismaClient): Prisma.Middlew
     // scalar/`id` where-clauses; for compound-unique keys (e.g. BundleTopic's
     // bundleId_topicId) findFirst rejects the input, so fall back to findUnique.
     let oldValue: unknown = null;
+    let existingRaw: unknown = null;
     if ((action === 'update' || action === 'delete' || action === 'upsert') && args.where) {
       const cli = (prisma as Record<string, any>)[prop];
-      let existing: unknown = null;
       try {
-        existing = await cli.findFirst({ where: args.where });
+        existingRaw = await cli.findFirst({ where: args.where });
       } catch {
         try {
-          existing = await cli.findUnique({ where: args.where });
+          existingRaw = await cli.findUnique({ where: args.where });
         } catch {
-          existing = null;
+          existingRaw = null;
         }
       }
-      oldValue = existing ? sanitize(existing) : null;
+      oldValue = existingRaw ? sanitize(existingRaw) : null;
+    }
+
+    // CR-11: a no-op update (every supplied field already holds that value) must
+    // neither write nor create an audit row — short-circuit and return the record.
+    if (action === 'update' && existingRaw && args.data && typeof args.data === 'object' && !Array.isArray(args.data)) {
+      const data = args.data as Record<string, unknown>;
+      const rec = existingRaw as Record<string, unknown>;
+      const norm = (v: unknown) => (v instanceof Date ? v.toISOString() : JSON.stringify(v));
+      const changed = Object.keys(data).some((k) => k !== 'updatedAt' && norm(rec[k]) !== norm(data[k]));
+      if (!changed) return existingRaw;
     }
 
     const dataForAction = action === 'upsert' ? args.update : args.data;

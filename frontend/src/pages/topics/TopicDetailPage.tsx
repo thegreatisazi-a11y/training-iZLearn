@@ -66,8 +66,11 @@ interface Question {
   matchPairs?: { left: string; right: string }[];
   correctAnswer: string | string[];
   explanation?: string;
+  helpText?: string;
   isMandatory: boolean;
 }
+
+const MAX_OPTIONS = 4; // CR-34
 
 const QUESTION_TYPE_OPTIONS = questionType.options.map((t) => ({ value: t, label: t.replace(/_/g, ' ') }));
 
@@ -80,7 +83,26 @@ interface QuestionForm {
   fillVariants: string;
   matchPairs: { left: string; right: string }[];
   explanation: string;
+  helpText: string;
   isMandatory: boolean;
+}
+
+/** CR-35: a correct answer must be chosen before a question can be saved. */
+function questionHasAnswer(f: QuestionForm): boolean {
+  switch (f.questionType) {
+    case 'MULTIPLE_CHOICE_SINGLE':
+      return f.correctIds.length === 1 && f.options.every((o) => o.text.trim() || !f.correctIds.includes(o.id));
+    case 'MULTIPLE_CHOICE_MULTI':
+      return f.correctIds.length >= 1;
+    case 'TRUE_FALSE':
+      return !!f.trueFalseAnswer;
+    case 'FILL_IN_THE_BLANKS':
+      return f.fillVariants.split(',').map((v) => v.trim()).filter(Boolean).length > 0;
+    case 'MATCH_THE_WORDS':
+      return f.matchPairs.length >= 2 && f.matchPairs.every((p) => p.left.trim() && p.right.trim());
+    default:
+      return false;
+  }
 }
 
 function blankQuestionForm(): QuestionForm {
@@ -99,6 +121,7 @@ function blankQuestionForm(): QuestionForm {
       { left: '', right: '' },
     ],
     explanation: '',
+    helpText: '',
     isMandatory: false,
   };
 }
@@ -114,6 +137,7 @@ function formFromQuestion(q: Question): QuestionForm {
     fillVariants: isArr ? (q.correctAnswer as string[]).join(', ') : String(q.correctAnswer ?? ''),
     matchPairs: q.matchPairs?.length ? q.matchPairs : blankQuestionForm().matchPairs,
     explanation: q.explanation ?? '',
+    helpText: q.helpText ?? '',
     isMandatory: q.isMandatory,
   };
 }
@@ -125,6 +149,7 @@ function questionBody(f: QuestionForm, topicId: string) {
     questionText: f.questionText,
     questionType: f.questionType,
     explanation: f.explanation || undefined,
+    helpText: f.helpText || undefined,
     isMandatory: f.isMandatory,
   };
   switch (f.questionType) {
@@ -187,8 +212,9 @@ export default function TopicDetailPage() {
   const [editTopicReasonOpen, setEditTopicReasonOpen] = useState(false);
   const [editTopicForm, setEditTopicForm] = useState({
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM',
-    departmentId: '', designationId: '', roleId: '', durationMinutes: '', maxAttempts: '',
+    departmentId: '', designationId: '', roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
     questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
+    requiresAssessment: true, assessmentTimeMinutes: '',
     randomizeQuestions: true, showExplanations: true, blockAfterMaxAttempts: true,
   });
 
@@ -222,7 +248,7 @@ export default function TopicDetailPage() {
   const { data: usersForNames } = useQuery({
     queryKey: ['users', 'names'],
     queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }),
-    enabled: tab === 'materials' && canMaterialWrite,
+    enabled: (tab === 'materials' && canMaterialWrite) || tab === 'history',
   });
   const editDepts = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: editTopicOpen });
   const editDesigs = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: editTopicOpen });
@@ -342,7 +368,9 @@ export default function TopicDetailPage() {
         trainingType: editTopicForm.trainingType,
         departmentId: editTopicForm.departmentId || undefined,
         designationId: editTopicForm.designationId || undefined,
-        roleId: editTopicForm.roleId || undefined,
+        roleIds: editTopicForm.roleIds,
+        requiresAssessment: editTopicForm.requiresAssessment,
+        assessmentTimeMinutes: editTopicForm.assessmentTimeMinutes ? Number(editTopicForm.assessmentTimeMinutes) : null,
         durationMinutes: Number(editTopicForm.durationMinutes),
         maxAttempts: Number(editTopicForm.maxAttempts),
         questionLimit: editTopicForm.questionLimit ? Number(editTopicForm.questionLimit) : undefined,
@@ -416,7 +444,7 @@ export default function TopicDetailPage() {
       trainingType: String(t.trainingType ?? 'CLASSROOM'),
       departmentId: String(t.departmentId ?? ''),
       designationId: String(t.designationId ?? ''),
-      roleId: String(t.roleId ?? ''),
+      roleIds: Array.isArray(t.roleIds) && (t.roleIds as string[]).length ? (t.roleIds as string[]) : t.roleId ? [String(t.roleId)] : [],
       durationMinutes: t.durationMinutes != null ? String(t.durationMinutes) : '',
       maxAttempts: t.maxAttempts != null ? String(t.maxAttempts) : '',
       questionLimit: t.questionLimit != null ? String(t.questionLimit) : '',
@@ -424,6 +452,8 @@ export default function TopicDetailPage() {
       materialViewSeconds: t.materialViewSeconds != null ? String(t.materialViewSeconds) : '',
       effectiveDate: toDateInput(t.effectiveDate as string | null | undefined),
       reviewDate: toDateInput(t.reviewDate as string | null | undefined),
+      requiresAssessment: t.requiresAssessment !== false,
+      assessmentTimeMinutes: t.assessmentTimeMinutes != null ? String(t.assessmentTimeMinutes) : '',
       randomizeQuestions: t.randomizeQuestions !== false,
       showExplanations: t.showExplanations !== false,
       blockAfterMaxAttempts: t.blockAfterMaxAttempts !== false,
@@ -559,17 +589,34 @@ export default function TopicDetailPage() {
                   <Pencil className="h-4 w-4" /> Edit details
                 </Button>
               )}
-              {String(t.status) === 'PUBLISHED'
-                ? canArchive && (
-                    <Button variant="outline" onClick={() => setStatusChange('ARCHIVED')}>
-                      Unpublish (Archive)
+              {String(t.status) === 'PUBLISHED' ? (
+                <>
+                  {/* CR-26: Unpublish returns the topic to Draft (editable) — it does NOT archive. */}
+                  {canEdit && (
+                    <Button variant="outline" onClick={() => setStatusChange('DRAFT')}>
+                      Unpublish
                     </Button>
-                  )
-                : canEdit && (
+                  )}
+                  {canArchive && (
+                    <Button variant="outline" onClick={() => setStatusChange('ARCHIVED')}>
+                      Archive
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {canEdit && String(t.status) !== 'ARCHIVED' && (
                     <Button variant="outline" onClick={() => setStatusChange('PUBLISHED')}>
                       Publish
                     </Button>
                   )}
+                  {canArchive && String(t.status) !== 'ARCHIVED' && (
+                    <Button variant="outline" onClick={() => setStatusChange('ARCHIVED')}>
+                      Archive
+                    </Button>
+                  )}
+                </>
+              )}
               {canBundleEdit && (
                 <Button variant="outline" onClick={() => { setSelectedBundleIds([]); setBundleDialogOpen(true); }}>
                   <Layers className="h-4 w-4" /> Add to bundle(s)
@@ -700,34 +747,8 @@ export default function TopicDetailPage() {
             </div>
           )}
 
-          {/* Archived Materials — superseded files (read-only history) */}
-          {archivedMaterials.length > 0 && (
-            <div>
-              <div className="mb-2 text-sm font-semibold uppercase text-slate-500">Archived Materials ({archivedMaterials.length})</div>
-              <DataTable<Material>
-                columns={[
-                  { key: 'originalFileName', header: 'File', render: (r) => <span className="text-slate-700">{r.originalFileName}</span> },
-                  { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
-                  { key: 'archivedAt', header: 'Changed', render: (r) => (r.archivedAt ? formatDateTime(r.archivedAt) : '—') },
-                  { key: 'archivedBy', header: 'Changed by', render: (r) => userName(r.archivedBy) },
-                  { key: 'changeReason', header: 'Reason', render: (r) => r.changeReason || '—' },
-                  {
-                    key: 'actions',
-                    header: '',
-                    className: 'text-right',
-                    render: (r) => (
-                      <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setViewingMaterial(r)} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Eye className="h-4 w-4" /> View</button>
-                        <button type="button" onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Download className="h-4 w-4" /> Download</button>
-                      </div>
-                    ),
-                  },
-                ]}
-                rows={archivedMaterials}
-                emptyText="No archived materials."
-              />
-            </div>
-          )}
+          {/* CR-25 (D4): superseded files are NOT shown as a separate "Archived Materials"
+              workflow — old versions live only in the Version History tab. */}
 
           {/* Hidden input for per-file Replace/Update (4.1) */}
           <input
@@ -754,7 +775,7 @@ export default function TopicDetailPage() {
               <CardContent>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <div className="font-semibold text-slate-800">Version v{h.version}</div>
-                  <div className="text-xs text-slate-500">Changed on {formatDateTime(h.changedAt)}</div>
+                  <div className="text-xs text-slate-500">Changed by {userName(h.changedBy)} on {formatDateTime(h.changedAt)}</div>
                 </div>
                 {h.note && <div className="mb-1 text-sm text-slate-700">{h.note}</div>}
                 {h.reason && <div className="mb-2 text-sm text-slate-500"><span className="font-medium">Reason:</span> {h.reason}</div>}
@@ -870,7 +891,7 @@ export default function TopicDetailPage() {
             <Button variant="outline" onClick={() => setQuestionDialog(false)}>
               Cancel
             </Button>
-            <Button disabled={!qForm.questionText || createQuestionMut.isPending} onClick={submitQuestion}>
+            <Button disabled={!qForm.questionText || !questionHasAnswer(qForm) || createQuestionMut.isPending} onClick={submitQuestion}>
               {editingQuestion ? 'Continue' : createQuestionMut.isPending ? 'Saving…' : 'Add'}
             </Button>
           </>
@@ -894,9 +915,10 @@ export default function TopicDetailPage() {
               <Button
                 size="sm"
                 variant="outline"
+                disabled={qForm.options.length >= MAX_OPTIONS}
                 onClick={() => setQForm({ ...qForm, options: [...qForm.options, { id: `o${qForm.options.length + 1}_${Date.now()}`, text: '' }] })}
               >
-                Add option
+                Add option{qForm.options.length >= MAX_OPTIONS ? ` (max ${MAX_OPTIONS})` : ''}
               </Button>
             </div>
             <div className="space-y-2">
@@ -994,6 +1016,12 @@ export default function TopicDetailPage() {
         <Field label="Explanation (optional)">
           <Textarea value={qForm.explanation} onChange={(e) => setQForm({ ...qForm, explanation: e.target.value })} />
         </Field>
+        <Field label="Help text (optional)" hint="Shown to the trainee under the question (e.g. 'multiple options can be selected').">
+          <Input value={qForm.helpText} onChange={(e) => setQForm({ ...qForm, helpText: e.target.value })} />
+        </Field>
+        {!questionHasAnswer(qForm) && (
+          <p className="mb-2 text-xs text-amber-600">Select / enter the correct answer before saving.</p>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={qForm.isMandatory} onChange={(e) => setQForm({ ...qForm, isMandatory: e.target.checked })} />
           Mandatory question (always included in assessments)
@@ -1013,8 +1041,8 @@ export default function TopicDetailPage() {
         open={!!statusChange}
         onClose={() => setStatusChange(null)}
         onConfirm={async (sig) => { await statusMut.mutateAsync(sig); setStatusChange(null); }}
-        title={statusChange === 'PUBLISHED' ? 'Publish Topic (e-signature required)' : 'Archive Topic (e-signature required)'}
-        defaultMeaning={statusChange === 'PUBLISHED' ? 'Approved' : 'Performed'}
+        title={statusChange === 'PUBLISHED' ? 'Publish Topic (e-signature required)' : statusChange === 'ARCHIVED' ? 'Archive Topic (e-signature required)' : 'Unpublish Topic (e-signature required)'}
+        defaultMeaning={statusChange === 'PUBLISHED' ? 'Approved' : statusChange === 'ARCHIVED' ? 'Performed' : 'Reviewed'}
         requireReason
       />
 
@@ -1136,10 +1164,22 @@ export default function TopicDetailPage() {
           </Field>
         </div>
         <Field label="Description"><Textarea value={editTopicForm.description} onChange={(e) => setEditTopicForm((f) => ({ ...f, description: e.target.value }))} /></Field>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <Field label="Department"><Select placeholder="—" options={editDeptOpts} value={editTopicForm.departmentId} onChange={(e) => setEditTopicForm((f) => ({ ...f, departmentId: e.target.value }))} /></Field>
-          <Field label="Designation"><Select placeholder="—" options={editDesigOpts} value={editTopicForm.designationId} onChange={(e) => setEditTopicForm((f) => ({ ...f, designationId: e.target.value }))} /></Field>
-          <Field label="Role"><Select placeholder="—" options={editRoleOpts} value={editTopicForm.roleId} onChange={(e) => setEditTopicForm((f) => ({ ...f, roleId: e.target.value }))} /></Field>
+          <Field label="Functional Role"><Select placeholder="—" options={editDesigOpts} value={editTopicForm.designationId} onChange={(e) => setEditTopicForm((f) => ({ ...f, designationId: e.target.value }))} /></Field>
+        </div>
+        <Field label="Roles (one or more)" hint="The topic is assigned to users holding any of these roles.">
+          <MultiSelect
+            options={editRoleOpts}
+            value={editTopicForm.roleIds}
+            onChange={(roleIds) => setEditTopicForm((f) => ({ ...f, roleIds }))}
+            placeholder="Search roles…"
+            emptyText="No roles available"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)</label>
+          <Field label="Assessment time limit (min)" hint="Blank = no timer."><Input type="number" min={1} value={editTopicForm.assessmentTimeMinutes} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, assessmentTimeMinutes: e.target.value }))} /></Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Duration (min)"><Input type="number" min={1} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} /></Field>

@@ -1,11 +1,13 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-// Normalise the configured API origin so it ALWAYS targets exactly one `/api`
-// segment — VITE_API_URL works whether it's set to the bare origin
-// ("https://api.example.com"), already ends in "/api", or has a trailing slash.
-// Falls back to the relative "/api" (Vite dev proxy / same-origin) when unset.
-const RAW_API = (import.meta.env.VITE_API_URL as string)?.trim() || '/api';
-const API_BASE = RAW_API.replace(/\/+$/, '').replace(/\/api$/, '') + '/api';
+// Build the API base as "<origin>/api". We extract only the first origin
+// (protocol + host) from VITE_API_URL, so the value is robust to common
+// misconfigurations: a missing or duplicated "/api", a trailing slash, or the
+// whole URL accidentally pasted twice. When VITE_API_URL is unset, fall back to
+// the relative "/api" (Vite dev proxy in dev / same-origin behind a proxy).
+const RAW_API = (import.meta.env.VITE_API_URL as string)?.trim() || '';
+const ORIGIN = RAW_API.match(/^https?:\/\/[^/\s]+/)?.[0];
+const API_BASE = ORIGIN ? `${ORIGIN}/api` : '/api';
 
 const ACCESS_KEY = 'izlearn_access';
 const REFRESH_KEY = 'izlearn_refresh';
@@ -77,8 +79,24 @@ api.interceptors.response.use(
   },
 );
 
-/** Extract a human-readable message from an Axios error. */
+/**
+ * Extract a human-readable message from an Axios error. When the backend returns
+ * field-level `details` (Zod validation errors, or any AppError with a details
+ * array), surface the specific message(s) — e.g. "New signature and confirm
+ * password must match" — instead of the generic top-level message. Falls back to
+ * the generic message, then the Axios message, then a constant.
+ */
 export function apiError(e: unknown): string {
-  const err = e as AxiosError<{ error?: { message?: string } }>;
-  return err?.response?.data?.error?.message || err?.message || 'Request failed';
+  const err = e as AxiosError<{
+    error?: { message?: string; details?: Array<{ message?: string } | string> | unknown };
+  }>;
+  const data = err?.response?.data?.error;
+  const details = data?.details;
+  if (Array.isArray(details) && details.length) {
+    const messages = details
+      .map((d) => (typeof d === 'string' ? d : d?.message))
+      .filter((m): m is string => typeof m === 'string' && m.length > 0);
+    if (messages.length) return messages.join('; ');
+  }
+  return data?.message || err?.message || 'Request failed';
 }

@@ -21,6 +21,9 @@ const MaterialLibraryPage = lazy(() => import('@/pages/materials/MaterialLibrary
 const MaterialViewerPage = lazy(() => import('@/pages/materials/MaterialViewerPage'));
 const MyTrainingsPage = lazy(() => import('@/pages/training/MyTrainingsPage'));
 const JDPage = lazy(() => import('@/pages/jd/JDPage'));
+const MyJobDescriptionPage = lazy(() => import('@/pages/jd/MyJobDescriptionPage'));
+const MyCVPage = lazy(() => import('@/pages/cv/MyCVPage'));
+const TeamCVsPage = lazy(() => import('@/pages/cv/TeamCVsPage'));
 const TNIPage = lazy(() => import('@/pages/tni/TNIPage'));
 const SchedulesPage = lazy(() => import('@/pages/schedules/SchedulesPage'));
 const AttendancePage = lazy(() => import('@/pages/schedules/AttendancePage'));
@@ -64,6 +67,9 @@ export function AppRoutes() {
             <Route path="/materials/:id/view" element={gate('materialManagement', 'read', <MaterialViewerPage />)} />
             <Route path="/my-trainings" element={<MyTrainingsPage />} />
             <Route path="/job-descriptions" element={gate('jobDescription', 'read', <JDPage />)} />
+            <Route path="/my-jd" element={<MyJobDescriptionPage />} />
+            <Route path="/my-cv" element={<MyCVPage />} />
+            <Route path="/team-cvs" element={gate('userManagement', 'read', <TeamCVsPage />)} />
             <Route path="/tni" element={gate('tni', 'read', <TNIPage />)} />
             <Route path="/schedules" element={gate('scheduling', 'read', <SchedulesPage />)} />
             <Route path="/schedules/:id/attendance" element={gate('attendance', 'read', <AttendancePage />)} />

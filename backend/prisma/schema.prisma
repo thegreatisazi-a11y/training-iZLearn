@@ -40,6 +40,9 @@ model User {
   lockedUntil           DateTime?
   passwordChangedAt     DateTime?
   mustChangePassword    Boolean   @default(false)
+  releaseStage          ReleaseStage @default(ONBOARDING) // CR-15/16: onboarding -> ready -> released
+  releasedAt            DateTime?
+  releasedBy            String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   createdBy             String
@@ -47,6 +50,13 @@ model User {
   @@index([departmentId])
   @@index([locationId])
   @@index([isDeleted])
+}
+
+/// CR-15/16: user onboarding lifecycle / release stage.
+enum ReleaseStage {
+  ONBOARDING
+  READY_FOR_RELEASE
+  RELEASED
 }
 
 enum UserType {
@@ -151,9 +161,12 @@ model TrainingTopic {
   trainingType            TrainingType
   status                  TopicStatus  @default(DRAFT) // draft topics are hidden from trainees
   departmentId            String? // optional department this SOP/topic belongs to
-  designationId           String? // optional designation mapping
-  roleId                  String? // optional role mapping
+  designationId           String? // DEPRECATED (D1): designation removed from izLearn; retained for data history only
+  roleId                  String? // DEPRECATED: single-role mapping; superseded by roleIds (CR-30)
+  roleIds                 Json         @default("[]") // CR-30: multiple roles a topic is mapped to (array of roleId)
   durationMinutes         Int
+  requiresAssessment      Boolean      @default(true) // CR-41: false = SOP completes via read + T&C acknowledgement (no quiz)
+  assessmentTimeMinutes   Int? // CR-38: countdown time limit for the assessment (null = no limit)
   passingScorePercent     Int
   maxAttempts             Int
   questionLimit           Int? // per-topic number of questions drawn for an assessment (null = system default)
@@ -161,6 +174,8 @@ model TrainingTopic {
   showExplanations        Boolean      @default(true) // show incorrect-answer explanations after a failed attempt
   blockAfterMaxAttempts   Boolean      @default(true) // block the assessment after the configured max attempts
   refresherIntervalMonths Int?
+  signatoryUserIds        Json         @default("[]") // CR-51: prepared/reviewed/approved-by signatories — training auto-completed, they don't take it
+  sequenceIndex           Int? // CR-29: optional ordering for course-in-sequence
   materialViewSeconds     Int? // minimum seconds the material must stay open before the assessment unlocks
   effectiveDate           DateTime? // date the (published) version becomes effective
   reviewDate              DateTime? // next scheduled review date for the SOP/topic
@@ -188,6 +203,12 @@ enum TrainingType {
   WORKSHOP
   SOP
   ONLINE
+  // CR-58: additional self-paced / delivery types
+  SELF_READ
+  SELF_READ_EVALUATION
+  QUIZ
+  VIDEO
+  REMOTE
 }
 
 enum TopicStatus {
@@ -263,9 +284,10 @@ model Question {
   topicVersion  Int
   questionText  String
   questionType  QuestionType
-  options       Json? // Array of option objects {id, text} or match pairs
+  options       Json? // Array of option objects {id, text} or match pairs (max 4 options — CR-34)
   correctAnswer Json // Array of correct option IDs or answer string
   explanation   String? // Shown to user after incorrect answer
+  helpText      String? // CR-37: per-question hint, e.g. "multiple options can be selected"
   isMandatory   Boolean      @default(false)
   isActive      Boolean      @default(true)
   isDeleted     Boolean      @default(false)
@@ -321,9 +343,16 @@ model TrainingAssignment {
   scheduleId       String?
   assignedBy       String
   assignmentType   AssignmentType
-  dueDate          DateTime?
+  dueDate          DateTime? // CR-56: optional — no due date when a user joins after it would have passed
   refresherDueDate DateTime?
+  sequenceIndex    Int? // CR-29: optional order within a curriculum/sequence
   status           AssignmentStatus @default(PENDING)
+  overdueNotifiedAt        DateTime? // CR-56: set when the after-due email was sent (avoids duplicate notifications)
+  requiresSupervisorApproval Boolean @default(false) // CR-56: completion past due needs supervisor sign-off
+  supervisorApprovalStatus String? // CR-56: null | PENDING | APPROVED | REJECTED
+  supervisorApprovedBy     String?
+  supervisorApprovedAt     DateTime?
+  activateOn       DateTime? // CR-57: assign-later — DEFERRED assignments activate on/after this date
   tniId            String?
   isDeleted        Boolean          @default(false)
   createdAt        DateTime         @default(now())
@@ -350,6 +379,7 @@ enum AssignmentStatus {
   OVERDUE
   BLOCKED
   WAIVED
+  DEFERRED // CR-57: assign-later — not yet visible to the trainee until activated
 }
 
 model Attendance {
@@ -428,6 +458,8 @@ model AssessmentAttempt {
   assignmentId  String?
   attemptNumber Int
   startedAt     DateTime  @default(now())
+  expiresAt     DateTime? // CR-38: server-side deadline = startedAt + assessmentTimeMinutes; submissions after this are auto-failed
+  autoSubmitted Boolean   @default(false) // CR-38: set when the attempt was force-submitted on timeout / leaving the page
   completedAt   DateTime?
   score         Float?
   isPassed      Boolean?
@@ -522,7 +554,8 @@ model JobDescription {
   id           String    @id @default(uuid()) @map("_id")
   userId       String
   departmentId String
-  roleId       String
+  roleId       String? // DEPRECATED: RBAC-role keying; superseded by functionalRoleId (D-JD1)
+  functionalRoleId String? // D-JD1: the Functional Role this JD is for (DesignationMaster id)
   title        String
   content      String // Rich text / HTML
   version      Int       @default(1)
@@ -530,6 +563,11 @@ model JobDescription {
   approvedBy   String?
   approvedAt   DateTime?
   signatureId  String?
+  assignedBy     String? // CR-50: supervisor who assigned this JD to the user
+  assignedAt     DateTime?
+  acknowledgedAt DateTime? // CR-50: when the user acknowledged their assigned JD
+  acknowledgementText        String? // exact sentence the user typed when acknowledging (immutable)
+  acknowledgementSignatureId String? // e-signature captured on acknowledgement
   parentJdId   String? // previous version, for history chains
   isDeleted    Boolean   @default(false)
   createdAt    DateTime  @default(now())
@@ -548,11 +586,13 @@ enum DocStatus {
   REJECTED
 }
 
-/// Master JD template per department + role (used to pre-fill on transfer).
+/// Master JD template keyed by Functional Role (+ optional department) — D-JD1.
+/// The approved master content auto-assigned to users with that functional role.
 model JDTemplate {
   id           String   @id @default(uuid()) @map("_id")
-  departmentId String
-  roleId       String
+  departmentId String? // optional department scoping
+  roleId       String? // DEPRECATED RBAC-role keying (kept for back-compat)
+  functionalRoleId String? // the Functional Role (DesignationMaster id) this template serves
   title        String
   content      String
   isActive     Boolean  @default(true)
@@ -561,7 +601,8 @@ model JDTemplate {
   updatedAt    DateTime @updatedAt
   createdBy    String
 
-  @@unique([departmentId, roleId])
+  @@index([functionalRoleId])
+  @@index([departmentId])
 }
 
 model PersonalDocument {
@@ -859,5 +900,53 @@ model BundleTopic {
   createdBy String
 
   @@unique([bundleId, topicId])
+  @@index([topicId])
+}
+
+// ============================================================
+// CV (Curriculum Vitae) — CR-52
+// ============================================================
+
+/// A user's curriculum vitae. Created/updated by the user; viewable by Super Admin
+/// and supervisors. One live CV per user (history preserved via audit trail).
+model CurriculumVitae {
+  id            String   @id @default(uuid()) @map("_id")
+  userId        String   @unique
+  languagesKnown String? // "read, write, understand" free text
+  qualifications Json    @default("[]") // [{ year, degree, specialization, institute }]
+  currentRole   String? // current role / designation (defaults to functional role)
+  currentTenureFrom String? // MM-YYYY
+  currentTenureTo   String? // MM-YYYY
+  currentResponsibilities String?
+  experience    Json     @default("[]") // [{ organisation, role, tenureFrom, tenureTo, responsibilities }]
+  trainings     Json     @default("[]") // [{ srNo, detail }]
+  publications  Json     @default("[]") // [{ srNo, detail }]
+  attachmentPath String? // optional uploaded CV document
+  isDeleted     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String
+}
+
+// ============================================================
+// TNI requirement matrix (role × topic) — CR-46 / CR-47
+// ============================================================
+
+/// One cell of the TNI matrix: whether a given training topic is REQUIRED for a
+/// given role. Drives role-based auto-assignment (alongside JD mapping and direct
+/// assignment). Soft-delete only.
+model TniRequirement {
+  id         String   @id @default(uuid()) @map("_id")
+  roleId     String
+  topicId    String
+  isRequired Boolean  @default(true) // true = Required, false = Not Required
+  note       String?
+  isDeleted  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  createdBy  String
+
+  @@unique([roleId, topicId])
+  @@index([roleId])
   @@index([topicId])
 }

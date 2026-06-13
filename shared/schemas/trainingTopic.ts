@@ -11,7 +11,10 @@ export const createTopicSchema = z.object({
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   roleId: uuid.optional(),
+  roleIds: z.array(uuid).optional(), // CR-30: multiple roles a topic is mapped to
   durationMinutes: z.coerce.number().int().positive(),
+  requiresAssessment: z.coerce.boolean().optional(), // CR-41: false = SOP, completes via T&C
+  assessmentTimeMinutes: z.coerce.number().int().positive().optional(), // CR-38: countdown limit
   passingScorePercent: z.coerce.number().int().min(0).max(100),
   maxAttempts: z.coerce.number().int().min(1),
   questionLimit: z.coerce.number().int().min(1).optional(), // per-topic # of questions per assessment
@@ -19,6 +22,8 @@ export const createTopicSchema = z.object({
   showExplanations: z.coerce.boolean().optional(),
   blockAfterMaxAttempts: z.coerce.boolean().optional(),
   refresherIntervalMonths: z.coerce.number().int().positive().optional(),
+  signatoryUserIds: z.array(uuid).optional(), // CR-51: prepared/reviewed/approved-by signatories
+  sequenceIndex: z.coerce.number().int().min(0).optional(), // CR-29: course ordering
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),
   reviewDate: z.coerce.date().optional(),
@@ -40,6 +45,9 @@ export const updateTopicSchema = z.object({
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   roleId: uuid.optional(),
+  roleIds: z.array(uuid).optional(), // CR-30
+  requiresAssessment: z.coerce.boolean().optional(), // CR-41
+  assessmentTimeMinutes: z.coerce.number().int().positive().nullable().optional(), // CR-38 (null clears)
   durationMinutes: z.coerce.number().int().positive().optional(),
   refresherIntervalMonths: z.coerce.number().int().positive().optional(),
   maxAttempts: z.coerce.number().int().min(1).optional(),
@@ -47,6 +55,8 @@ export const updateTopicSchema = z.object({
   randomizeQuestions: z.coerce.boolean().optional(),
   showExplanations: z.coerce.boolean().optional(),
   blockAfterMaxAttempts: z.coerce.boolean().optional(),
+  signatoryUserIds: z.array(uuid).optional(), // CR-51
+  sequenceIndex: z.coerce.number().int().min(0).optional(), // CR-29
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),
   reviewDate: z.coerce.date().optional(),

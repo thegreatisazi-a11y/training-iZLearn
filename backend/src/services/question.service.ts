@@ -38,6 +38,13 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
   const topic = await prisma.trainingTopic.findFirst({ where: { id: input.topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
 
+  // CR-36: for MATCH_THE_WORDS the answer key IS the set of pairs, so derive it
+  // from matchPairs (never trust a separately-supplied answer that could drift).
+  const correctAnswer =
+    input.questionType === 'MATCH_THE_WORDS'
+      ? ((input.matchPairs ?? []) as Prisma.InputJsonValue)
+      : (input.correctAnswer as Prisma.InputJsonValue);
+
   return prisma.question.create({
     data: {
       topicId: input.topicId,
@@ -45,8 +52,9 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       questionText: input.questionText,
       questionType: input.questionType,
       options: buildOptionsPayload(input.questionType, input.options, input.matchPairs),
-      correctAnswer: input.correctAnswer as Prisma.InputJsonValue,
+      correctAnswer,
       explanation: input.explanation ?? null,
+      helpText: input.helpText ?? null,
       isMandatory: input.isMandatory,
       createdBy,
     },
@@ -101,10 +109,13 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput) {
             ) ?? null,
           }
         : {}),
-      ...(input.correctAnswer !== undefined
-        ? { correctAnswer: input.correctAnswer as Prisma.InputJsonValue }
-        : {}),
+      ...(effectiveType === 'MATCH_THE_WORDS' && input.matchPairs !== undefined
+        ? { correctAnswer: (input.matchPairs ?? []) as Prisma.InputJsonValue }
+        : input.correctAnswer !== undefined
+          ? { correctAnswer: input.correctAnswer as Prisma.InputJsonValue }
+          : {}),
       ...(input.explanation !== undefined ? { explanation: input.explanation } : {}),
+      ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
       ...(input.isMandatory !== undefined ? { isMandatory: input.isMandatory } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
     },

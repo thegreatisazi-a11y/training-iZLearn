@@ -111,6 +111,24 @@ export async function login(
   const authUser = await buildAuthUser(user.id, sessionId);
   if (!authUser) throw AppError.unauthorized('Account is inactive or no longer exists.');
 
+  // CR-1: a user whose roles have all been made inactive (or who has no role
+  // assigned) cannot use the system. buildAuthUser only returns active, non-deleted
+  // roles, so an empty roleIds set means there is no usable role — deny login and
+  // tear down the session we just created.
+  if (!authUser.roleIds.length) {
+    await session.invalidateSession(user.id, sessionId);
+    await recordEvent({
+      action: 'LOGIN_FAILED',
+      entityType: 'User',
+      entityId: user.id,
+      actor: { userId: user.id, userFullName: user.fullName },
+      newValue: { reason: 'No active role assigned' },
+      ipAddress: ip,
+      userAgent,
+    });
+    throw AppError.forbidden('Your account has no active role assigned. Contact your administrator.');
+  }
+
   await recordEvent({
     action: 'LOGIN',
     entityType: 'User',
@@ -189,10 +207,29 @@ export async function setSignaturePassword(
   userId: string,
   loginPassword: string,
   signaturePassword: string,
+  oldSignaturePassword?: string,
 ): Promise<{ ok: true }> {
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
   if (!user || !(await comparePassword(loginPassword, user.passwordHash))) {
     throw AppError.unauthorized('Login password is incorrect');
+  }
+
+  // When a signature password already exists, the user must prove knowledge of it
+  // before it can be replaced (prevents an unattended-session takeover of the
+  // second e-signature component).
+  if (user.signaturePasswordHash) {
+    if (!oldSignaturePassword) {
+      throw AppError.badRequest('Your current signature password is required to change it.');
+    }
+    if (!(await comparePassword(oldSignaturePassword, user.signaturePasswordHash))) {
+      throw AppError.badRequest('Your current signature password is incorrect.');
+    }
+  }
+
+  // 21 CFR Part 11 §11.200 — the two components of the electronic signature must be
+  // distinct. The signature password may not equal the login password.
+  if (await comparePassword(signaturePassword, user.passwordHash)) {
+    throw AppError.badRequest('Your signature password must be different from your login password.');
   }
 
   const policy = await getPasswordPolicy();

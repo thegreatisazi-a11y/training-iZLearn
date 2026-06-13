@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Upload, ClipboardList } from 'lucide-react';
+import { UserPlus, Upload, ClipboardList, Printer, Download } from 'lucide-react';
 import { userType as userTypeEnum } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
-import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { Button } from '@/components/ui/button';
 import { Input, Field, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -14,8 +13,9 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
-import { apiError } from '@/lib/axios';
-import { svc } from '@/services';
+import { api, apiError } from '@/lib/axios';
+import { svc, downloadBlob } from '@/services';
+import { printHtml, printTable } from '@/lib/print';
 
 interface UserRow {
   id: string;
@@ -26,6 +26,9 @@ interface UserRow {
   email?: string | null;
   departmentId?: string;
   locationId?: string;
+  departmentName?: string | null;
+  locationName?: string | null;
+  roleNames?: string[];
   supervisorId?: string | null;
   designationId?: string | null;
   isActive: boolean;
@@ -71,16 +74,112 @@ const EMPTY_FORM = {
   remarks: '',
 };
 
+type StatusFilter = 'active' | 'inactive' | 'all';
+
+interface Lifecycle {
+  releaseStage: string;
+  releasedAt?: string | null;
+  jd: { title: string; acknowledged: boolean } | null;
+  jdAcknowledged: boolean;
+  cvCompleted: boolean;
+  tni: { total: number; approved: number; pending: number };
+  training: { total: number; completed: number; complete: boolean };
+  eligibleForRelease: boolean;
+}
+
+/**
+ * CR-15/16: user onboarding lifecycle — JD acknowledgement, CV, TNI, training
+ * completion, and the release stage (advanced by an e-signed action).
+ */
+function LifecycleDialog({ user, canApprove, onClose }: { user: { id: string; fullName: string }; canApprove: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [signStage, setSignStage] = useState<'READY_FOR_RELEASE' | 'RELEASED' | 'ONBOARDING' | null>(null);
+  const { data, isLoading } = useQuery({ queryKey: ['user-lifecycle', user.id], queryFn: () => svc.users.lifecycle(user.id) as unknown as Promise<Lifecycle> });
+
+  const releaseMut = useMutation({
+    mutationFn: (sig: ESignaturePayload) => {
+      const { reason, ...signature } = sig;
+      return svc.users.setReleaseStage(user.id, { stage: signStage, reasonForChange: (reason ?? '').trim(), signature });
+    },
+    onSuccess: () => {
+      toast.success('Release stage updated.');
+      qc.invalidateQueries({ queryKey: ['user-lifecycle', user.id] });
+      setSignStage(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const Row = ({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) => (
+    <div className="flex items-center justify-between border-b border-slate-100 py-2 text-sm">
+      <span className="text-slate-600">{label}</span>
+      <span className={ok ? 'font-medium text-green-700' : 'text-amber-700'}>{detail ?? (ok ? 'Complete' : 'Pending')}</span>
+    </div>
+  );
+
+  return (
+    <Dialog open onClose={onClose} title={`Lifecycle — ${user.fullName}`} footer={<Button variant="outline" onClick={onClose}>Close</Button>}>
+      {isLoading || !data ? (
+        <p className="py-6 text-center text-sm text-slate-500">Loading…</p>
+      ) : (
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-sm text-slate-500">Release stage</span>
+            <Badge tone={data.releaseStage === 'RELEASED' ? 'COMPLETED' : data.releaseStage === 'READY_FOR_RELEASE' ? 'APPROVED' : 'PENDING'}>
+              {data.releaseStage.replace(/_/g, ' ')}
+            </Badge>
+          </div>
+          <Row label="Job Description acknowledged" ok={data.jdAcknowledged} detail={data.jd ? undefined : 'No JD assigned'} />
+          <Row label="CV completed" ok={data.cvCompleted} />
+          <Row label="TNI" ok={data.tni.pending === 0} detail={`${data.tni.approved} approved · ${data.tni.pending} pending`} />
+          <Row label="Training" ok={data.training.complete} detail={`${data.training.completed}/${data.training.total} complete`} />
+          {canApprove && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {data.releaseStage !== 'READY_FOR_RELEASE' && (
+                <Button size="sm" variant="outline" disabled={!data.eligibleForRelease} onClick={() => setSignStage('READY_FOR_RELEASE')} title={data.eligibleForRelease ? '' : 'JD acknowledgement and all training must be complete'}>
+                  Mark ready for release
+                </Button>
+              )}
+              {data.releaseStage !== 'RELEASED' && (
+                <Button size="sm" disabled={!data.eligibleForRelease} onClick={() => setSignStage('RELEASED')}>
+                  Release user
+                </Button>
+              )}
+              {data.releaseStage !== 'ONBOARDING' && (
+                <Button size="sm" variant="outline" onClick={() => setSignStage('ONBOARDING')}>
+                  Back to onboarding
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      <ESignatureModal
+        open={!!signStage}
+        onClose={() => setSignStage(null)}
+        title="Sign — change release stage"
+        defaultMeaning="Approved"
+        requireReason
+        onConfirm={async (sig) => { await releaseMut.mutateAsync(sig); }}
+      />
+    </Dialog>
+  );
+}
+
 export default function UsersPage() {
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canWrite = hasPermission('userManagement', 'write');
   const canApprove = hasPermission('userManagement', 'approve');
+  const canPrint = hasPermission('userManagement', 'print');
+  const canExport = hasPermission('userManagement', 'export');
+  const canAssignJd = hasPermission('jobDescription', 'assign'); // D-JD1: assign Functional Role + JD
   const canAct = canWrite || canApprove;
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [includeInactive, setIncludeInactive] = useState(false);
+  // CR-12: Active / Inactive / All filter (drives the API includeInactive flag).
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [exporting, setExporting] = useState(false);
 
   const [esign, setEsign] = useState<{ open: boolean; action: ActionKind; user?: UserRow; reason: string }>({
     open: false,
@@ -91,16 +190,34 @@ export default function UsersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [resetPwdDialog, setResetPwdDialog] = useState<{ username: string; tempPassword: string } | null>(null);
 
-  // Phase 3: edit details (write) + change roles (approve, e-signed)
+  // CR-12: read-only View dialog
+  const [viewUser, setViewUser] = useState<UserRow | null>(null);
+  const [lifecycleUser, setLifecycleUser] = useState<UserRow | null>(null);
+
+  // Phase 3: edit details (write, e-signed per CR-14) + change roles (approve, e-signed)
   const [editUser, setEditUser] = useState<UserRow | null>(null);
   const [editForm, setEditForm] = useState(EMPTY_EDIT_FORM);
-  const [editReasonOpen, setEditReasonOpen] = useState(false);
+  const [editEsignOpen, setEditEsignOpen] = useState(false);
   const [rolesUser, setRolesUser] = useState<UserRow | null>(null);
   const [rolesSelected, setRolesSelected] = useState<string[]>([]);
   const [rolesEsignOpen, setRolesEsignOpen] = useState(false);
+  // D-JD1 / CR-50: assign a Functional Role → auto-assigns the approved JD.
+  const [frUser, setFrUser] = useState<UserRow | null>(null);
+  const [frSelected, setFrSelected] = useState('');
+  const [frEsignOpen, setFrEsignOpen] = useState(false);
 
+  const includeInactive = statusFilter !== 'active';
   const params = { page, pageSize: 50, search: search || undefined, includeInactive };
   const { data, isLoading } = useQuery({ queryKey: ['users', params], queryFn: () => svc.users.list(params) });
+
+  // CR-12: the "Inactive only" view is the inactive subset of an includeInactive query.
+  const rawRows = (data?.data ?? []) as unknown as UserRow[];
+  const rows = statusFilter === 'inactive' ? rawRows.filter((r) => !r.isActive) : rawRows;
+
+  // CR-13: mandatory-field gating for the create/edit forms.
+  const createFormValid =
+    !!form.fullName && !!form.employeeId && !!form.windowsUsername && !!form.departmentId && !!form.locationId && form.roleIds.length > 0;
+  const editFormValid = !!editForm.fullName && !!editForm.departmentId && !!editForm.locationId;
 
   const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
   const locations = useQuery({ queryKey: ['locations', 'all'], queryFn: () => svc.locations.list({ pageSize: 200 }) });
@@ -139,7 +256,7 @@ export default function UsersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
       toast.success('User details updated.');
-      setEditReasonOpen(false);
+      setEditEsignOpen(false);
       setEditUser(null);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -152,6 +269,17 @@ export default function UsersPage() {
       toast.success('Roles updated.');
       setRolesEsignOpen(false);
       setRolesUser(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const assignFrMutation = useMutation({
+    mutationFn: (body: unknown) => svc.jds.assignFunctionalRole(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success('Functional role assigned and Job Description created.');
+      setFrEsignOpen(false);
+      setFrUser(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -184,6 +312,46 @@ export default function UsersPage() {
     }
   }
 
+  // CR-12: print the currently-displayed users list (client-side, no server dependency).
+  function handlePrint() {
+    const body =
+      `<h1>Users</h1>` +
+      `<div class="sub">${rows.length} record(s)${search ? ` · search: "${search}"` : ''} · ${
+        statusFilter === 'all' ? 'All' : statusFilter === 'inactive' ? 'Inactive' : 'Active'
+      }</div>` +
+      printTable(
+        ['Employee ID', 'Full Name', 'Username', 'Email', 'Department', 'Location', 'Roles', 'Status'],
+        rows.map((r) => [
+          r.employeeId,
+          r.fullName,
+          r.windowsUsername,
+          r.email ?? '',
+          r.departmentName ?? '',
+          r.locationName ?? '',
+          (r.roleNames ?? []).join(', '),
+          r.isActive ? 'Active' : 'Inactive',
+        ]),
+      );
+    printHtml('Users', body);
+  }
+
+  // CR-12: download the filtered users list from the export endpoint (authenticated blob).
+  async function handleExport(format: 'xlsx' | 'csv') {
+    setExporting(true);
+    try {
+      const res = await api.get('/users/export', {
+        params: { format, search: search || undefined, includeInactive },
+        responseType: 'blob',
+      });
+      downloadBlob(res.data as Blob, `users.${format}`);
+      toast.success('Users exported.');
+    } catch (e) {
+      toast.error(apiError(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function confirmAction(signature: ESignaturePayload) {
     if (!esign.user) return;
     const reason = (signature.reason ?? '').trim();
@@ -204,6 +372,11 @@ export default function UsersPage() {
     { key: 'windowsUsername', header: 'Username' },
     { key: 'userType', header: 'Type' },
     {
+      key: 'roles',
+      header: 'Roles',
+      render: (r) => (r.roleNames && r.roleNames.length ? r.roleNames.join(', ') : '—'),
+    },
+    {
       key: 'status',
       header: 'Status',
       render: (r) => <Badge tone={r.isActive ? 'APPROVED' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
@@ -211,20 +384,31 @@ export default function UsersPage() {
     {
       key: 'actions',
       header: 'Actions',
-      render: (r) =>
-        canAct ? (
-          <div className="flex flex-wrap gap-1">
-            {canWrite && (
-              <Button size="sm" variant="outline" onClick={() => openEditUser(r)}>
-                Edit
-              </Button>
-            )}
-            {canApprove && (
-              <Button size="sm" variant="outline" onClick={() => openChangeRoles(r)}>
-                Change Roles
-              </Button>
-            )}
-            {r.isActive ? (
+      render: (r) => (
+        <div className="flex flex-wrap gap-1">
+          <Button size="sm" variant="outline" onClick={() => setViewUser(r)}>
+            View
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setLifecycleUser(r)}>
+            Lifecycle
+          </Button>
+          {canWrite && (
+            <Button size="sm" variant="outline" onClick={() => openEditUser(r)}>
+              Edit
+            </Button>
+          )}
+          {canApprove && (
+            <Button size="sm" variant="outline" onClick={() => openChangeRoles(r)}>
+              Change Roles
+            </Button>
+          )}
+          {canAssignJd && (
+            <Button size="sm" variant="outline" onClick={() => { setFrUser(r); setFrSelected(r.designationId ?? ''); }}>
+              Functional Role
+            </Button>
+          )}
+          {canAct &&
+            (r.isActive ? (
               <Button size="sm" variant="outline" onClick={() => openAction('deactivate', r)}>
                 Deactivate
               </Button>
@@ -232,14 +416,14 @@ export default function UsersPage() {
               <Button size="sm" variant="outline" onClick={() => openAction('activate', r)}>
                 Activate
               </Button>
-            )}
+            ))}
+          {canAct && (
             <Button size="sm" variant="outline" onClick={() => openAction('resetPassword', r)}>
               Reset Password
             </Button>
-          </div>
-        ) : (
-          '—'
-        ),
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -260,6 +444,21 @@ export default function UsersPage() {
                 <Upload className="h-4 w-4" /> Bulk Upload
               </Button>
             </Link>
+            {canPrint && (
+              <Button variant="outline" onClick={handlePrint}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            )}
+            {canExport && (
+              <>
+                <Button variant="outline" disabled={exporting} onClick={() => handleExport('xlsx')}>
+                  <Download className="h-4 w-4" /> Excel
+                </Button>
+                <Button variant="outline" disabled={exporting} onClick={() => handleExport('csv')}>
+                  <Download className="h-4 w-4" /> CSV
+                </Button>
+              </>
+            )}
             {canWrite && (
               <Button onClick={() => setCreateOpen(true)}>
                 <UserPlus className="h-4 w-4" /> New User Request
@@ -279,26 +478,28 @@ export default function UsersPage() {
             setPage(1);
           }}
         />
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input
-            type="checkbox"
-            checked={includeInactive}
-            onChange={(e) => {
-              setIncludeInactive(e.target.checked);
-              setPage(1);
-            }}
-          />
-          Include Inactive
-        </label>
+        <Select
+          className="w-40"
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as StatusFilter);
+            setPage(1);
+          }}
+          options={[
+            { value: 'active', label: 'Active' },
+            { value: 'inactive', label: 'Inactive' },
+            { value: 'all', label: 'All' },
+          ]}
+        />
       </div>
 
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as UserRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}
-        total={data?.total ?? 0}
+        total={statusFilter === 'inactive' ? rows.length : data?.total ?? 0}
         onPageChange={setPage}
         emptyText="No users found."
       />
@@ -312,7 +513,48 @@ export default function UsersPage() {
         requireReason
       />
 
-      {/* Phase 3: Edit user details (userManagement:write, reason-for-change) */}
+      {/* CR-12 read-only View dialog */}
+      {lifecycleUser && (
+        <LifecycleDialog user={lifecycleUser} canApprove={canApprove} onClose={() => setLifecycleUser(null)} />
+      )}
+
+      <Dialog
+        open={!!viewUser}
+        onClose={() => setViewUser(null)}
+        title={`User Details — ${viewUser?.fullName ?? ''}`}
+        footer={
+          <Button variant="outline" onClick={() => setViewUser(null)}>
+            Close
+          </Button>
+        }
+      >
+        {viewUser && (
+          <dl className="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+            <dt className="font-medium text-slate-500">Full Name</dt>
+            <dd className="col-span-2">{viewUser.fullName}</dd>
+            <dt className="font-medium text-slate-500">Employee ID</dt>
+            <dd className="col-span-2">{viewUser.employeeId}</dd>
+            <dt className="font-medium text-slate-500">Username</dt>
+            <dd className="col-span-2">{viewUser.windowsUsername}</dd>
+            <dt className="font-medium text-slate-500">Email</dt>
+            <dd className="col-span-2">{viewUser.email || '—'}</dd>
+            <dt className="font-medium text-slate-500">User Type</dt>
+            <dd className="col-span-2">{viewUser.userType}</dd>
+            <dt className="font-medium text-slate-500">Department</dt>
+            <dd className="col-span-2">{viewUser.departmentName || '—'}</dd>
+            <dt className="font-medium text-slate-500">Location</dt>
+            <dd className="col-span-2">{viewUser.locationName || '—'}</dd>
+            <dt className="font-medium text-slate-500">Roles</dt>
+            <dd className="col-span-2">{viewUser.roleNames && viewUser.roleNames.length ? viewUser.roleNames.join(', ') : '—'}</dd>
+            <dt className="font-medium text-slate-500">Status</dt>
+            <dd className="col-span-2">
+              <Badge tone={viewUser.isActive ? 'APPROVED' : 'default'}>{viewUser.isActive ? 'Active' : 'Inactive'}</Badge>
+            </dd>
+          </dl>
+        )}
+      </Dialog>
+
+      {/* CR-13/CR-14: Edit user details (userManagement:write, e-signed) */}
       <Dialog
         open={!!editUser}
         onClose={() => setEditUser(null)}
@@ -322,22 +564,22 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setEditUser(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.fullName || !editForm.departmentId || !editForm.locationId} onClick={() => setEditReasonOpen(true)}>
-              Save…
+            <Button disabled={!editFormValid} onClick={() => setEditEsignOpen(true)}>
+              Sign &amp; Save…
             </Button>
           </>
         }
       >
-        <Field label="Full Name">
+        <Field label="Full Name" required error={!editForm.fullName ? 'Full name is required.' : undefined}>
           <Input value={editForm.fullName} onChange={(e) => setEditForm((f) => ({ ...f, fullName: e.target.value }))} />
         </Field>
         <Field label="Email">
           <Input type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} />
         </Field>
-        <Field label="User Type">
+        <Field label="User Type" required>
           <Select options={USER_TYPE_OPTIONS} value={editForm.userType} onChange={(e) => setEditForm((f) => ({ ...f, userType: e.target.value }))} />
         </Field>
-        <Field label="Department">
+        <Field label="Department" required error={!editForm.departmentId ? 'Department is required.' : undefined}>
           <Select
             placeholder="Select department…"
             options={((departments.data?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }))}
@@ -345,7 +587,7 @@ export default function UsersPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, departmentId: e.target.value }))}
           />
         </Field>
-        <Field label="Location">
+        <Field label="Location" required error={!editForm.locationId ? 'Location is required.' : undefined}>
           <Select
             placeholder="Select location…"
             options={((locations.data?.data ?? []) as { id: string; name: string }[]).map((l) => ({ value: l.id, label: l.name }))}
@@ -366,9 +608,9 @@ export default function UsersPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, supervisorId: e.target.value }))}
           />
         </Field>
-        <Field label="Designation">
+        <Field label="Functional Role">
           <Select
-            placeholder="Select designation…"
+            placeholder="Select functional role…"
             options={[{ value: '', label: '— None —' }, ...((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))]}
             value={editForm.designationId}
             onChange={(e) => setEditForm((f) => ({ ...f, designationId: e.target.value }))}
@@ -376,11 +618,15 @@ export default function UsersPage() {
         </Field>
       </Dialog>
 
-      <ReasonForChangeDialog
-        open={editReasonOpen}
-        onClose={() => setEditReasonOpen(false)}
-        onConfirm={async (reasonForChange) => {
+      {/* CR-14: editing a user requires a two-component e-signature (reason collected here too). */}
+      <ESignatureModal
+        open={editEsignOpen}
+        onClose={() => setEditEsignOpen(false)}
+        onConfirm={async (signature) => {
           if (!editUser) return;
+          const reason = (signature.reason ?? '').trim();
+          if (reason.length < 5) throw new Error('A reason of at least 5 characters is required.');
+          const { reason: _r, ...sig } = signature;
           await updateUserMutation.mutateAsync({
             id: editUser.id,
             body: {
@@ -391,10 +637,14 @@ export default function UsersPage() {
               supervisorId: editForm.supervisorId || undefined,
               designationId: editForm.designationId || undefined,
               userType: editForm.userType,
-              reasonForChange,
+              reasonForChange: reason,
+              signature: sig,
             },
           });
         }}
+        title={`Edit User — ${editUser?.fullName ?? ''}`}
+        defaultMeaning="Approved"
+        requireReason
       />
 
       {/* Phase 3: Change roles (userManagement:approve, e-signed) */}
@@ -448,6 +698,43 @@ export default function UsersPage() {
         requireReason
       />
 
+      {/* D-JD1 / CR-50: assign Functional Role → auto-assign approved JD (e-signed). */}
+      <Dialog
+        open={!!frUser}
+        onClose={() => setFrUser(null)}
+        title={`Functional Role & JD — ${frUser?.fullName ?? ''}`}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setFrUser(null)}>Cancel</Button>
+            <Button disabled={!frSelected} onClick={() => setFrEsignOpen(true)}>Assign &amp; Sign…</Button>
+          </>
+        }
+      >
+        <Field label="Functional Role" required>
+          <Select
+            placeholder="Select functional role…"
+            options={((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))}
+            value={frSelected}
+            onChange={(e) => setFrSelected(e.target.value)}
+          />
+        </Field>
+        <p className="text-xs text-slate-500">
+          Assigning a functional role auto-assigns the approved Job Description template for that role and notifies the user to acknowledge it. If no template exists yet, the role is set but no JD is created.
+        </p>
+      </Dialog>
+
+      <ESignatureModal
+        open={frEsignOpen}
+        onClose={() => setFrEsignOpen(false)}
+        onConfirm={async (signature) => {
+          if (!frUser) return;
+          const { reason: _r, ...sig } = signature;
+          await assignFrMutation.mutateAsync({ userId: frUser.id, functionalRoleId: frSelected, signature: sig });
+        }}
+        title={`Assign Functional Role — ${frUser?.fullName ?? ''}`}
+        defaultMeaning="Approved"
+      />
+
       <Dialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -473,37 +760,29 @@ export default function UsersPage() {
                   remarks: form.remarks || undefined,
                 })
               }
-              disabled={
-                createMutation.isPending ||
-                !form.fullName ||
-                !form.employeeId ||
-                !form.windowsUsername ||
-                !form.departmentId ||
-                !form.locationId ||
-                form.roleIds.length === 0
-              }
+              disabled={createMutation.isPending || !createFormValid}
             >
               {createMutation.isPending ? 'Submitting…' : 'Submit Request'}
             </Button>
           </>
         }
       >
-        <Field label="User Type">
+        <Field label="User Type" required>
           <Select options={USER_TYPE_OPTIONS} value={form.userType} onChange={(e) => setForm((f) => ({ ...f, userType: e.target.value }))} />
         </Field>
-        <Field label="Full Name">
+        <Field label="Full Name" required error={!form.fullName ? 'Full name is required.' : undefined}>
           <Input value={form.fullName} onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))} />
         </Field>
-        <Field label="Employee ID">
+        <Field label="Employee ID" required error={!form.employeeId ? 'Employee ID is required.' : undefined}>
           <Input value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} />
         </Field>
-        <Field label="Windows Username">
+        <Field label="Windows Username" required error={!form.windowsUsername ? 'Windows username is required.' : undefined}>
           <Input value={form.windowsUsername} onChange={(e) => setForm((f) => ({ ...f, windowsUsername: e.target.value }))} />
         </Field>
         <Field label="Email">
           <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
         </Field>
-        <Field label="Department">
+        <Field label="Department" required error={!form.departmentId ? 'Department is required.' : undefined}>
           <Select
             placeholder="Select department…"
             options={((departments.data?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }))}
@@ -511,7 +790,7 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, departmentId: e.target.value }))}
           />
         </Field>
-        <Field label="Location">
+        <Field label="Location" required error={!form.locationId ? 'Location is required.' : undefined}>
           <Select
             placeholder="Select location…"
             options={((locations.data?.data ?? []) as { id: string; name: string }[]).map((l) => ({ value: l.id, label: l.name }))}
@@ -527,15 +806,15 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, supervisorId: e.target.value }))}
           />
         </Field>
-        <Field label="Designation">
+        <Field label="Functional Role">
           <Select
-            placeholder="Select designation…"
+            placeholder="Select functional role…"
             options={[{ value: '', label: '— None —' }, ...((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))]}
             value={form.designationId}
             onChange={(e) => setForm((f) => ({ ...f, designationId: e.target.value }))}
           />
         </Field>
-        <Field label="Roles">
+        <Field label="Roles" required error={form.roleIds.length === 0 ? 'At least one role is required.' : undefined}>
           <select
             multiple
             className="iz-input h-32"
@@ -559,6 +838,7 @@ export default function UsersPage() {
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
             <h2 className="mb-1 text-lg font-semibold">Password Reset Successfully</h2>
             <p className="mb-4 text-sm text-slate-500">
+              Both the login password and the electronic-signature password have been reset to the same temporary value.
               Share these credentials with the user securely. The temporary password cannot be retrieved again.
             </p>
             <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-4 font-mono text-sm">
@@ -567,12 +847,13 @@ export default function UsersPage() {
                 <strong>{resetPwdDialog.username}</strong>
               </div>
               <div>
-                <span className="text-slate-500">Temp Password: </span>
+                <span className="text-slate-500">Temp Password (login &amp; signature): </span>
                 <strong>{resetPwdDialog.tempPassword}</strong>
               </div>
             </div>
             <p className="mb-4 text-xs text-amber-600">
-              The user will be required to change this password on their next login.
+              The user will be required to change their login password on their next login. They should also set a new
+              electronic-signature password from their profile.
             </p>
             <button
               className="w-full rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
