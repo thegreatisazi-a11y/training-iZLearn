@@ -599,6 +599,72 @@ export async function getUserLifecycle(userId: string) {
   };
 }
 
+// ---- Team management (supervisor visibility) --------------------------------
+
+/**
+ * Team overview for a supervisor: every user reporting to `supervisorId` (or ALL
+ * users when `seeAll`), each with a training summary + JD/CV/TNI/certificate
+ * status. Strictly scoped server-side — a supervisor only ever sees their own
+ * reports, so this is safe for any authenticated caller.
+ */
+export async function listMyTeam(supervisorId: string, seeAll: boolean, q: PaginationQuery) {
+  const where: Prisma.UserWhereInput = {
+    isDeleted: false,
+    ...(seeAll ? {} : { supervisorId }),
+    ...(q.includeInactive ? {} : { isActive: true }),
+    ...(q.search
+      ? { OR: [{ fullName: { contains: q.search, mode: 'insensitive' } }, { employeeId: { contains: q.search, mode: 'insensitive' } }] }
+      : {}),
+  };
+  const users = await prisma.user.findMany({ where, orderBy: { fullName: 'asc' } });
+  const ids = users.map((u) => u.id);
+  if (!ids.length) return { data: [], total: 0, page: q.page, pageSize: q.pageSize };
+
+  const [assignments, jds, cvs, certs, tnis] = await Promise.all([
+    prisma.trainingAssignment.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'DEFERRED' } } }),
+    prisma.jobDescription.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'OBSOLETE' } } }),
+    prisma.curriculumVitae.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
+    prisma.certificate.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
+    prisma.tNI.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true, status: true } }),
+  ]);
+
+  const acc = new Map<string, { total: number; completed: number; pending: number; overdue: number }>();
+  for (const a of assignments) {
+    const c = acc.get(a.userId) ?? { total: 0, completed: 0, pending: 0, overdue: 0 };
+    c.total += 1;
+    if (a.status === 'COMPLETED' || a.status === 'WAIVED') c.completed += 1;
+    else if (a.status === 'OVERDUE') c.overdue += 1;
+    else c.pending += 1;
+    acc.set(a.userId, c);
+  }
+  const jdAck = new Map<string, boolean>();
+  for (const j of jds) if (j.acknowledgedAt) jdAck.set(j.userId, true);
+  const hasCv = new Set(cvs.map((c) => c.userId));
+  const certCount = new Map<string, number>();
+  for (const c of certs) certCount.set(c.userId, (certCount.get(c.userId) ?? 0) + 1);
+  const tniPending = new Map<string, number>();
+  for (const t of tnis) if (t.status === 'PENDING') tniPending.set(t.userId, (tniPending.get(t.userId) ?? 0) + 1);
+
+  const named = await withNames(users);
+  const data = named.map((u) => {
+    const t = acc.get(u.id) ?? { total: 0, completed: 0, pending: 0, overdue: 0 };
+    return {
+      id: u.id,
+      fullName: u.fullName,
+      employeeId: u.employeeId,
+      isActive: u.isActive,
+      departmentName: u.departmentName,
+      functionalRoleNames: u.functionalRoleNames,
+      training: t,
+      jdAcknowledged: jdAck.get(u.id) ?? false,
+      cvCompleted: hasCv.has(u.id),
+      certificates: certCount.get(u.id) ?? 0,
+      tniPending: tniPending.get(u.id) ?? 0,
+    };
+  });
+  return { data, total: data.length, page: q.page, pageSize: q.pageSize };
+}
+
 /** CR-16: move a user along the release lifecycle. Controlled action — e-signed. */
 export async function setReleaseStage(userId: string, stage: 'ONBOARDING' | 'READY_FOR_RELEASE' | 'RELEASED', req: Request) {
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });

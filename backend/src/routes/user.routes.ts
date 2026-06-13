@@ -21,6 +21,9 @@ router.get('/', requirePermission('userManagement', 'read'), c.list);
 // CR-12: export the (filtered) users list. Must precede '/:id' so it is not captured as an id.
 router.get('/export', requirePermission('userManagement', 'export'), c.exportUsers);
 
+// Team overview — self-scoped (a supervisor sees only their own reports; admin sees all).
+router.get('/team', c.team);
+
 // Creation requests (specific routes before '/:id')
 router.get('/requests', requirePermission('userManagement', 'read'), c.listRequests);
 router.get('/requests/:id', requirePermission('userManagement', 'read'), c.getRequest);

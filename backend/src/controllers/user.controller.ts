@@ -106,6 +106,14 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
 });
 
+// Team overview: a supervisor sees their own reports; SUPER_ADMIN sees everyone.
+export const team = asyncHandler(async (req: Request, res: Response) => {
+  const q = paginationQuery.parse(req.query);
+  const seeAll = req.user!.roleNames.includes('SUPER_ADMIN') || req.user!.permissions['userManagement']?.approve === true;
+  const r = await svc.listMyTeam(req.user!.id, seeAll, q);
+  sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
+});
+
 // CR-15/16: user lifecycle aggregate + release-stage transition.
 export const lifecycle = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.getUserLifecycle(req.params.id));

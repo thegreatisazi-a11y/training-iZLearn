@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { MultiSelect } from '@/components/common/MultiSelect';
+import { SearchableSelect, type SearchOption } from '@/components/common/SearchableSelect';
 import { Button } from '@/components/ui/button';
 import { Input, Field, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -229,6 +230,17 @@ export default function UsersPage() {
   const roles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }) });
   const allUsers = useQuery({ queryKey: ['users', 'supervisors'], queryFn: () => svc.users.list({ pageSize: 500, includeInactive: false }) });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
+
+  // Supervisor options = active users only, rich label (name · ID · dept · functional roles · status), self excluded.
+  type SupRow = { id: string; fullName: string; employeeId: string; departmentName?: string | null; functionalRoleNames?: string[]; isActive?: boolean };
+  const supervisorOptions = (excludeId?: string): SearchOption[] =>
+    ((allUsers.data?.data ?? []) as SupRow[])
+      .filter((u) => u.id !== excludeId && u.isActive !== false)
+      .map((u) => ({
+        value: u.id,
+        label: `${u.fullName} (${u.employeeId})`,
+        sublabel: [u.departmentName, u.functionalRoleNames?.length ? u.functionalRoleNames.join(', ') : null].filter(Boolean).join(' · ') || undefined,
+      }));
 
   const actionMutation = useMutation({
     mutationFn: ({ action, id, body }: { action: ActionKind; id: string; body: unknown }) => svc.users[action](id, body),
@@ -550,6 +562,15 @@ export default function UsersPage() {
             <dd className="col-span-2">{viewUser.departmentName || '—'}</dd>
             <dt className="font-medium text-slate-500">Location</dt>
             <dd className="col-span-2">{viewUser.locationName || '—'}</dd>
+            <dt className="font-medium text-slate-500">Functional Role(s)</dt>
+            <dd className="col-span-2">{viewUser.functionalRoleNames && viewUser.functionalRoleNames.length ? viewUser.functionalRoleNames.join(', ') : '—'}</dd>
+            <dt className="font-medium text-slate-500">Supervisor</dt>
+            <dd className="col-span-2">
+              {(() => {
+                const sup = ((allUsers.data?.data ?? []) as { id: string; fullName: string; employeeId: string }[]).find((u) => u.id === viewUser.supervisorId);
+                return sup ? `${sup.fullName} (${sup.employeeId})` : '—';
+              })()}
+            </dd>
             <dt className="font-medium text-slate-500">Roles</dt>
             <dd className="col-span-2">{viewUser.roleNames && viewUser.roleNames.length ? viewUser.roleNames.join(', ') : '—'}</dd>
             <dt className="font-medium text-slate-500">Status</dt>
@@ -602,16 +623,12 @@ export default function UsersPage() {
           />
         </Field>
         <Field label="Supervisor">
-          <Select
+          <SearchableSelect
             placeholder="Select supervisor…"
-            options={[
-              { value: '', label: '— None —' },
-              ...((allUsers.data?.data ?? []) as { id: string; fullName: string; employeeId: string }[])
-                .filter((u) => u.id !== editUser?.id)
-                .map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` })),
-            ]}
+            options={supervisorOptions(editUser?.id)}
             value={editForm.supervisorId}
-            onChange={(e) => setEditForm((f) => ({ ...f, supervisorId: e.target.value }))}
+            onChange={(supervisorId) => setEditForm((f) => ({ ...f, supervisorId }))}
+            emptyText="No active users"
           />
         </Field>
         <Field label="Functional Role(s)">
@@ -805,11 +822,12 @@ export default function UsersPage() {
           />
         </Field>
         <Field label="Supervisor (optional — for training notifications)">
-          <Select
+          <SearchableSelect
             placeholder="Select supervisor…"
-            options={[{ value: '', label: '— None —' }, ...((allUsers.data?.data ?? []) as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }))]}
+            options={supervisorOptions()}
             value={form.supervisorId}
-            onChange={(e) => setForm((f) => ({ ...f, supervisorId: e.target.value }))}
+            onChange={(supervisorId) => setForm((f) => ({ ...f, supervisorId }))}
+            emptyText="No active users"
           />
         </Field>
         <Field label="Functional Role(s)">
