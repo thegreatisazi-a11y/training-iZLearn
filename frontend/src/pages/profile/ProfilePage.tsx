@@ -20,6 +20,7 @@ interface Assignment {
   id: string;
   topicId: string;
   topicTitle?: string;
+  topicNumber?: string;
   status: string;
   dueDate: string | null;
 }
@@ -164,13 +165,13 @@ export default function ProfilePage() {
   });
 
   const trainingColumns: Column<Assignment>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle || r.topicNumber || '—' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
   ];
   const certColumns: Column<Certificate>[] = [
     { key: 'certificateNumber', header: 'Certificate No.' },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle || '—' },
     { key: 'certificateType', header: 'Type' },
     { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
     {

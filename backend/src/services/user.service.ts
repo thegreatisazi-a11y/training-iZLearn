@@ -49,21 +49,38 @@ async function assertRolesActive(roleIds: string[]): Promise<void> {
   }
 }
 
-/** Resolve department / location names for a set of users (UI convenience). */
-async function withNames<T extends { departmentId: string; locationId: string }>(rows: T[]) {
+/** Normalise a user's functional roles to an id array (merges legacy single + array). */
+function functionalRoleIds(r: { designationId?: string | null; designationIds?: unknown }): string[] {
+  const arr = Array.isArray(r.designationIds) ? (r.designationIds as string[]) : [];
+  const merged = [...arr];
+  if (r.designationId && !merged.includes(r.designationId)) merged.unshift(r.designationId);
+  return merged.filter(Boolean);
+}
+
+/** Resolve department / location / functional-role names for a set of users (UI convenience). */
+async function withNames<T extends { departmentId: string; locationId: string; designationId?: string | null; designationIds?: unknown }>(rows: T[]) {
   const deptIds = Array.from(new Set(rows.map((r) => r.departmentId)));
   const locIds = Array.from(new Set(rows.map((r) => r.locationId)));
-  const [depts, locs] = await Promise.all([
+  const frIds = Array.from(new Set(rows.flatMap((r) => functionalRoleIds(r))));
+  const [depts, locs, frs] = await Promise.all([
     deptIds.length ? prisma.department.findMany({ where: { id: { in: deptIds } } }) : Promise.resolve([]),
     locIds.length ? prisma.location.findMany({ where: { id: { in: locIds } } }) : Promise.resolve([]),
+    frIds.length ? prisma.designationMaster.findMany({ where: { id: { in: frIds } } }) : Promise.resolve([]),
   ]);
   const deptMap = new Map(depts.map((d) => [d.id, d.name]));
   const locMap = new Map(locs.map((l) => [l.id, l.name]));
-  return rows.map((r) => ({
-    ...r,
-    departmentName: deptMap.get(r.departmentId) ?? null,
-    locationName: locMap.get(r.locationId) ?? null,
-  }));
+  const frMap = new Map(frs.map((f) => [f.id, f.displayName]));
+  return rows.map((r) => {
+    const ids = functionalRoleIds(r);
+    return {
+      ...r,
+      departmentName: deptMap.get(r.departmentId) ?? null,
+      locationName: locMap.get(r.locationId) ?? null,
+      // #2: normalised functional-role ids + their display names for the UI.
+      designationIds: ids,
+      functionalRoleNames: ids.map((id) => frMap.get(id)).filter(Boolean) as string[],
+    };
+  });
 }
 
 /**
@@ -119,7 +136,9 @@ export async function createUserRequest(input: CreateUserInput, createdBy: strin
       departmentId: input.departmentId,
       locationId: input.locationId,
       supervisorId: input.supervisorId ?? null,
-      designationId: input.designationId ?? null,
+      // #2: store all functional roles; designationId stays the primary (first).
+      designationId: input.designationId ?? input.designationIds?.[0] ?? null,
+      designationIds: (input.designationIds ?? (input.designationId ? [input.designationId] : [])) as Prisma.InputJsonValue,
       roleIds: input.roleIds as Prisma.InputJsonValue,
       remarks: input.remarks ?? null,
       status: 'PENDING_APPROVAL',
@@ -208,6 +227,8 @@ export async function decideRequest(
         locationId: request.locationId,
         supervisorId: (request as { supervisorId?: string | null }).supervisorId ?? null,
         designationId: (request as { designationId?: string | null }).designationId ?? null,
+        // #2: carry all functional roles from the request onto the user.
+        designationIds: ((request as { designationIds?: unknown }).designationIds ?? []) as Prisma.InputJsonValue,
         isActive: true,
         mustChangePassword: true,
         createdBy: req.user!.id,
@@ -332,7 +353,13 @@ export async function updateUser(id: string, input: UpdateUserInput, req: Reques
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
       ...(input.locationId !== undefined ? { locationId: input.locationId } : {}),
       ...(input.supervisorId !== undefined ? { supervisorId: input.supervisorId } : {}),
-      ...(input.designationId !== undefined ? { designationId: input.designationId } : {}),
+      // #2: when the functional-role array is supplied, store it and keep designationId
+      // (the primary, used by JD auto-assign) in sync with the first selected role.
+      ...(input.designationIds !== undefined
+        ? { designationIds: input.designationIds as Prisma.InputJsonValue, designationId: input.designationIds[0] ?? null }
+        : input.designationId !== undefined
+          ? { designationId: input.designationId }
+          : {}),
       ...(input.userType !== undefined ? { userType: input.userType } : {}),
     },
   });

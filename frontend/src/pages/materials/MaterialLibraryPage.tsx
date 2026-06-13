@@ -188,7 +188,7 @@ export default function MaterialLibraryPage() {
       <Dialog
         open={!!viewing}
         onClose={() => setViewing(null)}
-        className="max-w-4xl"
+        className="max-w-6xl"
         title={viewing?.originalFileName ?? 'View Material'}
         footer={
           <>

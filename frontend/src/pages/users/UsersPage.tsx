@@ -6,6 +6,7 @@ import { userType as userTypeEnum } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
+import { MultiSelect } from '@/components/common/MultiSelect';
 import { Button } from '@/components/ui/button';
 import { Input, Field, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -31,6 +32,8 @@ interface UserRow {
   roleNames?: string[];
   supervisorId?: string | null;
   designationId?: string | null;
+  designationIds?: string[];
+  functionalRoleNames?: string[];
   isActive: boolean;
 }
 
@@ -41,6 +44,7 @@ const EMPTY_EDIT_FORM = {
   locationId: '',
   supervisorId: '',
   designationId: '',
+  designationIds: [] as string[],
   userType: 'INTERNAL',
 };
 
@@ -70,6 +74,7 @@ const EMPTY_FORM = {
   locationId: '',
   supervisorId: '',
   designationId: '',
+  designationIds: [] as string[],
   roleIds: [] as string[],
   remarks: '',
 };
@@ -297,6 +302,7 @@ export default function UsersPage() {
       locationId: row.locationId ?? '',
       supervisorId: row.supervisorId ?? '',
       designationId: row.designationId ?? '',
+      designationIds: row.designationIds ?? (row.designationId ? [row.designationId] : []),
       userType: row.userType ?? 'INTERNAL',
     });
   }
@@ -608,12 +614,12 @@ export default function UsersPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, supervisorId: e.target.value }))}
           />
         </Field>
-        <Field label="Functional Role">
-          <Select
-            placeholder="Select functional role…"
-            options={[{ value: '', label: '— None —' }, ...((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))]}
-            value={editForm.designationId}
-            onChange={(e) => setEditForm((f) => ({ ...f, designationId: e.target.value }))}
+        <Field label="Functional Role(s)">
+          <MultiSelect
+            options={((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))}
+            value={editForm.designationIds}
+            onChange={(designationIds) => setEditForm((f) => ({ ...f, designationIds }))}
+            placeholder="Search functional roles…"
           />
         </Field>
       </Dialog>
@@ -635,7 +641,7 @@ export default function UsersPage() {
               departmentId: editForm.departmentId,
               locationId: editForm.locationId,
               supervisorId: editForm.supervisorId || undefined,
-              designationId: editForm.designationId || undefined,
+              designationIds: editForm.designationIds,
               userType: editForm.userType,
               reasonForChange: reason,
               signature: sig,
@@ -755,7 +761,7 @@ export default function UsersPage() {
                   departmentId: form.departmentId,
                   locationId: form.locationId,
                   supervisorId: form.supervisorId || undefined,
-                  designationId: form.designationId || undefined,
+                  designationIds: form.designationIds,
                   roleIds: form.roleIds,
                   remarks: form.remarks || undefined,
                 })
@@ -806,12 +812,12 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, supervisorId: e.target.value }))}
           />
         </Field>
-        <Field label="Functional Role">
-          <Select
-            placeholder="Select functional role…"
-            options={[{ value: '', label: '— None —' }, ...((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))]}
-            value={form.designationId}
-            onChange={(e) => setForm((f) => ({ ...f, designationId: e.target.value }))}
+        <Field label="Functional Role(s)">
+          <MultiSelect
+            options={((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))}
+            value={form.designationIds}
+            onChange={(designationIds) => setForm((f) => ({ ...f, designationIds }))}
+            placeholder="Search functional roles…"
           />
         </Field>
         <Field label="Roles" required error={form.roleIds.length === 0 ? 'At least one role is required.' : undefined}>

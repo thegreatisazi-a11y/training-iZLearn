@@ -144,7 +144,7 @@ export default function BundlesPage() {
           [
             ['Topics', r.topicIds?.length ?? 0],
             ['Departments', r.departmentIds?.length ?? 0],
-            ['Designations', r.designationIds?.length ?? 0],
+            ['Functional Roles', r.designationIds?.length ?? 0],
             ['Users', r.userIds?.length ?? 0],
             ['Due date', r.dueDate ? String(r.dueDate).slice(0, 10) : '—'],
             ['Status', r.isActive ? 'Active' : 'Inactive'],

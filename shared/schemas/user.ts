@@ -18,7 +18,8 @@ export const createUserSchema = z.object({
   departmentId: uuid,
   locationId: uuid,
   supervisorId: uuid.optional(), // UR-42: direct line manager for training notifications
-  designationId: uuid.optional(), // job designation (master data)
+  designationId: uuid.optional(), // primary functional role (back-compat)
+  designationIds: z.array(uuid).optional(), // #2: all functional roles
   roleIds: z.array(uuid).min(1, { message: 'At least one role is required' }),
   remarks: optionalString,
 });
@@ -30,7 +31,8 @@ export const updateUserSchema = z.object({
   departmentId: uuid.optional(),
   locationId: uuid.optional(),
   supervisorId: uuid.optional(), // UR-42
-  designationId: uuid.optional(), // job designation (master data)
+  designationId: uuid.optional(), // primary functional role (back-compat)
+  designationIds: z.array(uuid).optional(), // #2: all functional roles
   userType: userType.optional(),
   reasonForChange,
 });

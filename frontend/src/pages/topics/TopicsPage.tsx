@@ -56,6 +56,7 @@ const emptyForm = {
   trainingType: trainingType.options[0],
   departmentId: '',
   designationId: '',
+  designationIds: [] as string[],
   roleId: '',
   durationMinutes: '',
   passingScorePercent: '',
@@ -114,7 +115,7 @@ export default function TopicsPage() {
         trainingType: form.trainingType,
         status,
         departmentId: form.departmentId || undefined,
-        designationId: form.designationId || undefined,
+        designationIds: form.designationIds,
         roleId: form.roleId || undefined,
         durationMinutes: Number(form.durationMinutes),
         passingScorePercent: Number(form.passingScorePercent),
@@ -365,8 +366,8 @@ export default function TopicsPage() {
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Designation (optional)">
-            <Select placeholder="Select designation…" options={desigOptions} value={form.designationId} onChange={(e) => setForm({ ...form, designationId: e.target.value })} />
+          <Field label="Functional Role(s) (optional)">
+            <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
           </Field>
           <Field label="Role (optional)">
             <Select placeholder="Select role…" options={roleOptions} value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })} />

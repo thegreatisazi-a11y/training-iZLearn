@@ -32,7 +32,8 @@ model User {
   departmentId          String
   locationId            String
   supervisorId          String? // direct line manager (UR-42)
-  designationId         String? // job designation (master data)
+  designationId         String? // primary functional role (kept for JD auto-assign + back-compat)
+  designationIds        Json     @default("[]") // #2: all functional roles assigned to the user
   isActive              Boolean   @default(true)
   isDeleted             Boolean   @default(false)
   lastLoginAt           DateTime?
@@ -124,7 +125,8 @@ model UserCreationRequest {
   departmentId    String
   locationId      String
   supervisorId    String? // UR-42: direct line manager
-  designationId   String? // job designation (master data)
+  designationId   String? // primary functional role (back-compat)
+  designationIds  Json     @default("[]") // #2: all functional roles requested for the user
   roleIds         Json // array of roleId
   remarks         String?
   status          UserRequestStatus @default(PENDING_APPROVAL)
@@ -161,7 +163,8 @@ model TrainingTopic {
   trainingType            TrainingType
   status                  TopicStatus  @default(DRAFT) // draft topics are hidden from trainees
   departmentId            String? // optional department this SOP/topic belongs to
-  designationId           String? // DEPRECATED (D1): designation removed from izLearn; retained for data history only
+  designationId           String? // primary functional role (back-compat)
+  designationIds          Json         @default("[]") // #2: functional roles this topic targets
   roleId                  String? // DEPRECATED: single-role mapping; superseded by roleIds (CR-30)
   roleIds                 Json         @default("[]") // CR-30: multiple roles a topic is mapped to (array of roleId)
   durationMinutes         Int
@@ -912,7 +915,8 @@ model BundleTopic {
 model CurriculumVitae {
   id            String   @id @default(uuid()) @map("_id")
   userId        String   @unique
-  languagesKnown String? // "read, write, understand" free text
+  languagesKnown String? // legacy free text (back-compat)
+  languages      Json    @default("[]") // #4: [{ language, read, write, understand }]
   qualifications Json    @default("[]") // [{ year, degree, specialization, institute }]
   currentRole   String? // current role / designation (defaults to functional role)
   currentTenureFrom String? // MM-YYYY

@@ -14,9 +14,11 @@ import { printHtml, printTable } from '@/lib/print';
 interface Qualification { year?: string; degree?: string; specialization?: string; institute?: string }
 interface Experience { organisation?: string; role?: string; tenureFrom?: string; tenureTo?: string; responsibilities?: string }
 interface Numbered { srNo?: string | number; detail?: string }
-interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null }
+interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
+interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null; functionalRoles?: string[] }
 interface CvData {
   languagesKnown?: string | null;
+  languages?: LanguageItem[];
   qualifications?: Qualification[];
   currentRole?: string | null;
   currentTenureFrom?: string | null;
@@ -29,6 +31,7 @@ interface CvData {
 
 interface FormState {
   languagesKnown: string;
+  languages: LanguageItem[];
   qualifications: Qualification[];
   currentRole: string;
   currentTenureFrom: string;
@@ -42,6 +45,7 @@ interface FormState {
 function emptyForm(): FormState {
   return {
     languagesKnown: '',
+    languages: [{}],
     qualifications: [{}],
     currentRole: '',
     currentTenureFrom: '',
@@ -65,6 +69,7 @@ export default function MyCVPage() {
     if (!cv) return;
     setForm({
       languagesKnown: cv.languagesKnown ?? '',
+      languages: cv.languages?.length ? cv.languages : [{}],
       qualifications: cv.qualifications?.length ? cv.qualifications : [{}],
       currentRole: cv.currentRole ?? '',
       currentTenureFrom: cv.currentTenureFrom ?? '',
@@ -80,6 +85,7 @@ export default function MyCVPage() {
     mutationFn: () =>
       svc.cv.save({
         languagesKnown: form.languagesKnown || undefined,
+        languages: form.languages.filter((l) => l.language),
         qualifications: form.qualifications.filter((q) => q.year || q.degree || q.specialization || q.institute),
         currentRole: form.currentRole || undefined,
         currentTenureFrom: form.currentTenureFrom || undefined,
@@ -101,7 +107,8 @@ export default function MyCVPage() {
     const body =
       `<h1>Curriculum Vitae</h1>` +
       `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''}</div>` +
-      `<div class="section">Languages Known</div><p>${form.languagesKnown || '—'}</p>` +
+      `<div class="section">Languages Known</div>` +
+      printTable(['Language', 'Read', 'Write', 'Understand'], form.languages.filter((l) => l.language).map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—'])) +
       `<div class="section">Educational Qualifications</div>` +
       printTable(['Year', 'Degree', 'Specialization', 'Institute'], form.qualifications.map((q) => [q.year, q.degree, q.specialization, q.institute])) +
       `<div class="section">Current Role</div><p>${form.currentRole || '—'} (${form.currentTenureFrom || '?'} → ${form.currentTenureTo || 'present'})</p><p>${form.currentResponsibilities || ''}</p>` +
@@ -141,13 +148,24 @@ export default function MyCVPage() {
             <div><div className="text-xs text-slate-500">Functional Role</div><div className="font-medium">{header?.functionalRole ?? '—'}</div></div>
             <div><div className="text-xs text-slate-500">Department</div><div className="font-medium">{header?.departmentName ?? '—'}</div></div>
           </div>
-          <div className="mt-3">
-            <Field label="Language(s) Known" hint="e.g. English (read, write, understand)">
-              <Input value={form.languagesKnown} onChange={(e) => upd('languagesKnown', e.target.value)} />
-            </Field>
-          </div>
         </CardContent>
       </Card>
+
+      {/* #4: structured Language(s) Known — name + Read / Write / Understand */}
+      <RepeatableSection
+        title="Language(s) Known"
+        rows={form.languages}
+        onChange={(rows) => upd('languages', rows)}
+        blank={{}}
+        render={(row, set) => (
+          <div className="flex flex-wrap items-center gap-3">
+            <Input className="flex-1 min-w-[180px]" placeholder="Language (e.g. English)" value={row.language ?? ''} onChange={(e) => set({ ...row, language: e.target.value })} />
+            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.read} onChange={(e) => set({ ...row, read: e.target.checked })} /> Read</label>
+            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.write} onChange={(e) => set({ ...row, write: e.target.checked })} /> Write</label>
+            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.understand} onChange={(e) => set({ ...row, understand: e.target.checked })} /> Understand</label>
+          </div>
+        )}
+      />
 
       {/* Qualifications */}
       <RepeatableSection

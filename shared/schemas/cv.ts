@@ -23,8 +23,17 @@ const numberedItem = z.object({
   detail: optionalString,
 });
 
+/** #4: a structured known-language entry. */
+const languageItem = z.object({
+  language: optionalString,
+  read: z.boolean().optional(),
+  write: z.boolean().optional(),
+  understand: z.boolean().optional(),
+});
+
 export const upsertCvSchema = z.object({
   languagesKnown: optionalString,
+  languages: z.array(languageItem).optional(),
   qualifications: z.array(qualification).optional(),
   currentRole: optionalString,
   currentTenureFrom: optionalString,

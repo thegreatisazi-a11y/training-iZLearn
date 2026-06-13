@@ -19,16 +19,22 @@ function isAdmin(user: AuthUser): boolean {
 async function cvHeader(userId: string) {
   const u = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
   if (!u) throw AppError.notFound('User not found');
-  const [dept, fr] = await Promise.all([
+  // #2: merge legacy single + array functional roles, resolve to names.
+  const ids = Array.from(
+    new Set([...(Array.isArray(u.designationIds) ? (u.designationIds as string[]) : []), ...(u.designationId ? [u.designationId] : [])].filter(Boolean)),
+  );
+  const [dept, frs] = await Promise.all([
     prisma.department.findFirst({ where: { id: u.departmentId } }),
-    u.designationId ? prisma.designationMaster.findFirst({ where: { id: u.designationId } }) : Promise.resolve(null),
+    ids.length ? prisma.designationMaster.findMany({ where: { id: { in: ids } } }) : Promise.resolve([]),
   ]);
+  const functionalRoleNames = frs.map((f) => f.displayName);
   return {
     userId: u.id,
     employeeName: u.fullName,
     employeeCode: u.employeeId,
     departmentName: dept?.name ?? null,
-    functionalRole: fr?.displayName ?? null,
+    functionalRole: functionalRoleNames.join(', ') || null,
+    functionalRoles: functionalRoleNames,
   };
 }
 
@@ -40,6 +46,7 @@ export async function getMyCV(userId: string) {
 export async function upsertMyCV(userId: string, input: UpsertCvInput) {
   const data = {
     languagesKnown: input.languagesKnown ?? null,
+    languages: (input.languages ?? []) as Prisma.InputJsonValue,
     qualifications: (input.qualifications ?? []) as Prisma.InputJsonValue,
     currentRole: input.currentRole ?? null,
     currentTenureFrom: input.currentTenureFrom ?? null,

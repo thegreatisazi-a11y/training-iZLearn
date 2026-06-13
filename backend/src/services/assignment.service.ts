@@ -132,18 +132,25 @@ export async function listMyTrainings(userId: string) {
     if (at.score !== null && (cur.score === null || at.score > cur.score)) cur.score = at.score;
     bestByTopic.set(at.topicId, cur);
   }
-  return assignments.map((a) => ({
-    id: a.id,
-    topicId: a.topicId,
-    status: a.status,
-    dueDate: a.dueDate,
-    refresherDueDate: a.refresherDueDate,
-    assignmentType: a.assignmentType,
-    requiresSupervisorApproval: a.requiresSupervisorApproval,
-    supervisorApprovalStatus: a.supervisorApprovalStatus,
-    topic: topicMap.get(a.topicId) ?? null,
-    result: bestByTopic.get(a.topicId) ?? null,
-  }));
+  return assignments.map((a) => {
+    const topic = topicMap.get(a.topicId) ?? null;
+    return {
+      id: a.id,
+      topicId: a.topicId,
+      status: a.status,
+      dueDate: a.dueDate,
+      refresherDueDate: a.refresherDueDate,
+      assignmentType: a.assignmentType,
+      requiresSupervisorApproval: a.requiresSupervisorApproval,
+      supervisorApprovalStatus: a.supervisorApprovalStatus,
+      topic,
+      // #7: flat, human-readable fields so no consumer ever falls back to the raw id.
+      topicTitle: topic?.title ?? null,
+      topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
+      topicVersion: topic?.currentVersion ?? null,
+      result: bestByTopic.get(a.topicId) ?? null,
+    };
+  });
 }
 
 export async function updateAssignment(id: string, input: UpdateAssignmentInput) {

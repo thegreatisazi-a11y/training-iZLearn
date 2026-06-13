@@ -148,7 +148,7 @@ export default function BundleDetailPage() {
       printTable(['Topic No.', 'Topic', 'Type', 'Version', 'Status'], b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status])) +
       `<div class="section">Targets</div>` +
       printTable(
-        ['Departments', 'Designations', 'Roles', 'Resolved users'],
+        ['Departments', 'Functional Roles', 'Roles', 'Resolved users'],
         [[b.departments.map((d) => d.name).join(', ') || '—', b.designations.map((d) => d.displayName).join(', ') || '—', b.roles.map((r) => r.roleName).join(', ') || '—', b.resolvedUserCount]],
       );
     printHtml(`Bundle — ${b.name}`, body);
@@ -212,7 +212,7 @@ export default function BundleDetailPage() {
         </Card>
         <Card>
           <CardContent>
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><BadgeCheck className="h-4 w-4" /> Designations ({b.designations.length})</div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><BadgeCheck className="h-4 w-4" /> Functional Roles ({b.designations.length})</div>
             <ul className="space-y-1 text-sm text-slate-600">
               {b.designations.map((d) => <li key={d.id}>{d.displayName}</li>)}
               {b.designations.length === 0 && <li className="text-slate-400">—</li>}
@@ -282,7 +282,7 @@ export default function BundleDetailPage() {
         }
       >
         <p className="mb-3 text-sm text-slate-600">
-          This creates one training assignment for every user in the bundle's target departments, designations and named users, for each published topic. Already-assigned users are skipped. Assigning training requires your electronic signature.
+          This creates one training assignment for every user in the bundle's target departments, functional roles and named users, for each published topic. Already-assigned users are skipped. Assigning training requires your electronic signature.
         </p>
         <Field label="Due date (optional)">
           <Input type="date" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} />

@@ -212,7 +212,7 @@ export default function TopicDetailPage() {
   const [editTopicReasonOpen, setEditTopicReasonOpen] = useState(false);
   const [editTopicForm, setEditTopicForm] = useState({
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM',
-    departmentId: '', designationId: '', roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
+    departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
     questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
     requiresAssessment: true, assessmentTimeMinutes: '',
     randomizeQuestions: true, showExplanations: true, blockAfterMaxAttempts: true,
@@ -367,7 +367,7 @@ export default function TopicDetailPage() {
         description: editTopicForm.description || undefined,
         trainingType: editTopicForm.trainingType,
         departmentId: editTopicForm.departmentId || undefined,
-        designationId: editTopicForm.designationId || undefined,
+        designationIds: editTopicForm.designationIds,
         roleIds: editTopicForm.roleIds,
         requiresAssessment: editTopicForm.requiresAssessment,
         assessmentTimeMinutes: editTopicForm.assessmentTimeMinutes ? Number(editTopicForm.assessmentTimeMinutes) : null,
@@ -444,6 +444,9 @@ export default function TopicDetailPage() {
       trainingType: String(t.trainingType ?? 'CLASSROOM'),
       departmentId: String(t.departmentId ?? ''),
       designationId: String(t.designationId ?? ''),
+      designationIds: Array.isArray(t.designationIds) && (t.designationIds as string[]).length
+        ? (t.designationIds as string[])
+        : t.designationId ? [String(t.designationId)] : [],
       roleIds: Array.isArray(t.roleIds) && (t.roleIds as string[]).length ? (t.roleIds as string[]) : t.roleId ? [String(t.roleId)] : [],
       durationMinutes: t.durationMinutes != null ? String(t.durationMinutes) : '',
       maxAttempts: t.maxAttempts != null ? String(t.maxAttempts) : '',
@@ -1166,7 +1169,7 @@ export default function TopicDetailPage() {
         <Field label="Description"><Textarea value={editTopicForm.description} onChange={(e) => setEditTopicForm((f) => ({ ...f, description: e.target.value }))} /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Department"><Select placeholder="—" options={editDeptOpts} value={editTopicForm.departmentId} onChange={(e) => setEditTopicForm((f) => ({ ...f, departmentId: e.target.value }))} /></Field>
-          <Field label="Functional Role"><Select placeholder="—" options={editDesigOpts} value={editTopicForm.designationId} onChange={(e) => setEditTopicForm((f) => ({ ...f, designationId: e.target.value }))} /></Field>
+          <Field label="Functional Role(s)"><MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" /></Field>
         </div>
         <Field label="Roles (one or more)" hint="The topic is assigned to users holding any of these roles.">
           <MultiSelect

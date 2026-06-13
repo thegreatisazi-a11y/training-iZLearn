@@ -10,6 +10,7 @@ export const createTopicSchema = z.object({
   trainingType,
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
+  designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
   roleId: uuid.optional(),
   roleIds: z.array(uuid).optional(), // CR-30: multiple roles a topic is mapped to
   durationMinutes: z.coerce.number().int().positive(),
@@ -44,6 +45,7 @@ export const updateTopicSchema = z.object({
   trainingType: trainingType.optional(),
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
+  designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
   roleId: uuid.optional(),
   roleIds: z.array(uuid).optional(), // CR-30
   requiresAssessment: z.coerce.boolean().optional(), // CR-41

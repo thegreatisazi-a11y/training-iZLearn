@@ -130,7 +130,8 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       trainingType: input.trainingType,
       status: input.status ?? 'DRAFT', // "Save as Draft" (default) vs "Create & Publish"
       departmentId: input.departmentId ?? null,
-      designationId: input.designationId ?? null,
+      designationId: input.designationId ?? input.designationIds?.[0] ?? null,
+      designationIds: (input.designationIds ?? (input.designationId ? [input.designationId] : [])) as Prisma.InputJsonValue,
       roleId: input.roleId ?? null,
       roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue,
       requiresAssessment: input.requiresAssessment ?? true,
@@ -169,7 +170,11 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.trainingType !== undefined ? { trainingType: input.trainingType } : {}),
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId ?? null } : {}),
-      ...(input.designationId !== undefined ? { designationId: input.designationId ?? null } : {}),
+      ...(input.designationIds !== undefined
+        ? { designationIds: input.designationIds as Prisma.InputJsonValue, designationId: input.designationIds[0] ?? null }
+        : input.designationId !== undefined
+          ? { designationId: input.designationId ?? null }
+          : {}),
       ...(input.roleId !== undefined ? { roleId: input.roleId ?? null } : {}),
       ...(input.roleIds !== undefined ? { roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue } : {}),
       ...(input.requiresAssessment !== undefined ? { requiresAssessment: input.requiresAssessment } : {}),
@@ -305,6 +310,7 @@ export async function reviseTopic(id: string, req: Request) {
       status: old.status === 'ARCHIVED' ? 'PUBLISHED' : old.status,
       departmentId: old.departmentId,
       designationId: old.designationId,
+      designationIds: (old.designationIds ?? []) as Prisma.InputJsonValue,
       roleId: old.roleId,
       roleIds: old.roleIds as Prisma.InputJsonValue,
       requiresAssessment: old.requiresAssessment,

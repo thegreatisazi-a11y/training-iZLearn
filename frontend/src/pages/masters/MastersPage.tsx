@@ -36,7 +36,7 @@ interface TypeRow {
 const TABS = [
   { key: 'locations', label: 'Locations' },
   { key: 'departments', label: 'Departments' },
-  { key: 'designations', label: 'Designations' },
+  { key: 'designations', label: 'Functional Roles' },
   { key: 'training-types', label: 'Training Types' },
   { key: 'document-types', label: 'Document Types' },
 ];
@@ -680,7 +680,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
     mutationFn: (body: unknown) => svc.master.createDesignation(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['designations'] });
-      toast.success('Designation created.');
+      toast.success('Functional Role created.');
       setCreateOpen(false);
       setForm({ code: '', displayName: '', description: '' });
     },
@@ -691,7 +691,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.master.updateDesignation(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['designations'] });
-      toast.success('Designation updated.');
+      toast.success('Functional Role updated.');
       setReasonAction(null);
       setEdit(null);
     },
@@ -726,7 +726,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
       {canWrite && (
         <div className="mb-3 flex justify-end">
           <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Designation
+            <Plus className="h-4 w-4" /> Add Functional Role
           </Button>
         </div>
       )}
@@ -738,13 +738,13 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
         pageSize={data?.pageSize ?? 50}
         total={data?.total ?? 0}
         onPageChange={setPage}
-        emptyText="No designations found."
+        emptyText="No functional roles found."
       />
 
       <Dialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title="Add Designation"
+        title="Add Functional Role"
         footer={
           <>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
@@ -771,7 +771,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
       <Dialog
         open={!!edit}
         onClose={() => setEdit(null)}
-        title={`Edit Designation — ${edit?.displayName ?? ''}`}
+        title={`Edit Functional Role — ${edit?.displayName ?? ''}`}
         footer={
           <>
             <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>

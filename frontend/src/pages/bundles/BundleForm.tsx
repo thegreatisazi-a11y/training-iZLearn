@@ -86,8 +86,8 @@ export function BundleForm({
         <Field label="Assign to Departments">
           <MultiSelect options={deptOpts} value={value.departmentIds} onChange={(departmentIds) => onChange({ ...value, departmentIds })} placeholder="Search departments…" />
         </Field>
-        <Field label="Assign to Designation">
-          <MultiSelect options={desigOpts} value={value.designationIds} onChange={(designationIds) => onChange({ ...value, designationIds })} placeholder="Search designations…" />
+        <Field label="Assign to Functional Role">
+          <MultiSelect options={desigOpts} value={value.designationIds} onChange={(designationIds) => onChange({ ...value, designationIds })} placeholder="Search functional roles…" />
         </Field>
       </div>
       <Field label="Assign to specific Users (optional)">

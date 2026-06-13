@@ -14,7 +14,7 @@ export function InlineFileViewer({
   materialId,
   fileName = 'material',
   fileType,
-  heightClass = 'h-[60vh]',
+  heightClass = 'h-[80vh]',
 }: {
   materialId: string;
   fileName?: string;
@@ -55,10 +55,11 @@ export function InlineFileViewer({
   if (!url) return null;
 
   // Locked container: blocks the context menu (Save/Print/etc.) and disables
-  // text highlighting/selection for the rendered material.
+  // text highlighting/selection. #8: the wrapper carries the height so media using
+  // `h-full` (full-page viewer) fills its parent instead of collapsing to zero.
   const lockProps = {
     onContextMenu: (e: MouseEvent) => e.preventDefault(),
-    className: 'select-none',
+    className: `select-none w-full ${heightClass}`,
     style: { userSelect: 'none' as const },
   };
 
@@ -68,8 +69,8 @@ export function InlineFileViewer({
       <div {...lockProps}>
         <iframe
           title={fileName}
-          src={`${url}#toolbar=0&navpanes=0&scrollbar=0`}
-          className={`w-full rounded border border-slate-200 ${heightClass}`}
+          src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+          className="h-full w-full rounded border border-slate-200"
         />
       </div>
     );
@@ -82,7 +83,7 @@ export function InlineFileViewer({
           alt={fileName}
           src={url}
           draggable={false}
-          className={`mx-auto max-w-full rounded border border-slate-200 ${heightClass} object-contain`}
+          className="mx-auto h-full max-w-full rounded border border-slate-200 object-contain"
         />
       </div>
     );
@@ -97,7 +98,7 @@ export function InlineFileViewer({
           controlsList="nodownload noplaybackrate"
           disablePictureInPicture
           onContextMenu={(e) => e.preventDefault()}
-          className={`w-full rounded border border-slate-200 ${heightClass}`}
+          className="h-full w-full rounded border border-slate-200"
         />
       </div>
     );
