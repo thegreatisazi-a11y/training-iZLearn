@@ -620,12 +620,13 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
   const ids = users.map((u) => u.id);
   if (!ids.length) return { data: [], total: 0, page: q.page, pageSize: q.pageSize };
 
-  const [assignments, jds, cvs, certs, tnis] = await Promise.all([
+  const [assignments, jds, cvs, certs, tnis, passedAttempts] = await Promise.all([
     prisma.trainingAssignment.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'DEFERRED' } } }),
     prisma.jobDescription.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'OBSOLETE' } } }),
     prisma.curriculumVitae.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
     prisma.certificate.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
     prisma.tNI.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true, status: true } }),
+    prisma.assessmentAttempt.findMany({ where: { userId: { in: ids }, isDeleted: false, isPassed: true }, select: { userId: true, topicId: true } }),
   ]);
 
   const acc = new Map<string, { total: number; completed: number; pending: number; overdue: number }>();
@@ -644,6 +645,13 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
   for (const c of certs) certCount.set(c.userId, (certCount.get(c.userId) ?? 0) + 1);
   const tniPending = new Map<string, number>();
   for (const t of tnis) if (t.status === 'PENDING') tniPending.set(t.userId, (tniPending.get(t.userId) ?? 0) + 1);
+  // Assessment completion = distinct topics the user has passed.
+  const assessPassed = new Map<string, Set<string>>();
+  for (const a of passedAttempts) {
+    const s = assessPassed.get(a.userId) ?? new Set<string>();
+    s.add(a.topicId);
+    assessPassed.set(a.userId, s);
+  }
 
   const named = await withNames(users);
   const data = named.map((u) => {
@@ -656,6 +664,7 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
       departmentName: u.departmentName,
       functionalRoleNames: u.functionalRoleNames,
       training: t,
+      assessmentsPassed: assessPassed.get(u.id)?.size ?? 0,
       jdAcknowledged: jdAck.get(u.id) ?? false,
       cvCompleted: hasCv.has(u.id),
       certificates: certCount.get(u.id) ?? 0,
@@ -663,6 +672,35 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
     };
   });
   return { data, total: data.length, page: q.page, pageSize: q.pageSize };
+}
+
+/**
+ * Training history for one team member — assignments + assessment attempts.
+ * Scoped: the caller must be the member's supervisor, or have team-wide visibility
+ * (SUPER_ADMIN / userManagement:approve). Enforced server-side.
+ */
+export async function getTeamMemberHistory(req: Request, targetUserId: string) {
+  const requester = req.user!;
+  const seeAll = requester.roleNames.includes('SUPER_ADMIN') || requester.permissions['userManagement']?.approve === true;
+  const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false } });
+  if (!target) throw AppError.notFound('User not found');
+  if (!seeAll && target.supervisorId !== requester.id) {
+    throw AppError.forbidden('You may only view the training history of your own team members.');
+  }
+  const [assignments, attempts] = await Promise.all([
+    prisma.trainingAssignment.findMany({ where: { userId: targetUserId, isDeleted: false }, orderBy: { createdAt: 'desc' } }),
+    prisma.assessmentAttempt.findMany({ where: { userId: targetUserId, isDeleted: false }, orderBy: { startedAt: 'desc' } }),
+  ]);
+  const topicIds = Array.from(new Set([...assignments.map((a) => a.topicId), ...attempts.map((a) => a.topicId)]));
+  const topics = topicIds.length
+    ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true } })
+    : [];
+  const tName = new Map(topics.map((t) => [t.id, t.title]));
+  return {
+    user: { id: target.id, fullName: target.fullName, employeeId: target.employeeId },
+    assignments: assignments.map((a) => ({ id: a.id, topic: tName.get(a.topicId) ?? a.topicId, status: a.status, dueDate: a.dueDate, createdAt: a.createdAt })),
+    attempts: attempts.map((a) => ({ id: a.id, topic: tName.get(a.topicId) ?? a.topicId, score: a.score, isPassed: a.isPassed, attemptNumber: a.attemptNumber, completedAt: a.completedAt })),
+  };
 }
 
 /** CR-16: move a user along the release lifecycle. Controlled action — e-signed. */

@@ -57,6 +57,7 @@ export const svc = {
     lifecycle: (id: string) => data(api.get(`/users/${id}/lifecycle`)),
     setReleaseStage: (id: string, body: unknown) => data(api.post(`/users/${id}/release-stage`, body)),
     team: (params?: ListParams) => api.get('/users/team', { params }).then((r) => r.data),
+    teamHistory: (userId: string) => data(api.get(`/users/team/${userId}/history`)),
   },
 
   roles: createCrud('/roles'),

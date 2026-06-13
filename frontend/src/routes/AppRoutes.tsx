@@ -67,11 +67,11 @@ export function AppRoutes() {
             <Route path="/materials" element={gate('materialManagement', 'read', <MaterialLibraryPage />)} />
             <Route path="/materials/:id/view" element={gate('materialManagement', 'read', <MaterialViewerPage />)} />
             <Route path="/my-trainings" element={<MyTrainingsPage />} />
-            <Route path="/team" element={<MyTeamPage />} />
+            <Route path="/team" element={gate('team', 'read', <MyTeamPage />)} />
             <Route path="/job-descriptions" element={gate('jobDescription', 'read', <JDPage />)} />
             <Route path="/my-jd" element={<MyJobDescriptionPage />} />
             <Route path="/my-cv" element={<MyCVPage />} />
-            <Route path="/team-cvs" element={gate('userManagement', 'read', <TeamCVsPage />)} />
+            <Route path="/team-cvs" element={gate('team', 'read', <TeamCVsPage />)} />
             <Route path="/tni" element={gate('tni', 'read', <TNIPage />)} />
             <Route path="/schedules" element={gate('scheduling', 'read', <SchedulesPage />)} />
             <Route path="/schedules/:id/attendance" element={gate('attendance', 'read', <AttendancePage />)} />

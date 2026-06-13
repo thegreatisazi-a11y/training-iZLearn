@@ -33,7 +33,7 @@ const SYSTEM = 'ROLE_MIGRATION';
 /** Legacy role name -> target role name. SUPER_ADMIN/TRAINER/TRAINEE are unchanged. */
 const ROLE_MAP: Record<string, string> = {
   SUPER_ADMIN: 'SUPER_ADMIN',
-  IT_ADMIN: 'SUPER_ADMIN', // IT admins keep full access (incl. integrations)
+  IT_ADMIN: 'SUPERVISOR', // remapped to SUPERVISOR (no new full-access admins)
   QA_ADMIN: 'SUPERVISOR',
   DEPARTMENT_HEAD: 'SUPERVISOR',
   TRAINING_COORDINATOR: 'SUPERVISOR',

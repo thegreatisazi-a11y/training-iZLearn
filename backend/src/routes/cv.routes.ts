@@ -16,7 +16,9 @@ router.use(authenticate);
 
 router.get('/mine', requirePermission('cv', 'view'), c.mine);
 router.post('/mine', requirePermission('cv', 'edit'), validate(upsertCvSchema), c.upsertMine);
-router.get('/team', requirePermission('cv', 'view'), c.team);
+// Team CV views are gated on the team module ("View team CV"); ownership/supervisor
+// scope is still enforced in the service.
+router.get('/team', requirePermission('team', 'view'), c.team);
 router.get('/user/:userId', requirePermission('cv', 'view'), c.getUser);
 
 export default router;

@@ -18,7 +18,7 @@ router.patch('/:id', requirePermission('scheduling', 'write'), requireReasonForC
 router.post('/:id/waive', requirePermission('scheduling', 'write'), requireReasonForChange, validate(waiveAssignmentSchema), c.waive);
 // CR-57: activate a deferred (assign-later) assignment.
 router.post('/:id/activate', requirePermission('scheduling', 'write'), c.activate);
-// CR-56: supervisor sign-off on a past-due / completion assignment.
-router.post('/:id/supervisor-decision', requirePermission('scheduling', 'approve'), requireReasonForChange, validate(supervisorDecisionSchema), c.supervisorDecision);
+// CR-56: supervisor sign-off on a past-due / completion assignment — "Approve/verify team training".
+router.post('/:id/supervisor-decision', requirePermission('team', 'approve'), requireReasonForChange, validate(supervisorDecisionSchema), c.supervisorDecision);
 
 export default router;

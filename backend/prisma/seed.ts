@@ -93,6 +93,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
       jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
       tni: ['view', 'create', 'edit', 'assign', 'approve'],
       cv: ['view', 'create', 'edit'],
+      team: ['view', 'review', 'approve', 'export', 'print'],
       scheduling: ['view', 'create', 'edit', 'assign'],
       attendance: ['view', 'create', 'edit'],
       assessments: ['view'],

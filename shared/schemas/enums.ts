@@ -165,6 +165,7 @@ export const PERMISSION_MODULES = [
   'jobDescription',
   'tni',
   'cv',
+  'team',
   'scheduling',
   'attendance',
   'assessments',

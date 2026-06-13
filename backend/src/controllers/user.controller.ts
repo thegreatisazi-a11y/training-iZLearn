@@ -114,6 +114,11 @@ export const team = asyncHandler(async (req: Request, res: Response) => {
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 
+// Training history for one team member (scoped to the caller's reports / admin).
+export const teamHistory = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.getTeamMemberHistory(req, req.params.userId));
+});
+
 // CR-15/16: user lifecycle aggregate + release-stage transition.
 export const lifecycle = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.getUserLifecycle(req.params.id));
