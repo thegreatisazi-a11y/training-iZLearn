@@ -60,10 +60,12 @@ export default function JDPage() {
   const [templateForm, setTemplateForm] = useState(emptyTemplate);
 
   // Select option sources.
-  const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 200 }) });
+  const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
   const { data: departments } = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
   const { data: roles } = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }) });
   const userOptions = ((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => ({ value: u.id, label: u.fullName }));
+  // Resolve approver id → name for the "Approved By" column (show name, not the UUID).
+  const userName = new Map(((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => [u.id, u.fullName]));
   const departmentOptions = ((departments?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const roleOptions = ((roles?.data ?? []) as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
   // D-JD1: JD templates are keyed by Functional Role (DesignationMaster).
@@ -159,7 +161,7 @@ export default function JDPage() {
     },
     { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status.replace(/_/g, ' ')}</Badge> },
-    { key: 'approvedBy', header: 'Approved By', render: (r) => r.approvedBy ?? '—' },
+    { key: 'approvedBy', header: 'Approved By', render: (r) => (r.approvedBy ? userName.get(r.approvedBy) ?? r.approvedBy : '—') },
     { key: 'approvedAt', header: 'Approved At', render: (r) => formatDate(r.approvedAt) },
     {
       key: 'actions',

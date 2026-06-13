@@ -43,7 +43,9 @@ export const isoDateString = z
 /** Standard pagination query params. */
 export const paginationQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  // Up to 1000 so "load-all" pickers (supervisor list, name resolution, topic/bundle
+  // option lists) that request pageSize 500/1000 aren't rejected as a validation error.
+  pageSize: z.coerce.number().int().min(1).max(1000).default(50),
   search: z.string().trim().optional(),
   sortBy: z.string().trim().optional(),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
