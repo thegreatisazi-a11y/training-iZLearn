@@ -11,10 +11,14 @@ router.use(authenticate);
 
 router.get('/mine', c.listMine);
 router.get('/', requirePermission('assessments', 'read'), c.list);
-router.post('/start', requirePermission('assessments', 'write'), validate(startAssessmentSchema), c.start);
-router.post('/submit', requirePermission('assessments', 'write'), validate(submitAssessmentSchema), c.submit);
+// Taking an assessment is a PERSONAL action on the user's own assigned training —
+// any authenticated user may take training that has been assigned to them, regardless
+// of their role's assessment-authoring permissions. Ownership / assignment / blocked
+// / reading-gate checks are all enforced in assessment.service.
+router.post('/start', validate(startAssessmentSchema), c.start);
+router.post('/submit', validate(submitAssessmentSchema), c.submit);
 // CR-41: complete a no-assessment SOP via read + T&C acknowledgement.
-router.post('/acknowledge-read', requirePermission('assessments', 'write'), validate(startAssessmentSchema), c.acknowledgeRead);
+router.post('/acknowledge-read', validate(startAssessmentSchema), c.acknowledgeRead);
 router.post('/assignments/:assignmentId/unblock', requirePermission('assessments', 'write'), captureReasonIfPresent, c.unblock);
 router.get('/:id', requirePermission('assessments', 'read'), c.get);
 

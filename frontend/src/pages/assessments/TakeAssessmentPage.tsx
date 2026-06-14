@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ArrowLeft, Clock } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -200,6 +200,7 @@ function QuestionCard({ index, question, answer, onChange }: { index: number; qu
 export default function TakeAssessmentPage() {
   const { topicId = '' } = useParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
   const [result, setResult] = useState<SubmitResult | null>(null);
   // Phase 6 / reading-gate: questions are gated behind per-material timed reading,
@@ -221,10 +222,29 @@ export default function TakeAssessmentPage() {
 
   const tabBlocked = useSingleTabGuard(phase === 'assessment' && !result);
 
+  // Resolve THIS topic's assignment so attempts link to it (drives the assignment's
+  // status: IN_PROGRESS → COMPLETED on pass / BLOCKED on max attempts). Without this
+  // the assignment would stay PENDING even after passing or exhausting attempts.
+  const assignmentsQ = useQuery({
+    queryKey: ['my-trainings'],
+    queryFn: () => svc.assignments.mine() as unknown as Promise<{ id: string; topicId: string; status: string }[]>,
+  });
+  const assignmentId = useMemo(() => {
+    const list = assignmentsQ.data ?? [];
+    const forTopic = list.filter((a) => a.topicId === topicId);
+    const active = forTopic.find((a) => !['COMPLETED', 'WAIVED'].includes(a.status));
+    return (active ?? forTopic[0])?.id;
+  }, [assignmentsQ.data, topicId]);
+
   const start = useMutation({
-    mutationFn: () => svc.assessments.start({ topicId }) as unknown as Promise<StartResult>,
+    mutationFn: () => svc.assessments.start({ topicId, assignmentId }) as unknown as Promise<StartResult>,
     onSuccess: () => setPhase('assessment'),
-    onError: (e) => toast.error(apiError(e)),
+    onError: (e) => {
+      // e.g. "Maximum attempts reached" — the assignment is now BLOCKED, so refresh
+      // My Trainings to surface the "Request retake" action.
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
+      toast.error(apiError(e));
+    },
   });
   const submit = useMutation({
     mutationFn: (opts?: { auto?: boolean }) =>
@@ -233,7 +253,10 @@ export default function TakeAssessmentPage() {
         answers: answersRef.current,
         autoSubmitted: opts?.auto ?? false,
       }) as unknown as Promise<SubmitResult>,
-    onSuccess: (r) => setResult(r),
+    onSuccess: (r) => {
+      setResult(r);
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
+    },
     onError: (e) => {
       submittedRef.current = false; // allow a manual retry on transient failure
       toast.error(apiError(e));
@@ -241,8 +264,11 @@ export default function TakeAssessmentPage() {
   });
   // CR-41: SOP / no-assessment topics complete via read + T&C acknowledgement.
   const ackComplete = useMutation({
-    mutationFn: () => svc.assessments.acknowledgeRead({ topicId }) as unknown as Promise<SubmitResult>,
-    onSuccess: (r) => setResult(r),
+    mutationFn: () => svc.assessments.acknowledgeRead({ topicId, assignmentId }) as unknown as Promise<SubmitResult>,
+    onSuccess: (r) => {
+      setResult(r);
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
+    },
     onError: (e) => toast.error(apiError(e)),
   });
 

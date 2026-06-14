@@ -4,6 +4,7 @@ import { signAccessToken, verifyRefreshToken } from '../utils/jwtUtils';
 import { hashPassword, comparePassword, validatePasswordPolicy, assertNotReused } from '../utils/passwordUtils';
 import { AppError } from '../utils/response';
 import { buildAuthUser } from '../middlewares/auth.middleware';
+import { auditContext } from '../utils/auditContext';
 import type { AuthUser } from '../types';
 import { recordEvent } from './auditTrail.service';
 import { getPasswordPolicy, getAuthPolicy } from './systemConfig.service';
@@ -51,6 +52,11 @@ export async function login(
     });
     throw AppError.unauthorized('Invalid credentials');
   }
+
+  // The account is now identified. Attribute every audited write that follows in
+  // this (still-unauthenticated) request — failed-attempt counter, lastLoginAt,
+  // session termination — to this user instead of the default ANONYMOUS actor.
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName });
 
   if (!user.isActive) throw AppError.forbidden('Account is inactive');
 

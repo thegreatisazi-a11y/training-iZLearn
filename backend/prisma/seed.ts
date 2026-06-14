@@ -11,8 +11,15 @@
  * because it is a one-time bootstrap that runs before any user exists. Every
  * record is stamped createdBy = 'SYSTEM'.
  */
+import dotenv from 'dotenv';
+import path from 'path';
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+
+// Load backend/.env if present, else fall back to the monorepo-root .env (same
+// resolution as src/config/env.ts) so `npm run seed` works from the backend workspace.
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 import { DEFAULT_SYSTEM_CONFIG, PERMISSION_CATALOG, deriveLegacyFlags } from '@izlearn/shared';
 
 const prisma = new PrismaClient();

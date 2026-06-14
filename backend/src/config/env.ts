@@ -1,6 +1,11 @@
 import dotenv from 'dotenv';
+import path from 'path';
 
+// Load backend/.env first (local-dev layout), then fall back to the monorepo-root
+// .env (the docker-compose / Render layout). dotenv does not override variables that
+// are already set, so a local backend/.env takes precedence and the root .env fills gaps.
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
 function required(key: string, fallback?: string): string {
   const v = process.env[key] ?? fallback;

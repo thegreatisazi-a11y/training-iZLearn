@@ -3,7 +3,6 @@ import { prisma } from '../config/prisma';
 import { signRefreshToken } from '../utils/jwtUtils';
 import {
   setSession,
-  getUserSessions,
   deleteSession,
   deleteAllUserSessions,
   type RedisSession,
@@ -57,8 +56,30 @@ export async function createSession(
   return { sessionId, refreshToken };
 }
 
+/**
+ * Active sessions for a user, read from the durable Mongo `UserSession` collection
+ * (the source of truth) so single-session enforcement works regardless of Redis
+ * availability. Mapped to the RedisSession shape callers already expect.
+ */
 export async function getActiveSessions(userId: string): Promise<RedisSession[]> {
-  return getUserSessions(userId);
+  const rows = await prisma.userSession.findMany({
+    where: { userId, isActive: true, expiresAt: { gt: new Date() } },
+  });
+  return rows.map((s) => ({
+    sessionId: s.sessionId,
+    userId: s.userId,
+    deviceInfo: s.deviceInfo ?? undefined,
+    ipAddress: s.ipAddress ?? undefined,
+    createdAt: s.createdAt.toISOString(),
+  }));
+}
+
+/** Is a specific session still active? Durable Mongo check (Redis-independent). */
+export async function isSessionActive(userId: string, sessionId: string): Promise<boolean> {
+  const row = await prisma.userSession.findFirst({
+    where: { userId, sessionId, isActive: true, expiresAt: { gt: new Date() } },
+  });
+  return Boolean(row);
 }
 
 /** Terminate every existing session for a user (single-session enforcement). */

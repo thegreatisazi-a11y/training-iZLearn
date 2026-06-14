@@ -157,24 +157,11 @@ See `.env.example` for the full annotated list.
 ---
 
 ## 7. Local development
-Use Docker (`docker-compose.yml` runs Redis + the backend; the frontend runs with Vite),
-or run the workspaces directly. MongoDB must be a **replica set** for transactions:
-
-- **Easiest:** point `DATABASE_URL` at your Atlas cluster.
-- **Local Mongo:** run a single-node replica set, e.g.
-  `docker run -d -p 27017:27017 mongo:7 --replSet rs0` then
-  `docker exec <id> mongosh --eval "rs.initiate()"`, and use
-  `mongodb://localhost:27017/izlearn?replicaSet=rs0`.
-
-With `R2_*` unset, files are stored in your (local or Atlas) MongoDB. To use the on-disk
-`./storage` folder instead during offline dev, set `STORAGE_DRIVER=local`.
-
-```bash
-npm install
-npm run build -w shared
-npm run -w backend prisma:generate
-npm run dev            # backend + frontend (concurrently)
-```
+Running izLearn on your own machine is covered in **[`README.md`](./README.md)**. In short:
+point `DATABASE_URL` at your Atlas cluster (or a local single-node replica set),
+`npm install`, `npm run -w backend prisma:generate`, `npm run seed -w backend`, then
+`npm run dev`. Redis is **optional locally** — auth and the UI run without it (sessions are
+stored in MongoDB); only the background queues are skipped when Redis is absent.
 
 ---
 
@@ -186,6 +173,10 @@ npm run dev            # backend + frontend (concurrently)
   redeploying re-runs `prisma db push` on boot to apply the changes (additive/sync).
 - **Audit trail:** immutable by application design (no update/delete endpoints). With
   MongoDB there is no DB-level trigger enforcing this, unlike the prior Postgres build.
+- **Redis resilience:** Redis is an accelerator, not the source of truth. Sessions live in the
+  Mongo `UserSession` collection, so authentication keeps working if Redis is briefly
+  unavailable (e.g. a sleeping Render Key Value instance); only the Bull queues (email,
+  reminders, backups) pause until it returns.
 - **Files:** by default stored in MongoDB (`FileBlob`, keyed `materials/…`,
   `certificates/…`, `personal-documents/…`, `attendance/…`); set `R2_*` to move them to
   Cloudflare R2 with no code change. Either way downloads are streamed through the API

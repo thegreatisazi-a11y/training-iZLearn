@@ -58,6 +58,7 @@ export function ESignatureModal({
   }, [open, defaultMeaning]);
 
   const reasonOk = !requireReason || reason.trim().length >= 5;
+  const canSign = !!username && !!password && confirmed && reasonOk;
 
   async function submit() {
     setLoading(true);
@@ -82,7 +83,7 @@ export function ESignatureModal({
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={loading || !username || !password || !reasonOk || !confirmed}>
+          <Button onClick={submit} disabled={loading || !canSign}>
             {loading ? 'Signing…' : 'Sign'}
           </Button>
         </>
@@ -101,7 +102,7 @@ export function ESignatureModal({
         <Select options={MEANINGS} value={meaning} onChange={(e) => setMeaning(e.target.value)} />
       </Field>
       {requireReason && (
-        <Field label="Reason for Change">
+        <Field label="Reason for Change" required hint="Minimum 5 characters — required to enable Sign.">
           <Textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -118,6 +119,12 @@ export function ESignatureModal({
         />
         <span>I confirm that I am applying my electronic signature and that this action is attributable to me.</span>
       </label>
+      {!canSign && !error && (
+        <p className="mt-2 text-xs text-slate-400">
+          To enable Sign: enter your username and signature password
+          {requireReason ? ', provide a reason (≥5 characters)' : ''}, and tick the confirmation box above.
+        </p>
+      )}
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </Dialog>
   );

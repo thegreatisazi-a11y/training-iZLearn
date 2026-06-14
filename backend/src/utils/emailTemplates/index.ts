@@ -15,7 +15,9 @@ export type EmailType =
   | 'sessionTerminated'
   | 'announcement'
   | 'scheduleCreated'
-  | 'courseRevised';
+  | 'courseRevised'
+  | 'retakeRequested'
+  | 'retakeDecision';
 
 export interface RenderedEmail {
   subject: string;
@@ -165,6 +167,27 @@ export function renderEmail(type: EmailType, orgName: string, data: Data): Rende
               ['Topic Code', data.topicCode ?? ''],
               ['Reason', data.reason ?? '—'],
             ]),
+        ),
+      };
+    case 'retakeRequested':
+      return {
+        subject: `Retake request: ${data.topicTitle ?? ''}`,
+        html: layout(
+          'Assessment Retake Requested',
+          paragraph(`${escape(data.userName)} has requested to retake the assessment for "${escape(data.topicTitle)}" after reaching the maximum attempts. Your review and approval (e-signature) is required.`) +
+            (data.justification ? infoTable([['Justification', data.justification]]) : ''),
+        ),
+      };
+    case 'retakeDecision':
+      return {
+        subject: `Your retake request was ${data.decision ?? 'processed'}: ${data.topicTitle ?? ''}`,
+        html: layout(
+          'Retake Request Decision',
+          paragraph(`Your request to retake "${escape(data.topicTitle)}" has been ${escape(data.decision)}.`) +
+            (data.remarks ? paragraph(`Remarks: ${escape(data.remarks)}`) : '') +
+            (data.decision === 'approved'
+              ? paragraph('You may now start the assessment again from your "My Trainings" page.')
+              : ''),
         ),
       };
     default:

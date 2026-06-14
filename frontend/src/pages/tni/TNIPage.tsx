@@ -24,9 +24,9 @@ interface TNI {
 }
 
 interface MatrixData {
-  roles: { id: string; roleName: string }[];
+  designations: { id: string; displayName: string }[];
   topics: { id: string; title: string; topicCode: string; topicNumber?: string | null }[];
-  cells: { roleId: string; topicId: string; isRequired: boolean }[];
+  cells: { designationId: string; topicId: string; isRequired: boolean }[];
 }
 
 const STATUS_OPTIONS = tniStatus.options.map((s) => ({ value: s, label: s }));
@@ -47,7 +47,7 @@ function RequirementMatrix() {
   const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
 
   const setMut = useMutation({
-    mutationFn: (body: { roleId: string; topicId: string; isRequired: boolean }) => svc.tni.setRequirement(body),
+    mutationFn: (body: { designationId: string; topicId: string; isRequired: boolean }) => svc.tni.setRequirement(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tni-matrix'] }),
     onError: (e) => toast.error(apiError(e)),
   });
@@ -70,13 +70,13 @@ function RequirementMatrix() {
   });
 
   if (isLoading || !data) return <div className="py-8 text-center text-sm text-slate-500">Loading matrix…</div>;
-  const isRequired = (roleId: string, topicId: string) =>
-    data.cells.some((c) => c.roleId === roleId && c.topicId === topicId && c.isRequired);
+  const isRequired = (designationId: string, topicId: string) =>
+    data.cells.some((c) => c.designationId === designationId && c.topicId === topicId && c.isRequired);
 
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm text-slate-600">Mark which published topics are <strong>Required</strong> for each role, then assign.</p>
+        <p className="text-sm text-slate-600">Mark which published topics are <strong>Required</strong> for each functional role, then assign.</p>
         {canAssign && (
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-1.5 text-sm text-slate-600">
@@ -100,8 +100,8 @@ function RequirementMatrix() {
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">Topic</th>
-                {data.roles.map((r) => (
-                  <th key={r.id} className="px-3 py-2 text-center font-medium">{r.roleName}</th>
+                {data.designations.map((r) => (
+                  <th key={r.id} className="px-3 py-2 text-center font-medium">{r.displayName}</th>
                 ))}
               </tr>
             </thead>
@@ -111,14 +111,14 @@ function RequirementMatrix() {
                   <td className="px-3 py-2 text-slate-700">
                     <span className="font-mono text-xs text-slate-400">{t.topicNumber || t.topicCode}</span> {t.title}
                   </td>
-                  {data.roles.map((r) => (
+                  {data.designations.map((r) => (
                     <td key={r.id} className="px-3 py-2 text-center">
                       <input
                         type="checkbox"
                         disabled={!canEdit || setMut.isPending}
                         checked={isRequired(r.id, t.id)}
-                        onChange={(e) => setMut.mutate({ roleId: r.id, topicId: t.id, isRequired: e.target.checked })}
-                        title="Required for this role"
+                        onChange={(e) => setMut.mutate({ designationId: r.id, topicId: t.id, isRequired: e.target.checked })}
+                        title="Required for this functional role"
                       />
                     </td>
                   ))}

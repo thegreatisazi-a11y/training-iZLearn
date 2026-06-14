@@ -1,17 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { History } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
-import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PageLoader } from '@/components/ui/spinner';
 import { useAuthStore } from '@/store/authStore';
 import { printHtml, printTable } from '@/lib/print';
-import { formatDateTime } from '@/lib/format';
 import { svc } from '@/services';
 
 interface TeamMember {
@@ -29,31 +26,20 @@ interface TeamMember {
   tniPending: number;
 }
 
-interface HistoryRow {
-  user: { id: string; fullName: string; employeeId: string };
-  assignments: { id: string; topic: string; status: string; dueDate?: string | null; createdAt: string }[];
-  attempts: { id: string; topic: string; score?: number | null; isPassed?: boolean | null; attemptNumber: number; completedAt?: string | null }[];
-}
-
 /**
  * Supervisor team view: every user reporting to the signed-in supervisor (admins
  * see everyone), with their training / JD / CV / TNI / certificate status. Gated by
  * the `team` permission module; the backend additionally scopes by supervisorId.
+ * Click a member to open their full training detail page.
  */
 export default function MyTeamPage() {
   const navigate = useNavigate();
   const canPrint = useAuthStore((s) => s.hasPermission)('team', 'print');
   const [search, setSearch] = useState('');
-  const [historyUser, setHistoryUser] = useState<TeamMember | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['my-team', search],
     queryFn: () => svc.users.team({ pageSize: 200, search: search || undefined }),
-  });
-  const history = useQuery({
-    queryKey: ['team-history', historyUser?.id],
-    queryFn: () => svc.users.teamHistory(historyUser!.id) as unknown as Promise<HistoryRow>,
-    enabled: !!historyUser,
   });
 
   const rows = (data?.data ?? []) as unknown as TeamMember[];
@@ -84,10 +70,10 @@ export default function MyTeamPage() {
       key: 'name',
       header: 'Team Member',
       render: (r) => (
-        <div>
-          <div className="font-medium text-slate-800">{r.fullName} {!r.isActive && <span className="text-xs text-slate-400">(inactive)</span>}</div>
+        <button className="text-left hover:underline" onClick={() => navigate(`/team/${r.id}`)}>
+          <div className="font-medium text-primary">{r.fullName} {!r.isActive && <span className="text-xs text-slate-400">(inactive)</span>}</div>
           <div className="text-xs text-slate-500">{r.employeeId}{r.departmentName ? ` · ${r.departmentName}` : ''}</div>
-        </div>
+        </button>
       ),
     },
     { key: 'fr', header: 'Functional Role(s)', render: (r) => (r.functionalRoleNames?.length ? r.functionalRoleNames.join(', ') : '—') },
@@ -113,8 +99,8 @@ export default function MyTeamPage() {
       header: '',
       render: (r) => (
         <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setHistoryUser(r)}>
-            <History className="h-4 w-4" /> History
+          <Button size="sm" variant="ghost" onClick={() => navigate(`/team/${r.id}`)}>
+            Details <ChevronRight className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={() => navigate(`/team-cvs?user=${r.id}`)}>
             View CV
@@ -135,59 +121,6 @@ export default function MyTeamPage() {
         <Input className="max-w-xs" placeholder="Search name or employee ID…" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <DataTable columns={columns} rows={rows} loading={isLoading} emptyText="No team members are mapped to you yet." />
-
-      {/* Training history drill-in */}
-      <Dialog
-        open={!!historyUser}
-        onClose={() => setHistoryUser(null)}
-        className="max-w-3xl"
-        title={historyUser ? `Training History — ${historyUser.fullName}` : 'Training History'}
-        footer={<Button variant="outline" onClick={() => setHistoryUser(null)}>Close</Button>}
-      >
-        {history.isLoading ? (
-          <PageLoader />
-        ) : (
-          <div className="space-y-4">
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-slate-400">Training assignments</div>
-              {(history.data?.assignments ?? []).length === 0 ? (
-                <p className="text-sm text-slate-400">No assignments.</p>
-              ) : (
-                <ul className="space-y-1 text-sm">
-                  {(history.data?.assignments ?? []).map((a) => (
-                    <li key={a.id} className="flex items-center justify-between gap-2">
-                      <span className="text-slate-700">{a.topic}</span>
-                      <span className="flex items-center gap-2">
-                        <Badge tone={a.status}>{a.status.replace(/_/g, ' ')}</Badge>
-                        <span className="text-xs text-slate-400">{a.dueDate ? `due ${formatDateTime(a.dueDate)}` : ''}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-slate-400">Assessment attempts</div>
-              {(history.data?.attempts ?? []).length === 0 ? (
-                <p className="text-sm text-slate-400">No attempts.</p>
-              ) : (
-                <ul className="space-y-1 text-sm">
-                  {(history.data?.attempts ?? []).map((a) => (
-                    <li key={a.id} className="flex items-center justify-between gap-2">
-                      <span className="text-slate-700">{a.topic} <span className="text-xs text-slate-400">(attempt {a.attemptNumber})</span></span>
-                      <span className="flex items-center gap-2">
-                        {a.score != null && <span className="text-xs text-slate-500">{a.score}%</span>}
-                        <Badge tone={a.isPassed ? 'COMPLETED' : 'REJECTED'}>{a.isPassed ? 'Passed' : 'Failed'}</Badge>
-                        <span className="text-xs text-slate-400">{a.completedAt ? formatDateTime(a.completedAt) : ''}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        )}
-      </Dialog>
     </div>
   );
 }

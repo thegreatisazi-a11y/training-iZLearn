@@ -18,16 +18,16 @@ export type TNIDecisionInput = z.infer<typeof tniDecisionSchema>;
 
 /** CR-46/47: set one cell of the TNI requirement matrix (role × topic). */
 export const setTniRequirementSchema = z.object({
-  roleId: uuid,
+  designationId: uuid,
   topicId: uuid,
   isRequired: z.boolean(),
   note: optionalString,
 });
 export type SetTniRequirementInput = z.infer<typeof setTniRequirementSchema>;
 
-/** CR-49: assign training from the requirement matrix (optionally a single role). */
+/** CR-49: assign training from the requirement matrix (optionally a single functional role). */
 export const applyTniMatrixSchema = z.object({
-  roleId: uuid.optional(),
+  designationId: uuid.optional(),
   dueDate: z.coerce.date().optional(),
   // CR-57: assign-later — create the matrix assignments as DEFERRED until activation.
   activateLater: z.boolean().optional(),

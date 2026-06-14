@@ -95,15 +95,24 @@ export async function decideTNI(id: string, input: TNIDecisionInput, req: Reques
 
 // ---- TNI requirement matrix (CR-46 / CR-47 / CR-49) -------------------------
 
+/** Merge a user's functional roles (primary designationId + designationIds array). */
+function userFunctionalRoleIds(u: { designationId?: string | null; designationIds?: unknown }): string[] {
+  const arr = Array.isArray(u.designationIds) ? (u.designationIds as string[]) : [];
+  const merged = [...arr];
+  if (u.designationId && !merged.includes(u.designationId)) merged.push(u.designationId);
+  return merged;
+}
+
 /**
- * The role × topic requirement matrix: active roles, the PUBLISHED topic
- * catalogue, and the saved Required / Not-Required cells. Drives role-based
- * auto-assignment — the primary assignment workflow now that bundles are
- * deprioritized.
+ * The functional-role × topic requirement matrix: active functional roles
+ * (DesignationMaster — e.g. "QA Auditor", "Analyst"), the PUBLISHED topic
+ * catalogue, and the saved Required / Not-Required cells. Drives functional-role-
+ * based auto-assignment. NOTE: columns are FUNCTIONAL roles (job functions), not
+ * RBAC login roles (SUPER_ADMIN / TRAINER / …).
  */
 export async function getRequirementMatrix() {
-  const [roles, topics, cells] = await Promise.all([
-    prisma.role.findMany({ where: { isDeleted: false, isActive: true }, select: { id: true, roleName: true } }),
+  const [designations, topics, cells] = await Promise.all([
+    prisma.designationMaster.findMany({ where: { isDeleted: false, isActive: true }, select: { id: true, displayName: true }, orderBy: { displayName: 'asc' } }),
     prisma.trainingTopic.findMany({
       where: { isDeleted: false, status: 'PUBLISHED' },
       select: { id: true, title: true, topicCode: true, topicNumber: true, trainingType: true },
@@ -112,15 +121,15 @@ export async function getRequirementMatrix() {
     prisma.tniRequirement.findMany({ where: { isDeleted: false } }),
   ]);
   return {
-    roles,
+    designations,
     topics,
-    cells: cells.map((c) => ({ roleId: c.roleId, topicId: c.topicId, isRequired: c.isRequired, note: c.note })),
+    cells: cells.map((c) => ({ designationId: c.designationId, topicId: c.topicId, isRequired: c.isRequired, note: c.note })),
   };
 }
 
-/** Upsert one matrix cell (role × topic). */
+/** Upsert one matrix cell (functional role × topic). */
 export async function setRequirement(input: SetTniRequirementInput, createdBy: string) {
-  const existing = await prisma.tniRequirement.findFirst({ where: { roleId: input.roleId, topicId: input.topicId } });
+  const existing = await prisma.tniRequirement.findFirst({ where: { designationId: input.designationId, topicId: input.topicId } });
   if (existing) {
     return prisma.tniRequirement.update({
       where: { id: existing.id },
@@ -128,22 +137,23 @@ export async function setRequirement(input: SetTniRequirementInput, createdBy: s
     });
   }
   return prisma.tniRequirement.create({
-    data: { roleId: input.roleId, topicId: input.topicId, isRequired: input.isRequired, note: input.note ?? null, createdBy },
+    data: { designationId: input.designationId, topicId: input.topicId, isRequired: input.isRequired, note: input.note ?? null, createdBy },
   });
 }
 
 /**
  * CR-49: materialise training assignments from the Required cells of the matrix.
- * For each Required (role, topic) cell, every active holder of that role gets a
- * ROLE_SPECIFIC assignment for the (PUBLISHED) topic — skipping anyone who already
- * has an active/completed assignment for it. Optionally scoped to a single role.
+ * For each Required (functional role, topic) cell, every active user holding that
+ * functional role (via designationId / designationIds) gets a ROLE_SPECIFIC
+ * assignment for the (PUBLISHED) topic — skipping anyone who already has an
+ * active/completed assignment for it. Optionally scoped to a single functional role.
  */
 export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Request) {
   const assignedBy = req.user!.id;
   // Bulk assignment is a controlled action — two-component e-signature.
-  await signFromRequest(req, 'TniRequirement', input.roleId ?? 'all', 'Approved');
+  await signFromRequest(req, 'TniRequirement', input.designationId ?? 'all', 'Approved');
   const cells = await prisma.tniRequirement.findMany({
-    where: { isDeleted: false, isRequired: true, ...(input.roleId ? { roleId: input.roleId } : {}) },
+    where: { isDeleted: false, isRequired: true, ...(input.designationId ? { designationId: input.designationId } : {}) },
   });
   if (!cells.length) return { created: 0 };
 
@@ -152,20 +162,35 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
     (await prisma.trainingTopic.findMany({ where: { id: { in: topicIds }, isDeleted: false, status: 'PUBLISHED' }, select: { id: true } })).map((t) => t.id),
   );
 
+  // Resolve functional-role holders once: designationId -> Set<userId>. A user may
+  // hold several functional roles (primary designationId + designationIds array).
+  const activeUsers = await prisma.user.findMany({
+    where: { isActive: true, isDeleted: false },
+    select: { id: true, designationId: true, designationIds: true },
+  });
+  const holdersByDesignation = new Map<string, string[]>();
+  for (const u of activeUsers) {
+    for (const d of userFunctionalRoleIds(u)) {
+      const list = holdersByDesignation.get(d) ?? [];
+      list.push(u.id);
+      holdersByDesignation.set(d, list);
+    }
+  }
+
   // CR-57: assign-later keeps matrix assignments DEFERRED until activated.
   const deferred = !!input.activateLater;
   let created = 0;
   for (const cell of cells) {
     if (!publishable.has(cell.topicId)) continue;
-    const holders = await prisma.userRole.findMany({ where: { roleId: cell.roleId, isActive: true } });
-    for (const h of holders) {
+    const holderIds = holdersByDesignation.get(cell.designationId) ?? [];
+    for (const userId of holderIds) {
       const exists = await prisma.trainingAssignment.findFirst({
-        where: { userId: h.userId, topicId: cell.topicId, isDeleted: false, status: { notIn: ['WAIVED'] } },
+        where: { userId, topicId: cell.topicId, isDeleted: false, status: { notIn: ['WAIVED'] } },
       });
       if (exists) continue;
       const a = await prisma.trainingAssignment.create({
         data: {
-          userId: h.userId,
+          userId,
           topicId: cell.topicId,
           assignmentType: 'ROLE_SPECIFIC',
           dueDate: input.dueDate ?? null,

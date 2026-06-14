@@ -106,10 +106,11 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
 });
 
-// Team overview: a supervisor sees their own reports; SUPER_ADMIN sees everyone.
+// Team overview: a supervisor sees ONLY their own direct reports. Only SUPER_ADMIN
+// gets the org-wide view (other admins manage users via the Users page, not "My Team").
 export const team = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  const seeAll = req.user!.roleNames.includes('SUPER_ADMIN') || req.user!.permissions['userManagement']?.approve === true;
+  const seeAll = req.user!.roleNames.includes('SUPER_ADMIN');
   const r = await svc.listMyTeam(req.user!.id, seeAll, q);
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });

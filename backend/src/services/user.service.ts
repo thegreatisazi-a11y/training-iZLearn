@@ -681,25 +681,85 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
  */
 export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   const requester = req.user!;
-  const seeAll = requester.roleNames.includes('SUPER_ADMIN') || requester.permissions['userManagement']?.approve === true;
+  const seeAll = requester.roleNames.includes('SUPER_ADMIN');
   const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false } });
   if (!target) throw AppError.notFound('User not found');
   if (!seeAll && target.supervisorId !== requester.id) {
     throw AppError.forbidden('You may only view the training history of your own team members.');
   }
-  const [assignments, attempts] = await Promise.all([
+  const [assignments, attempts, retakeRequests] = await Promise.all([
     prisma.trainingAssignment.findMany({ where: { userId: targetUserId, isDeleted: false }, orderBy: { createdAt: 'desc' } }),
     prisma.assessmentAttempt.findMany({ where: { userId: targetUserId, isDeleted: false }, orderBy: { startedAt: 'desc' } }),
+    prisma.retakeRequest.findMany({ where: { userId: targetUserId, isDeleted: false }, orderBy: { createdAt: 'desc' } }),
   ]);
   const topicIds = Array.from(new Set([...assignments.map((a) => a.topicId), ...attempts.map((a) => a.topicId)]));
   const topics = topicIds.length
-    ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true } })
+    ? await prisma.trainingTopic.findMany({
+        where: { id: { in: topicIds } },
+        select: { id: true, title: true, topicNumber: true, topicCode: true, trainingType: true, maxAttempts: true, passingScorePercent: true, currentVersion: true, status: true, supersededByTopicId: true },
+      })
     : [];
-  const tName = new Map(topics.map((t) => [t.id, t.title]));
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+
+  // Per-topic attempt summary (attempts are keyed by user+topic, not by assignment).
+  const byTopic = new Map<string, { used: number; best: number | null; passed: boolean }>();
+  for (const a of attempts) {
+    const s = byTopic.get(a.topicId) ?? { used: 0, best: null, passed: false };
+    if (a.completedAt) s.used += 1;
+    if (a.score != null) s.best = s.best == null ? a.score : Math.max(s.best, a.score);
+    if (a.isPassed) s.passed = true;
+    byTopic.set(a.topicId, s);
+  }
+  const pendingRetakeByAssignment = new Map(
+    retakeRequests.filter((r) => r.status === 'PENDING_APPROVAL').map((r) => [r.assignmentId, r.id]),
+  );
+
   return {
     user: { id: target.id, fullName: target.fullName, employeeId: target.employeeId },
-    assignments: assignments.map((a) => ({ id: a.id, topic: tName.get(a.topicId) ?? a.topicId, status: a.status, dueDate: a.dueDate, createdAt: a.createdAt })),
-    attempts: attempts.map((a) => ({ id: a.id, topic: tName.get(a.topicId) ?? a.topicId, score: a.score, isPassed: a.isPassed, attemptNumber: a.attemptNumber, completedAt: a.completedAt })),
+    assignments: assignments
+      // A revised course shows ONLY the current version: hide assignments whose topic
+      // has been superseded by a newer version.
+      .filter((a) => {
+        const t = tMap.get(a.topicId);
+        return !t || !t.supersededByTopicId;
+      })
+      .map((a) => {
+      const t = tMap.get(a.topicId);
+      const sum = byTopic.get(a.topicId) ?? { used: 0, best: null, passed: false };
+      // Effective status: a passing attempt means COMPLETED even if the assignment
+      // row wasn't updated (e.g. an attempt taken without a linked assignmentId).
+      const effectiveStatus = sum.passed ? 'COMPLETED' : a.status;
+      return {
+        id: a.id,
+        topicId: a.topicId,
+        topic: t?.title ?? a.topicId,
+        topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+        trainingType: t?.trainingType ?? null,
+        version: t?.currentVersion ?? null,
+        isSuperseded: !!t?.supersededByTopicId,
+        status: effectiveStatus,
+        dueDate: a.dueDate,
+        createdAt: a.createdAt,
+        maxAttempts: t?.maxAttempts ?? null,
+        extraAttempts: a.extraAttempts,
+        attemptsUsed: sum.used,
+        bestScore: sum.best,
+        isPassed: sum.passed,
+        isBlocked: effectiveStatus === 'BLOCKED',
+        pendingRetakeId: pendingRetakeByAssignment.get(a.id) ?? null,
+      };
+    }),
+    attempts: attempts.map((a) => ({ id: a.id, topic: tMap.get(a.topicId)?.title ?? a.topicId, score: a.score, isPassed: a.isPassed, attemptNumber: a.attemptNumber, completedAt: a.completedAt })),
+    retakeRequests: retakeRequests.map((r) => ({
+      id: r.id,
+      assignmentId: r.assignmentId,
+      topic: tMap.get(r.topicId)?.title ?? r.topicId,
+      status: r.status,
+      justification: r.justification,
+      decisionRemarks: r.decisionRemarks,
+      createdAt: r.createdAt,
+      decidedAt: r.decidedAt,
+    })),
   };
 }
 

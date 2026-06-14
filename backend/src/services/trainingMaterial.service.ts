@@ -55,7 +55,10 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
     });
   }
 
-  const lastVersion = await prisma.trainingMaterial.count({ where: { topicId } });
+  // Use the highest existing version (not the count): materials are copied across
+  // topic revisions carrying their version numbers, so a raw count can fall BELOW an
+  // existing version and make the next file go backwards (e.g. v5 → v4).
+  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
 
   const material = await prisma.trainingMaterial.create({
     data: {
@@ -114,7 +117,7 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
     });
   }
 
-  const lastVersion = await prisma.trainingMaterial.count({ where: { topicId: old.topicId } });
+  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId: old.topicId,
@@ -181,7 +184,10 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
     });
   }
 
-  const lastVersion = await prisma.trainingMaterial.count({ where: { topicId } });
+  // Use the highest existing version (not the count): materials are copied across
+  // topic revisions carrying their version numbers, so a raw count can fall BELOW an
+  // existing version and make the next file go backwards (e.g. v5 → v4).
+  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId,

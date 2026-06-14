@@ -357,6 +357,10 @@ model TrainingAssignment {
   supervisorApprovedAt     DateTime?
   activateOn       DateTime? // CR-57: assign-later — DEFERRED assignments activate on/after this date
   tniId            String?
+  // Extra assessment attempts granted on top of the topic's maxAttempts (via an
+  // approved RetakeRequest). Effective limit = topic.maxAttempts + extraAttempts.
+  // Optional so existing documents (written before this field) still read cleanly.
+  extraAttempts    Int?
   isDeleted        Boolean          @default(false)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -383,6 +387,38 @@ enum AssignmentStatus {
   BLOCKED
   WAIVED
   DEFERRED // CR-57: assign-later — not yet visible to the trainee until activated
+}
+
+/// Trainee-initiated request to retake an assessment after exhausting the max
+/// attempts (assignment BLOCKED). Routed to the trainee's direct supervisor; on
+/// approval the assignment is unblocked and a fresh set of attempts is granted.
+model RetakeRequest {
+  id              String              @id @default(uuid()) @map("_id")
+  userId          String // the trainee requesting the retake
+  topicId         String
+  assignmentId    String // the BLOCKED assignment being retaken
+  supervisorId    String? // direct line manager who must decide (snapshot at request time)
+  justification   String
+  status          RetakeRequestStatus @default(PENDING_APPROVAL)
+  decidedBy       String?
+  decidedAt       DateTime?
+  decisionRemarks String?
+  signatureId     String? // e-signature on the supervisor decision
+  isDeleted       Boolean             @default(false)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  createdBy       String
+
+  @@index([userId])
+  @@index([supervisorId])
+  @@index([assignmentId])
+  @@index([status])
+}
+
+enum RetakeRequestStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
 }
 
 model Attendance {
@@ -940,17 +976,17 @@ model CurriculumVitae {
 /// given role. Drives role-based auto-assignment (alongside JD mapping and direct
 /// assignment). Soft-delete only.
 model TniRequirement {
-  id         String   @id @default(uuid()) @map("_id")
-  roleId     String
-  topicId    String
-  isRequired Boolean  @default(true) // true = Required, false = Not Required
-  note       String?
-  isDeleted  Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  createdBy  String
+  id            String   @id @default(uuid()) @map("_id")
+  designationId String // functional role (DesignationMaster), NOT an RBAC login role
+  topicId       String
+  isRequired    Boolean  @default(true) // true = Required, false = Not Required
+  note          String?
+  isDeleted     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String
 
-  @@unique([roleId, topicId])
-  @@index([roleId])
+  @@unique([designationId, topicId])
+  @@index([designationId])
   @@index([topicId])
 }

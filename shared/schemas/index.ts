@@ -29,6 +29,7 @@ export * from './jobDescription';
 export * from './cv';
 export * from './personalDocument';
 export * from './tni';
+export * from './retake';
 export * from './feedback';
 export * from './announcement';
 export * from './systemConfig';

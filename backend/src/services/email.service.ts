@@ -4,6 +4,7 @@ import { logger } from '../config/logger';
 import { auditContext } from '../utils/auditContext';
 import { getConfig, getNumber } from './systemConfig.service';
 import { emailQueue, EmailJobData } from '../jobs/queue';
+import { redisReady } from '../config/redis';
 
 export interface QueueEmailInput {
   userId?: string | null;
@@ -33,12 +34,23 @@ export async function queueEmail(input: QueueEmailInput) {
     },
   });
 
-  const delay = input.scheduledAt ? Math.max(0, input.scheduledAt.getTime() - Date.now()) : 0;
-  await emailQueue.add(
-    'send',
-    { logId: log.id, to: input.toEmail, subject: input.subject, html: input.html } as EmailJobData,
-    { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, delay, removeOnComplete: 500, removeOnFail: 1000 },
-  );
+  // Enqueue the Bull job — but never let a down/unreachable Redis block the request.
+  // The EmailNotificationLog row above is the durable audit record; if Redis is
+  // unavailable the job is simply not scheduled (best-effort, per Module 10).
+  if (redisReady()) {
+    const delay = input.scheduledAt ? Math.max(0, input.scheduledAt.getTime() - Date.now()) : 0;
+    try {
+      await emailQueue.add(
+        'send',
+        { logId: log.id, to: input.toEmail, subject: input.subject, html: input.html } as EmailJobData,
+        { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, delay, removeOnComplete: 500, removeOnFail: 1000 },
+      );
+    } catch (err) {
+      logger.warn(`Email job not enqueued (Redis error): ${(err as Error).message}. Logged in DB as QUEUED.`);
+    }
+  } else {
+    logger.warn('Email job not enqueued: Redis unavailable. Logged in DB as QUEUED.');
+  }
   return log;
 }
 

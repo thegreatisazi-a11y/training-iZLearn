@@ -25,6 +25,7 @@ const MyJobDescriptionPage = lazy(() => import('@/pages/jd/MyJobDescriptionPage'
 const MyCVPage = lazy(() => import('@/pages/cv/MyCVPage'));
 const TeamCVsPage = lazy(() => import('@/pages/cv/TeamCVsPage'));
 const MyTeamPage = lazy(() => import('@/pages/team/MyTeamPage'));
+const TeamMemberPage = lazy(() => import('@/pages/team/TeamMemberPage'));
 const TNIPage = lazy(() => import('@/pages/tni/TNIPage'));
 const SchedulesPage = lazy(() => import('@/pages/schedules/SchedulesPage'));
 const AttendancePage = lazy(() => import('@/pages/schedules/AttendancePage'));
@@ -68,6 +69,7 @@ export function AppRoutes() {
             <Route path="/materials/:id/view" element={gate('materialManagement', 'read', <MaterialViewerPage />)} />
             <Route path="/my-trainings" element={<MyTrainingsPage />} />
             <Route path="/team" element={gate('team', 'read', <MyTeamPage />)} />
+            <Route path="/team/:userId" element={gate('team', 'read', <TeamMemberPage />)} />
             <Route path="/job-descriptions" element={gate('jobDescription', 'read', <JDPage />)} />
             <Route path="/my-jd" element={<MyJobDescriptionPage />} />
             <Route path="/my-cv" element={<MyCVPage />} />
@@ -76,7 +78,9 @@ export function AppRoutes() {
             <Route path="/schedules" element={gate('scheduling', 'read', <SchedulesPage />)} />
             <Route path="/schedules/:id/attendance" element={gate('attendance', 'read', <AttendancePage />)} />
             <Route path="/assessments" element={gate('assessments', 'read', <AssessmentsPage />)} />
-            <Route path="/assessments/take/:topicId" element={gate('assessments', 'write', <TakeAssessmentPage />)} />
+            {/* Taking assigned training is a personal action — any authenticated user
+                can take training assigned to them (ownership enforced server-side). */}
+            <Route path="/assessments/take/:topicId" element={<TakeAssessmentPage />} />
             <Route path="/certificates" element={gate('certificates', 'read', <CertificatesPage />)} />
             <Route path="/admin/certificate-templates" element={gate('certificates', 'write', <CertificateTemplatesPage />)} />
             <Route path="/feedback" element={gate('feedback', 'read', <FeedbackPage />)} />

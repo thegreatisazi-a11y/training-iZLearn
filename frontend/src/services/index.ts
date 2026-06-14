@@ -190,6 +190,17 @@ export const svc = {
     applyMatrix: (body: unknown) => data(api.post('/tni/requirements/apply', body)),
   },
 
+  retake: {
+    /** Trainee: request to retake a blocked assessment. */
+    create: (body: unknown) => data(api.post('/retake-requests', body)),
+    /** Trainee: their own retake requests (with status). */
+    mine: () => data(api.get('/retake-requests/mine')),
+    /** Supervisor: retake requests routed to them. */
+    list: (params?: ListParams) => api.get('/retake-requests', { params }).then((r) => r.data),
+    /** Supervisor: approve / reject a retake request (e-signed). */
+    decide: (id: string, body: unknown) => data(api.post(`/retake-requests/${id}/decision`, body)),
+  },
+
   feedback: {
     listForms: (params?: ListParams) => api.get('/feedback/forms', { params }).then((r) => r.data),
     getForm: (id: string) => data(api.get(`/feedback/forms/${id}`)),

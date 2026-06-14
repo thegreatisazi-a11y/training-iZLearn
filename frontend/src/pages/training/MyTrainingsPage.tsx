@@ -1,14 +1,23 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GraduationCap } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { svc } from '@/services';
 import { formatDate } from '@/lib/format';
+import { toast } from '@/store/uiStore';
+import { apiError } from '@/lib/axios';
+
+interface RetakeRequest {
+  id: string;
+  assignmentId: string;
+  status: string;
+}
 
 interface MyTraining {
   id: string;
@@ -39,8 +48,33 @@ const STATUS_TONE: Record<string, string> = {
 
 export default function MyTrainingsPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('all');
+  const [retakeFor, setRetakeFor] = useState<MyTraining | null>(null);
+  const [justification, setJustification] = useState('');
+
   const { data, isLoading } = useQuery({ queryKey: ['my-trainings'], queryFn: () => svc.assignments.mine() as unknown as Promise<MyTraining[]> });
+  const { data: retakes } = useQuery({ queryKey: ['my-retakes'], queryFn: () => svc.retake.mine() as unknown as Promise<RetakeRequest[]> });
+
+  // assignmentId -> latest pending retake status, so a blocked row shows "requested".
+  const pendingByAssignment = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of retakes ?? []) {
+      if (r.status === 'PENDING_APPROVAL') m.set(r.assignmentId, r.status);
+    }
+    return m;
+  }, [retakes]);
+
+  const retakeMutation = useMutation({
+    mutationFn: (body: unknown) => svc.retake.create(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['my-retakes'] });
+      setRetakeFor(null);
+      setJustification('');
+      toast.success('Retake request submitted to your supervisor.');
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
 
   const rows = useMemo(() => {
     const all = (data ?? []).filter((t) => t.topic); // only show trainings whose topic still exists
@@ -74,7 +108,17 @@ export default function MyTrainingsPage() {
       render: (r) => {
         const done = r.status === 'COMPLETED' || r.result?.isPassed;
         if (done) return <Badge tone="COMPLETED">{r.result?.score != null ? `Passed · ${r.result.score}%` : 'Completed'}</Badge>;
-        if (r.status === 'BLOCKED') return <span className="text-sm text-red-600">Blocked</span>;
+        if (r.status === 'BLOCKED') {
+          if (pendingByAssignment.has(r.id)) {
+            return <span className="text-xs text-amber-600">Retake requested</span>;
+          }
+          return (
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-xs text-red-600">Blocked — max attempts reached</span>
+              <Button size="sm" variant="outline" onClick={() => setRetakeFor(r)}>Request retake</Button>
+            </div>
+          );
+        }
         return (
           <Button size="sm" onClick={() => navigate(`/assessments/take/${r.topicId}`)}>
             {r.status === 'IN_PROGRESS' ? 'Continue' : 'Start Training'}
@@ -118,6 +162,36 @@ export default function MyTrainingsPage() {
         emptyText="You have no assigned trainings."
       />
       <p className="mt-3 flex items-center gap-1 text-xs text-slate-400"><GraduationCap className="h-3.5 w-3.5" /> Click Start Training to read the material and take the assessment.</p>
+
+      {/* Request-retake dialog (blocked assessments) */}
+      <Dialog
+        open={!!retakeFor}
+        onClose={() => setRetakeFor(null)}
+        title={`Request Retake — ${retakeFor?.topic?.title ?? ''}`}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setRetakeFor(null)}>Cancel</Button>
+            <Button
+              disabled={justification.trim().length < 5 || retakeMutation.isPending}
+              onClick={() => retakeFor && retakeMutation.mutate({ assignmentId: retakeFor.id, justification: justification.trim() })}
+            >
+              Submit request
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-3 text-sm text-slate-600">
+          You have reached the maximum attempts for this assessment. Explain why you should be allowed to retake it — your
+          request will be sent to your supervisor for approval.
+        </p>
+        <textarea
+          className="w-full rounded-md border border-slate-300 p-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          rows={4}
+          placeholder="Reason for requesting a retake (min 5 characters)…"
+          value={justification}
+          onChange={(e) => setJustification(e.target.value)}
+        />
+      </Dialog>
     </div>
   );
 }

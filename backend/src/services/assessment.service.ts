@@ -89,11 +89,15 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     await finalizeAbandonedAttempt(ab.id);
   }
 
-  // After finalizing, every prior attempt counts towards the maximum.
+  // After finalizing, every prior attempt counts towards the maximum. An approved
+  // retake grants extra attempts on the assignment, raising the effective limit
+  // (effective = topic.maxAttempts + extraAttempts) so the user can take it again.
+  const extraAttempts = assignments.reduce((m, a) => Math.max(m, a.extraAttempts ?? 0), 0);
+  const effectiveMax = topic.maxAttempts + extraAttempts;
   const completedCount = priorAttempts.length;
-  if (topic.blockAfterMaxAttempts && completedCount >= topic.maxAttempts) {
+  if (topic.blockAfterMaxAttempts && completedCount >= effectiveMax) {
     if (assignmentId) await prisma.trainingAssignment.update({ where: { id: assignmentId }, data: { status: 'BLOCKED' } }).catch(() => undefined);
-    throw AppError.conflict('Maximum attempts reached. This assessment is blocked pending coordinator review.');
+    throw AppError.conflict('Maximum attempts reached. This assessment is blocked pending supervisor review.');
   }
 
   // Server-enforced reading gate: every timed material must have a completed view
@@ -284,13 +288,20 @@ export async function submitAttempt(
     } catch {
       certificateId = undefined;
     }
-  } else if (topic.blockAfterMaxAttempts && attempt.attemptNumber >= topic.maxAttempts) {
-    isBlocked = true;
-    await prisma.assessmentAttempt.update({ where: { id: attemptId }, data: { isBlocked: true } });
-    if (attempt.assignmentId) {
-      await prisma.trainingAssignment.update({ where: { id: attempt.assignmentId }, data: { status: 'BLOCKED' } }).catch(() => undefined);
+  } else {
+    // Effective limit includes any extra attempts granted by an approved retake.
+    const sourceAssignment = attempt.assignmentId
+      ? await prisma.trainingAssignment.findUnique({ where: { id: attempt.assignmentId } })
+      : null;
+    const effectiveMax = topic.maxAttempts + (sourceAssignment?.extraAttempts ?? 0);
+    if (topic.blockAfterMaxAttempts && attempt.attemptNumber >= effectiveMax) {
+      isBlocked = true;
+      await prisma.assessmentAttempt.update({ where: { id: attemptId }, data: { isBlocked: true } });
+      if (attempt.assignmentId) {
+        await prisma.trainingAssignment.update({ where: { id: attempt.assignmentId }, data: { status: 'BLOCKED' } }).catch(() => undefined);
+      }
+      await notifyAssessmentBlocked(userId, topic.id);
     }
-    await notifyAssessmentBlocked(userId, topic.id);
   }
 
   await recordEvent({

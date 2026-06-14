@@ -1,7 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import type { PermissionMatrix } from '@izlearn/shared';
 import { prisma } from '../config/prisma';
-import { getUserSessions, isLocked } from '../config/redis';
+import { isLocked } from '../config/redis';
+import { isSessionActive } from '../services/session.service';
 import { verifyAccessToken } from '../utils/jwtUtils';
 import { AppError, asyncHandler } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
@@ -49,9 +50,10 @@ function makeAuthenticate(allowLocked: boolean) {
     }
 
     // Session must still be active (single-session enforcement / termination).
-    const sessions = await getUserSessions(payload.sub);
-    const active = sessions.find((s) => s.sessionId === payload.sid);
-    if (!active) throw AppError.unauthorized('Your session has ended. Please log in again.');
+    // Validated against the durable Mongo UserSession (Redis-independent).
+    if (!(await isSessionActive(payload.sub, payload.sid))) {
+      throw AppError.unauthorized('Your session has ended. Please log in again.');
+    }
 
     if (!allowLocked && (await isLocked(payload.sub, payload.sid))) {
       throw new AppError(423, 'LOCKED', 'Session is locked due to inactivity. Re-enter your password to continue.');

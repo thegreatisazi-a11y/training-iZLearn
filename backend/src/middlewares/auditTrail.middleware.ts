@@ -38,6 +38,7 @@ const AUDITED_MODELS = new Set<string>([
   'JDTemplate',
   'PersonalDocument',
   'TNI',
+  'RetakeRequest',
   'FeedbackForm',
   'FeedbackResponse',
   'Announcement',

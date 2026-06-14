@@ -287,16 +287,38 @@ export async function reviseTopic(id: string, req: Request) {
   const old = await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false } });
   if (!old) throw AppError.notFound('Training topic not found');
 
+  // Only the CURRENT version may be revised. Revising an already-superseded version
+  // would create a parallel "published" version (two live versions of one course)
+  // and is almost always a mistake — point the user at the active version instead.
+  if (old.supersededByTopicId) {
+    throw AppError.badRequest('This version has already been superseded by a newer revision. Open the current version of the course and revise that instead.');
+  }
+
   // Controlled GMP change — a revision requires a two-component e-signature.
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
 
   const actorId = req.user!.id;
   const reason = auditContext.getStore()?.reasonForChange ?? null;
-  const nextVersion = old.currentVersion + 1;
   // topicCode is @unique; a revision keeps the base code (the part before any
-  // "-vN" suffix) and appends the new version so traceability is preserved
-  // without colliding with the prior row.
+  // "-vN" suffix) and appends the new version so traceability is preserved.
+  // Earlier revisions in this family may already occupy some "-vN" codes (e.g. a
+  // version was revised more than once), so advance past any existing code to
+  // guarantee uniqueness — otherwise the create hits a P2002 (409) collision.
   const baseCode = old.topicCode.replace(/-v\d+$/, '');
+  // The new version is exactly ONE past the highest version anywhere in this topic
+  // family (the base code itself = v1, plus every "<base>-vN" revision). This keeps
+  // the increment a consistent +1 from the true latest — never +2 or backwards —
+  // regardless of which version was revised, and the topicCode stays unique.
+  const family = await prisma.trainingTopic.findMany({
+    where: { OR: [{ topicCode: baseCode }, { topicCode: { startsWith: `${baseCode}-v` } }] },
+    select: { currentVersion: true },
+  });
+  const maxVersion = family.reduce((m, t) => Math.max(m, t.currentVersion), old.currentVersion);
+  let nextVersion = maxVersion + 1;
+  // Safety against any pre-existing code/version drift in the data: never collide.
+  while (await prisma.trainingTopic.findUnique({ where: { topicCode: `${baseCode}-v${nextVersion}` } })) {
+    nextVersion++;
+  }
   // The revised version carries forward all SOP metadata and becomes the active
   // version (inherits the old status; a previously-archived topic re-publishes).
   const created = await prisma.trainingTopic.create({
@@ -416,6 +438,30 @@ export async function reviseTopic(id: string, req: Request) {
     where: { id: old.id },
     data: { status: 'ARCHIVED', isActive: false, supersededByTopicId: created.id },
   });
+
+  // GMP re-training: a revised SOP/course must be re-completed on the new version.
+  // Auto-assign the new version (PENDING) to every user who had the previous version
+  // (any status except WAIVED/DEFERRED). Their old, completed v1 assignment is kept
+  // for history; the new PENDING v2 assignment reflects the current requirement.
+  const priorHolders = await prisma.trainingAssignment.findMany({
+    where: { topicId: old.id, isDeleted: false, status: { notIn: ['WAIVED', 'DEFERRED'] } },
+    select: { userId: true },
+  });
+  const holderIds = Array.from(new Set(priorHolders.map((a) => a.userId)));
+  for (const uid of holderIds) {
+    const exists = await prisma.trainingAssignment.findFirst({ where: { userId: uid, topicId: created.id, isDeleted: false } });
+    if (exists) continue;
+    await prisma.trainingAssignment.create({
+      data: {
+        userId: uid,
+        topicId: created.id,
+        assignmentType: 'COURSE_SPECIFIC',
+        status: 'PENDING',
+        assignedBy: actorId,
+        createdBy: actorId,
+      },
+    });
+  }
 
   // 7.5: notify assigned trainees (and their supervisors) that the course was revised.
   await notifyCourseRevised(old.id, reason);

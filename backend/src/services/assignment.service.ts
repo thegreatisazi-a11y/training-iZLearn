@@ -118,7 +118,7 @@ export async function listMyTrainings(userId: string) {
     topicIds.length
       ? prisma.trainingTopic.findMany({
           where: { id: { in: topicIds } },
-          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, materialViewSeconds: true },
+          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, materialViewSeconds: true, supersededByTopicId: true },
         })
       : Promise.resolve([]),
     prisma.assessmentAttempt.findMany({ where: { userId, isDeleted: false }, orderBy: { attemptNumber: 'desc' } }),
@@ -132,7 +132,14 @@ export async function listMyTrainings(userId: string) {
     if (at.score !== null && (cur.score === null || at.score > cur.score)) cur.score = at.score;
     bestByTopic.set(at.topicId, cur);
   }
-  return assignments.map((a) => {
+  return assignments
+    // A revised course shows ONLY the current version: hide assignments whose topic
+    // has been superseded by a newer version (the user gets a fresh assignment to it).
+    .filter((a) => {
+      const topic = topicMap.get(a.topicId);
+      return !topic || !topic.supersededByTopicId;
+    })
+    .map((a) => {
     const topic = topicMap.get(a.topicId) ?? null;
     return {
       id: a.id,

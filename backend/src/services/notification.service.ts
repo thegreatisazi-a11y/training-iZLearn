@@ -156,6 +156,21 @@ export async function notifyAssessmentBlocked(userId: string, topicId: string) {
   }
 }
 
+/** Notify the trainee's direct supervisor that a retake has been requested. */
+export async function notifyRetakeRequested(traineeUserId: string, topicId: string, justification: string) {
+  const t = await topicInfo(topicId);
+  const supervisor = await supervisorRecipient(traineeUserId);
+  const trainee = await userRecipient(traineeUserId);
+  await send('retakeRequested', supervisor, { topicTitle: t.title, userName: trainee?.fullName, justification });
+}
+
+/** Notify the trainee of the supervisor's decision on their retake request. */
+export async function notifyRetakeDecision(traineeUserId: string, topicId: string, approved: boolean, remarks?: string | null) {
+  const t = await topicInfo(topicId);
+  const trainee = await userRecipient(traineeUserId);
+  await send('retakeDecision', trainee, { topicTitle: t.title, decision: approved ? 'approved' : 'rejected', remarks: remarks ?? undefined });
+}
+
 export async function notifyUserRequestSubmitted(fullName: string, employeeId: string, requestedBy: string) {
   for (const r of await usersWithPermission('userManagement', 'approve')) {
     await send('userRequestSubmitted', r, { fullName, employeeId, requestedBy });
