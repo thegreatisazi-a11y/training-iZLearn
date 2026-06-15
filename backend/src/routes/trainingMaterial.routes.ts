@@ -25,6 +25,8 @@ router.post('/:id/view/complete', requirePermission('materialManagement', 'read'
 router.patch('/:id', requirePermission('materialManagement', 'write'), c.setViewTime);
 // topicId is supplied in the multipart body alongside the file.
 router.post('/', requirePermission('materialManagement', 'write'), uploadFile.single('file'), c.upload);
+// CR-MAT2: bulk-upload multiple files (library-level when no topicId supplied).
+router.post('/bulk', requirePermission('materialManagement', 'create'), uploadFile.array('files', 50), c.bulkUpload);
 // 4.2: attach an existing library material to a topic as the current version.
 router.post('/attach', requirePermission('materialManagement', 'write'), captureReasonIfPresent, c.attachFromLibrary);
 // 4.1: replace/update a specific material with a new uploaded version (multipart; reason required).

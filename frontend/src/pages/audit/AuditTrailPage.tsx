@@ -168,6 +168,35 @@ export default function AuditTrailPage() {
     return m;
   }, [usersForNames.data]);
   const resolveUser = (id: string) => userNameById.get(id);
+
+  // CR-AU1: resolve the audited record's id → a readable name per entity type.
+  const topicsForNames = useQuery({ queryKey: ['topics', 'audit-names'], queryFn: () => svc.topics.list({ pageSize: 1000 }) });
+  const rolesForNames = useQuery({ queryKey: ['roles', 'audit-names'], queryFn: () => svc.roles.list({ pageSize: 200, includeInactive: true }) });
+  const frForNames = useQuery({ queryKey: ['designations', 'audit-names'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
+  const recordName = useMemo(() => {
+    const topic = new Map<string, string>();
+    for (const t of (topicsForNames.data?.data ?? []) as { id: string; title?: string; topicNumber?: string | null; topicCode?: string }[]) topic.set(t.id, t.topicNumber || t.title || t.topicCode || t.id);
+    const role = new Map<string, string>();
+    for (const r of (rolesForNames.data?.data ?? []) as { id: string; roleName?: string }[]) role.set(r.id, r.roleName ?? r.id);
+    const fr = new Map<string, string>();
+    for (const d of (frForNames.data?.data ?? []) as { id: string; displayName?: string }[]) fr.set(d.id, d.displayName ?? d.id);
+    return (entityType: string, entityId: string | null): string | null => {
+      if (!entityId) return null;
+      switch (entityType) {
+        case 'User':
+        case 'UserCreationRequest':
+          return userNameById.get(entityId) ?? null;
+        case 'TrainingTopic':
+          return topic.get(entityId) ?? null;
+        case 'Role':
+          return role.get(entityId) ?? null;
+        case 'DesignationMaster':
+          return fr.get(entityId) ?? null;
+        default:
+          return null;
+      }
+    };
+  }, [topicsForNames.data, rolesForNames.data, frForNames.data, userNameById]);
   // CR-10: let the user pick the export format. Excel/CSV are generated server-side
   // with no browser dependency; PDF needs headless Chrome and may be unavailable.
   const [format, setFormat] = useState<'xlsx' | 'csv' | 'pdf'>('xlsx');
@@ -234,6 +263,20 @@ export default function AuditTrailPage() {
     { key: 'userFullName', header: 'User' },
     { key: 'action', header: 'Action', render: (r) => <Badge tone={r.action}>{r.action}</Badge> },
     { key: 'entityType', header: 'Entity' },
+    {
+      key: 'record',
+      header: 'Record',
+      render: (r) => {
+        const name = recordName(r.entityType, r.entityId);
+        return name ? (
+          <span className="text-slate-700">{name}</span>
+        ) : r.entityId ? (
+          <span className="font-mono text-xs text-slate-400">{r.entityId.slice(0, 8)}…</span>
+        ) : (
+          '—'
+        );
+      },
+    },
     {
       key: 'changeDetails',
       header: 'Change Details',

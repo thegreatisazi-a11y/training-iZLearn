@@ -50,5 +50,5 @@ export const createTemplate = asyncHandler(async (req, res) =>
 );
 
 export const updateTemplate = asyncHandler(async (req, res) =>
-  sendSuccess(res, await svc.updateTemplate(req.params.id, req.body), 'Template updated'),
+  sendSuccess(res, await svc.updateTemplate(req.params.id, req.body, req), 'Template updated'),
 );

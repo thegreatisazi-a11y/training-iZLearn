@@ -38,6 +38,9 @@ export default function ReportsPage() {
   const [topicId, setTopicId] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [userId, setUserId] = useState('');
+  const [locationId, setLocationId] = useState('');
+  const [designationId, setDesignationId] = useState('');
+  const [supervisorId, setSupervisorId] = useState('');
   const [result, setResult] = useState<ReportResult | null>(null);
 
   function filters() {
@@ -48,6 +51,9 @@ export default function ReportsPage() {
       topicId: topicId || undefined,
       departmentId: departmentId || undefined,
       userId: userId || undefined,
+      locationId: locationId || undefined,
+      designationId: designationId || undefined,
+      supervisorId: supervisorId || undefined,
     };
   }
 
@@ -96,6 +102,15 @@ export default function ReportsPage() {
             </Field>
             <Field label="User ID">
               <Input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="Location ID">
+              <Input value={locationId} onChange={(e) => setLocationId(e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="Functional Role ID">
+              <Input value={designationId} onChange={(e) => setDesignationId(e.target.value)} placeholder="Optional" />
+            </Field>
+            <Field label="Reporting Manager ID">
+              <Input value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} placeholder="Optional (supervisor)" />
             </Field>
           </div>
           <div className="flex flex-wrap items-center gap-4">

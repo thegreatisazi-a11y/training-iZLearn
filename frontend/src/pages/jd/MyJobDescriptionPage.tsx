@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileText } from 'lucide-react';
+import { CheckCircle2, FileText, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { printHtml, escapeHtml } from '@/lib/print';
+import { useAuthStore } from '@/store/authStore';
 import { JD_ACK_SENTENCE } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -32,6 +34,15 @@ export default function MyJobDescriptionPage() {
   const qc = useQueryClient();
   const [typed, setTyped] = useState('');
   const [signOpen, setSignOpen] = useState(false);
+  const userName = useAuthStore((s) => s.user?.fullName);
+
+  const printMyJD = (j: MyJD) => {
+    printHtml(
+      j.title,
+      `<h1>${escapeHtml(j.title)}</h1><div class="sub">Status: ${escapeHtml(j.status)}${j.acknowledgedAt ? ` · Acknowledged ${escapeHtml(formatDateTime(j.acknowledgedAt))}` : ''}</div><div>${DOMPurify.sanitize(j.content)}</div>`,
+      { printedBy: userName },
+    );
+  };
 
   const { data, isLoading } = useQuery({ queryKey: ['my-jd'], queryFn: () => svc.jds.mine() as unknown as Promise<MyJD | null> });
 
@@ -68,7 +79,15 @@ export default function MyJobDescriptionPage() {
 
   return (
     <div>
-      <PageHeader title="My Job Description" description={jd.title} />
+      <PageHeader
+        title="My Job Description"
+        description={jd.title}
+        actions={
+          <Button variant="outline" onClick={() => printMyJD(jd)}>
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+        }
+      />
 
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-center justify-between gap-3">

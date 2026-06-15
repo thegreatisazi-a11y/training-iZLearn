@@ -87,6 +87,79 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
 }
 
 /**
+ * CR-MAT2/MAT3: Persist a single uploaded file as a LIBRARY-level material (no
+ * topic). Reuses the same validation (extension/MIME/size), virus-scan and
+ * metadata capture (originalFileName/fileType/fileSize) as the single-upload
+ * path, and records a FILE_UPLOAD audit event. The material is stored with an
+ * empty topicId sentinel so it can later be reused into a topic via
+ * attachLibraryMaterial(). Pass `maxBytes` so a bulk loop resolves the size
+ * limit once.
+ */
+async function persistLibraryMaterial(file: Express.Multer.File, createdBy: string, maxBytes: number) {
+  validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
+  await scanFileForVirus(file.path);
+
+  const key = materialKey(file.filename);
+  await storage.putFile(key, file.path, file.mimetype);
+
+  const material = await prisma.trainingMaterial.create({
+    data: {
+      // Library-level: no owning topic. Empty sentinel keeps the non-null schema
+      // column satisfied; attach-from-library copies it into a topic later.
+      topicId: '',
+      originalFileName: file.originalname,
+      storedFileName: file.filename,
+      filePath: key,
+      fileType: getExtension(file.originalname),
+      fileSize: file.size,
+      version: 1,
+      isStaged: false,
+      isCurrentVersion: true,
+      createdBy,
+    },
+  });
+
+  await recordEvent({
+    action: 'FILE_UPLOAD',
+    entityType: 'TrainingMaterial',
+    entityId: material.id,
+    newValue: { library: true, originalFileName: file.originalname, fileType: material.fileType, fileSize: file.size },
+  });
+
+  return material;
+}
+
+/**
+ * CR-MAT2: Bulk-upload multiple files into the Material Library. Each file goes
+ * through the same single-file persist logic (validation + virus-scan + metadata
+ * capture + FILE_UPLOAD audit). Files are library-level (no topic) so they can be
+ * reused into topics later. A failure on one file does not abort the rest; the
+ * caller gets a summary of what uploaded and what failed.
+ */
+export async function bulkUploadMaterials(
+  files: Express.Multer.File[],
+  createdBy: string,
+  opts?: { topicId?: string | null },
+): Promise<{ uploaded: number; failed: number; materials: unknown[]; errors: { fileName: string; error: string }[] }> {
+  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const materials: unknown[] = [];
+  const errors: { fileName: string; error: string }[] = [];
+
+  for (const file of files) {
+    try {
+      const material = opts?.topicId
+        ? await uploadMaterial(opts.topicId, file, createdBy)
+        : await persistLibraryMaterial(file, createdBy, maxBytes);
+      materials.push(material);
+    } catch (err) {
+      errors.push({ fileName: file.originalname, error: err instanceof Error ? err.message : 'Upload failed' });
+    }
+  }
+
+  return { uploaded: materials.length, failed: errors.length, materials, errors };
+}
+
+/**
  * 4.1: Replace/Update a SPECIFIC material with a new uploaded file.
  *  - PUBLISHED topic: the new file is STAGED against the selected material
  *    (replacesMaterialId) and supersedes it only when the topic is revised. The

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Eye, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { printHtml, printTable, escapeHtml } from '@/lib/print';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
@@ -26,15 +27,19 @@ interface JD {
   version: number;
   status: string;
   content: string;
-  userFullName?: string;
+  userId?: string;
+  userFullName?: string | null;
+  functionalRoleId?: string | null;
   approvedBy?: string | null;
   approvedByName?: string | null;
   approvedAt?: string | null;
+  acknowledgedAt?: string | null;
 }
 
 interface JDTemplate {
   id: string;
   title: string;
+  content?: string;
   functionalRoleId?: string | null;
   departmentId?: string | null;
 }
@@ -46,6 +51,8 @@ export default function JDPage() {
   const qc = useQueryClient();
   const canWrite = useAuthStore((s) => s.hasPermission)('jobDescription', 'write');
   const canApprove = useAuthStore((s) => s.hasPermission)('jobDescription', 'approve');
+  const canPrint = useAuthStore((s) => s.hasPermission)('jobDescription', 'print');
+  const currentUserName = useAuthStore((s) => s.user?.fullName);
 
   const [tab, setTab] = useState('jds');
   const [page, setPage] = useState(1);
@@ -57,8 +64,12 @@ export default function JDPage() {
   const [editReasonOpen, setEditReasonOpen] = useState(false);
   const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
+  const [viewing, setViewing] = useState<JD | null>(null);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [templateForm, setTemplateForm] = useState(emptyTemplate);
+  const [editingTemplate, setEditingTemplate] = useState<JDTemplate | null>(null);
+  const [templateEditForm, setTemplateEditForm] = useState({ ...emptyTemplate, reasonForChange: '' });
+  const [templateSignOpen, setTemplateSignOpen] = useState(false);
 
   // Select option sources.
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
@@ -150,26 +161,93 @@ export default function JDPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  const updateTemplateMut = useMutation({
+    mutationFn: (sig: ESignaturePayload) =>
+      svc.jds.updateTemplate(editingTemplate!.id, {
+        functionalRoleId: templateEditForm.functionalRoleId,
+        departmentId: templateEditForm.departmentId || undefined,
+        title: templateEditForm.title,
+        content: templateEditForm.content,
+        reasonForChange: templateEditForm.reasonForChange,
+        signature: sig,
+      }),
+    onSuccess: () => {
+      toast.success('Template updated');
+      qc.invalidateQueries({ queryKey: ['jd-templates'] });
+      setEditingTemplate(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const printJD = (jd: JD) => {
+    const body = `
+      <h1>${escapeHtml(jd.title)}</h1>
+      <div class="sub">Status: ${escapeHtml(jd.status.replace(/_/g, ' '))}</div>
+      ${printTable(
+        ['User', 'Functional Role', 'Approved By', 'Acknowledged'],
+        [[
+          jd.userFullName ?? '—',
+          jd.functionalRoleId ? frName.get(jd.functionalRoleId) ?? '—' : '—',
+          jd.approvedByName ?? '—',
+          jd.acknowledgedAt ? `Yes · ${formatDate(jd.acknowledgedAt)}` : 'Pending',
+        ]],
+      )}
+      <div class="section">Content</div>
+      <div>${DOMPurify.sanitize(jd.content ?? '')}</div>
+    `;
+    printHtml(jd.title, body, { printedBy: currentUserName });
+  };
+
   const columns: Column<JD>[] = [
     {
+      key: 'userFullName',
+      header: 'User',
+      render: (r) => (
+        <span className="font-medium text-slate-800">
+          {r.userFullName ?? (r.userId ? userName.get(r.userId) ?? '—' : '—')}
+        </span>
+      ),
+    },
+    {
       key: 'title',
-      header: 'Title',
+      header: 'Functional Role / Title',
       render: (r) => (
         <button className="font-medium text-primary hover:underline" onClick={() => setDrawer(r)}>
-          {r.title}
+          {r.functionalRoleId ? frName.get(r.functionalRoleId) ?? r.title : r.title}
         </button>
       ),
     },
-    { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status.replace(/_/g, ' ')}</Badge> },
     { key: 'approvedBy', header: 'Approved By', render: (r) => r.approvedByName ?? (r.approvedBy ? userName.get(r.approvedBy) ?? r.approvedBy : '—') },
-    { key: 'approvedAt', header: 'Approved At', render: (r) => formatDate(r.approvedAt) },
+    {
+      key: 'acknowledgedAt',
+      header: 'Acknowledged',
+      render: (r) =>
+        r.acknowledgedAt ? (
+          <span className="text-green-700">Yes · {formatDate(r.acknowledgedAt)}</span>
+        ) : (
+          <span className="text-slate-400">Pending</span>
+        ),
+    },
+    {
+      key: 'active',
+      header: 'Active',
+      render: (r) => (r.status === 'APPROVED' || r.status === 'UNDER_REVIEW' ? 'Yes' : 'No'),
+    },
     {
       key: 'actions',
       header: '',
       className: 'text-right',
       render: (r) => (
         <div className="flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => setViewing(r)}>
+            <Eye className="h-4 w-4" /> View
+          </Button>
+          {canPrint && (
+            <Button size="sm" variant="outline" onClick={() => printJD(r)}>
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+          )}
           {canWrite && r.status === 'DRAFT' && (
             <Button size="sm" variant="outline" onClick={() => transitionMut.mutate({ id: r.id, body: { action: 'SUBMIT_FOR_REVIEW' } })}>
               Submit for review
@@ -206,6 +284,30 @@ export default function JDPage() {
     { key: 'title', header: 'Title', render: (r) => <span className="font-medium text-slate-800">{r.title}</span> },
     { key: 'functionalRole', header: 'Functional Role', render: (r) => (r.functionalRoleId ? frName.get(r.functionalRoleId) ?? '—' : '—') },
     { key: 'departmentName', header: 'Department', render: (r) => (r.departmentId ? deptName.get(r.departmentId) ?? '—' : 'Any') },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (r) =>
+        canWrite ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setEditingTemplate(r);
+              setTemplateEditForm({
+                functionalRoleId: r.functionalRoleId ?? '',
+                departmentId: r.departmentId ?? '',
+                title: r.title,
+                content: r.content ?? '',
+                reasonForChange: '',
+              });
+            }}
+          >
+            Edit
+          </Button>
+        ) : null,
+    },
   ];
 
   return (
@@ -222,7 +324,7 @@ export default function JDPage() {
               )
             : canWrite && (
                 <Button onClick={() => setCreatingTemplate(true)}>
-                  <Plus className="h-4 w-4" /> New Template
+                  <Plus className="h-4 w-4" /> New JD Template
                 </Button>
               )
         }
@@ -377,6 +479,94 @@ export default function JDPage() {
         <Field label="Content">
           <Textarea className="min-h-[160px]" value={templateForm.content} onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })} />
         </Field>
+      </Dialog>
+
+      {/* Edit Template (controlled — reason + e-signature) */}
+      <Dialog
+        open={!!editingTemplate}
+        onClose={() => setEditingTemplate(null)}
+        className="max-w-2xl"
+        title="Edit JD Template"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditingTemplate(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                !templateEditForm.functionalRoleId ||
+                !templateEditForm.title ||
+                !templateEditForm.content ||
+                templateEditForm.reasonForChange.trim().length < 5
+              }
+              onClick={() => setTemplateSignOpen(true)}
+            >
+              Continue
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Functional Role" required>
+            <Select options={functionalRoleOptions} placeholder="Select…" value={templateEditForm.functionalRoleId} onChange={(e) => setTemplateEditForm({ ...templateEditForm, functionalRoleId: e.target.value })} />
+          </Field>
+          <Field label="Department (optional)">
+            <Select options={[{ value: '', label: 'Any department' }, ...departmentOptions]} placeholder="Any department" value={templateEditForm.departmentId} onChange={(e) => setTemplateEditForm({ ...templateEditForm, departmentId: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Title">
+          <Input value={templateEditForm.title} onChange={(e) => setTemplateEditForm({ ...templateEditForm, title: e.target.value })} />
+        </Field>
+        <Field label="Content">
+          <Textarea className="min-h-[160px]" value={templateEditForm.content} onChange={(e) => setTemplateEditForm({ ...templateEditForm, content: e.target.value })} />
+        </Field>
+        <Field label="Reason for change" required>
+          <Input value={templateEditForm.reasonForChange} onChange={(e) => setTemplateEditForm({ ...templateEditForm, reasonForChange: e.target.value })} placeholder="At least 5 characters" />
+        </Field>
+      </Dialog>
+
+      <ESignatureModal
+        open={templateSignOpen}
+        onClose={() => setTemplateSignOpen(false)}
+        title="Sign — Edit JD Template"
+        defaultMeaning="Approved"
+        onConfirm={async (sig) => {
+          await updateTemplateMut.mutateAsync(sig);
+          setTemplateSignOpen(false);
+        }}
+      />
+
+      {/* View JD (read-only) */}
+      <Dialog
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        className="max-w-2xl"
+        title={viewing?.title ?? 'Job Description'}
+        footer={
+          <>
+            {canPrint && viewing && (
+              <Button variant="outline" onClick={() => printJD(viewing)}>
+                <Printer className="h-4 w-4" /> Print
+              </Button>
+            )}
+            <Button onClick={() => setViewing(null)}>Close</Button>
+          </>
+        }
+      >
+        {viewing && (
+          <div className="space-y-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={viewing.status}>{viewing.status.replace(/_/g, ' ')}</Badge>
+              <span className="text-slate-500">v{viewing.version}</span>
+            </div>
+            <dl className="grid grid-cols-2 gap-2 text-slate-700">
+              <div><dt className="text-xs text-slate-400">User</dt><dd>{viewing.userFullName ?? (viewing.userId ? userName.get(viewing.userId) ?? '—' : '—')}</dd></div>
+              <div><dt className="text-xs text-slate-400">Approved By</dt><dd>{viewing.approvedByName ?? '—'}</dd></div>
+              <div><dt className="text-xs text-slate-400">Acknowledged</dt><dd>{viewing.acknowledgedAt ? `Yes · ${formatDate(viewing.acknowledgedAt)}` : 'Pending'}</dd></div>
+            </dl>
+            <div className="prose-sm border-t border-slate-100 pt-3 text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.content ?? '') }} />
+          </div>
+        )}
       </Dialog>
 
       {/* Approve / Reject e-signature */}

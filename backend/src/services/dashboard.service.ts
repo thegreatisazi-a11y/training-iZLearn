@@ -34,6 +34,37 @@ export async function getDashboard(user: AuthUser) {
     roles: user.roleNames,
   };
 
+  // Reporting Manager section: aggregate counts for the caller's direct reports.
+  // Scoped strictly by supervisorId so a manager only sees their own team.
+  if (hasPermission(user.permissions, 'team', 'read')) {
+    const reports = await prisma.user.findMany({
+      where: { isDeleted: false, isActive: true, supervisorId: user.id },
+      select: { id: true },
+    });
+    const reportIds = reports.map((r) => r.id);
+    if (reportIds.length) {
+      const [teamPending, teamOverdue, teamBlocked] = await Promise.all([
+        prisma.trainingAssignment.count({
+          where: { userId: { in: reportIds }, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+        }),
+        prisma.trainingAssignment.count({
+          where: { userId: { in: reportIds }, isDeleted: false, status: 'OVERDUE' },
+        }),
+        prisma.trainingAssignment.count({
+          where: { userId: { in: reportIds }, isDeleted: false, status: 'BLOCKED' },
+        }),
+      ]);
+      payload.team = {
+        teamSize: reportIds.length,
+        pending: teamPending,
+        overdue: teamOverdue,
+        blocked: teamBlocked,
+      };
+    } else {
+      payload.team = { teamSize: 0, pending: 0, overdue: 0, blocked: 0 };
+    }
+  }
+
   // Organisation-wide section for users with reporting / admin visibility.
   const showOrg =
     hasPermission(user.permissions, 'reports', 'read') ||

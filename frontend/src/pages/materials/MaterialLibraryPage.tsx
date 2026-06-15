@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, Trash2, Eye } from 'lucide-react';
+import { Download, Trash2, Eye, Upload } from 'lucide-react';
 import { ALLOWED_MATERIAL_EXTENSIONS } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -16,7 +16,7 @@ import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
-import { apiError } from '@/lib/axios';
+import { api, apiError } from '@/lib/axios';
 import { svc } from '@/services';
 
 interface Material {
@@ -33,7 +33,10 @@ const FILE_TYPE_OPTIONS = ALLOWED_MATERIAL_EXTENSIONS.map((e) => ({ value: e, la
 export default function MaterialLibraryPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const canWrite = useAuthStore((s) => s.hasPermission)('materialManagement', 'write');
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canWrite = hasPermission('materialManagement', 'write');
+  const canBulkUpload = hasPermission('materialManagement', 'create') || canWrite;
+  const bulkInputRef = useRef<HTMLInputElement>(null);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -65,6 +68,28 @@ export default function MaterialLibraryPage() {
     },
     onError: (e) => toast.error(apiError(e)),
   });
+
+  const bulkUploadMut = useMutation({
+    mutationFn: async (files: File[]) => {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      // Library-level upload (no topicId): files become reusable library materials.
+      const r = await api.post('/materials/bulk', fd);
+      return r.data.data as { uploaded: number; failed: number; errors: { fileName: string; error: string }[] };
+    },
+    onSuccess: (res) => {
+      if (res.uploaded > 0) toast.success(`${res.uploaded} file(s) uploaded to the library`);
+      if (res.failed > 0) toast.error(`${res.failed} file(s) failed: ${res.errors.map((e) => e.fileName).join(', ')}`);
+      qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const onBulkFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) bulkUploadMut.mutate(files);
+    e.target.value = ''; // allow re-selecting the same files
+  };
 
   const deleteMut = useMutation({
     mutationFn: (reason: string) => svc.materials.remove(deleting!.id, reason),
@@ -113,7 +138,28 @@ export default function MaterialLibraryPage() {
 
   return (
     <div>
-      <PageHeader title="Material Library" description="Controlled training documents" />
+      <PageHeader
+        title="Material Library"
+        description="Controlled training documents"
+        actions={
+          canBulkUpload ? (
+            <>
+              <input
+                ref={bulkInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                accept={ALLOWED_MATERIAL_EXTENSIONS.map((e) => `.${e}`).join(',')}
+                onChange={onBulkFilesSelected}
+              />
+              <Button onClick={() => bulkInputRef.current?.click()} disabled={bulkUploadMut.isPending}>
+                <Upload className="mr-2 h-4 w-4" />
+                {bulkUploadMut.isPending ? 'Uploading…' : 'Bulk Upload'}
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
       {canWrite && (
         <Card className="mb-5">

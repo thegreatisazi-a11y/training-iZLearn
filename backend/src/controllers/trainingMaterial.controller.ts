@@ -55,6 +55,20 @@ export const upload = asyncHandler(async (req: Request, res: Response) => {
   sendCreated(res, material, 'Material uploaded');
 });
 
+/**
+ * CR-MAT2: Bulk-upload multiple files (multer .array('files')). topicId is
+ * optional — when omitted the files become library-level materials reusable into
+ * topics later. Returns an { uploaded, failed, errors[] } summary; partial
+ * success is reported with HTTP 200.
+ */
+export const bulkUpload = asyncHandler(async (req: Request, res: Response) => {
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  if (files.length === 0) throw AppError.badRequest('At least one file is required.');
+  const topicId = req.body?.topicId ? req.body.topicId.toString() : undefined;
+  const result = await svc.bulkUploadMaterials(files, req.user!.id, { topicId });
+  sendSuccess(res, result, `${result.uploaded} file(s) uploaded${result.failed ? `, ${result.failed} failed` : ''}`);
+});
+
 export const download = asyncHandler(async (req: Request, res: Response) => {
   // UR-16: a trainee may only download the current, non-obsolete version.
   if (!canManageMaterials(req)) {

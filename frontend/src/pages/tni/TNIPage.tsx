@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, Check, Search } from 'lucide-react';
 import { tniStatus } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -44,10 +44,17 @@ function RequirementMatrix() {
   const [signOpen, setSignOpen] = useState(false);
   const [assignLater, setAssignLater] = useState(false);
   const [activateOn, setActivateOn] = useState('');
+  const [q, setQ] = useState('');
   const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
 
+  type Cell = { designationId: string; topicId: string; isRequired: boolean };
   const setMut = useMutation({
-    mutationFn: (body: { designationId: string; topicId: string; isRequired: boolean }) => svc.tni.setRequirement(body),
+    mutationFn: (body: Cell) => svc.tni.setRequirement(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tni-matrix'] }),
+    onError: (e) => toast.error(apiError(e)),
+  });
+  const bulkMut = useMutation({
+    mutationFn: (cells: Cell[]) => Promise.all(cells.map((c) => svc.tni.setRequirement(c))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tni-matrix'] }),
     onError: (e) => toast.error(apiError(e)),
   });
@@ -70,13 +77,38 @@ function RequirementMatrix() {
   });
 
   if (isLoading || !data) return <div className="py-8 text-center text-sm text-slate-500">Loading matrix…</div>;
-  const isRequired = (designationId: string, topicId: string) =>
-    data.cells.some((c) => c.designationId === designationId && c.topicId === topicId && c.isRequired);
+
+  const reqSet = new Set(data.cells.filter((c) => c.isRequired).map((c) => `${c.designationId}|${c.topicId}`));
+  const isRequired = (d: string, t: string) => reqSet.has(`${d}|${t}`);
+  const term = q.trim().toLowerCase();
+  const topics = term
+    ? data.topics.filter((t) => t.title.toLowerCase().includes(term) || (t.topicNumber || t.topicCode || '').toLowerCase().includes(term))
+    : data.topics;
+  const colCount = (d: string) => data.topics.filter((t) => isRequired(d, t.id)).length;
+  const rowCount = (t: string) => data.designations.filter((d) => isRequired(d.id, t)).length;
+  const busy = setMut.isPending || bulkMut.isPending;
+  const setColumn = (designationId: string, on: boolean) => bulkMut.mutate(topics.map((t) => ({ designationId, topicId: t.id, isRequired: on })));
+  const setRow = (topicId: string, on: boolean) => bulkMut.mutate(data.designations.map((d) => ({ designationId: d.id, topicId, isRequired: on })));
+
+  const noRoles = data.designations.length === 0;
+  const noTopics = data.topics.length === 0;
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm text-slate-600">Mark which published topics are <strong>Required</strong> for each functional role, then assign.</p>
+      {/* Header: intent + summary + assign controls */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-slate-600">
+            Mark which published SOPs/topics are <span className="font-medium text-green-700">Required</span> for each Functional Role, then assign.
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span>{data.designations.length} functional role(s)</span>
+            <span>·</span>
+            <span>{data.topics.length} topic(s)</span>
+            <span>·</span>
+            <Badge tone="APPROVED">{reqSet.size} required mapping(s)</Badge>
+          </div>
+        </div>
         {canAssign && (
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-1.5 text-sm text-slate-600">
@@ -86,48 +118,98 @@ function RequirementMatrix() {
             {assignLater && (
               <Input type="date" className="max-w-[150px]" value={activateOn} onChange={(e) => setActivateOn(e.target.value)} title="Activate on (optional)" />
             )}
-            <Button onClick={() => setSignOpen(true)} disabled={data.topics.length === 0}>
+            <Button onClick={() => setSignOpen(true)} disabled={noTopics || reqSet.size === 0}>
               {assignLater ? 'Schedule assignment' : 'Assign from matrix'}
             </Button>
           </div>
         )}
       </div>
-      {data.topics.length === 0 ? (
+
+      {/* Toolbar: search + legend */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+          <Search className="h-4 w-4 text-slate-400" />
+          <input className="bg-transparent text-sm outline-none" placeholder="Filter topics…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1"><span className="inline-flex h-4 w-4 items-center justify-center rounded bg-green-100 text-green-700"><Check className="h-3 w-3" /></span> Required</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-flex h-4 w-4 items-center justify-center rounded bg-slate-100 text-slate-400">–</span> Not required</span>
+        </div>
+      </div>
+
+      {noRoles ? (
+        <p className="py-8 text-center text-sm text-slate-500">No Functional Roles defined. Add them under Master Setup → Functional Roles first.</p>
+      ) : noTopics ? (
         <p className="py-8 text-center text-sm text-slate-500">No published topics yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded border border-slate-200">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+        <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200">
+          <table className="border-separate border-spacing-0 text-sm">
+            <thead>
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Topic</th>
-                {data.designations.map((r) => (
-                  <th key={r.id} className="px-3 py-2 text-center font-medium">{r.displayName}</th>
+                <th className="sticky left-0 top-0 z-30 min-w-[260px] border-b border-r border-slate-200 bg-slate-100 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  SOP / Topic
+                </th>
+                {data.designations.map((d) => (
+                  <th key={d.id} className="sticky top-0 z-20 min-w-[120px] border-b border-slate-200 bg-slate-100 px-3 py-2 text-center align-bottom">
+                    <div className="text-xs font-semibold text-slate-700">{d.displayName}</div>
+                    <div className="mt-0.5 text-[10px] font-normal text-slate-400">{colCount(d.id)}/{data.topics.length} required</div>
+                    {canEdit && (
+                      <div className="mt-1 flex justify-center gap-1 text-[10px]">
+                        <button type="button" disabled={busy} className="rounded px-1 text-primary hover:underline disabled:opacity-50" onClick={() => setColumn(d.id, true)}>All</button>
+                        <span className="text-slate-300">|</span>
+                        <button type="button" disabled={busy} className="rounded px-1 text-slate-400 hover:underline disabled:opacity-50" onClick={() => setColumn(d.id, false)}>None</button>
+                      </div>
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.topics.map((t) => (
-                <tr key={t.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2 text-slate-700">
-                    <span className="font-mono text-xs text-slate-400">{t.topicNumber || t.topicCode}</span> {t.title}
+            <tbody>
+              {topics.map((t, i) => (
+                <tr key={t.id} className={i % 2 ? 'bg-slate-50/40' : 'bg-white'}>
+                  <td className={`sticky left-0 z-10 border-b border-r border-slate-200 px-3 py-2 ${i % 2 ? 'bg-slate-50' : 'bg-white'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-slate-800">{t.title}</div>
+                        <div className="font-mono text-[10px] text-slate-400">{t.topicNumber || t.topicCode} · {rowCount(t.id)} role(s)</div>
+                      </div>
+                      {canEdit && (
+                        <div className="flex shrink-0 gap-1 text-[10px]">
+                          <button type="button" disabled={busy} className="text-primary hover:underline disabled:opacity-50" onClick={() => setRow(t.id, true)}>All</button>
+                          <span className="text-slate-300">|</span>
+                          <button type="button" disabled={busy} className="text-slate-400 hover:underline disabled:opacity-50" onClick={() => setRow(t.id, false)}>None</button>
+                        </div>
+                      )}
+                    </div>
                   </td>
-                  {data.designations.map((r) => (
-                    <td key={r.id} className="px-3 py-2 text-center">
-                      <input
-                        type="checkbox"
-                        disabled={!canEdit || setMut.isPending}
-                        checked={isRequired(r.id, t.id)}
-                        onChange={(e) => setMut.mutate({ designationId: r.id, topicId: t.id, isRequired: e.target.checked })}
-                        title="Required for this functional role"
-                      />
-                    </td>
-                  ))}
+                  {data.designations.map((d) => {
+                    const req = isRequired(d.id, t.id);
+                    return (
+                      <td key={d.id} className="border-b border-slate-100 px-3 py-2 text-center">
+                        <button
+                          type="button"
+                          disabled={!canEdit || busy}
+                          title={req ? 'Required — click to clear' : 'Not required — click to set required'}
+                          onClick={() => setMut.mutate({ designationId: d.id, topicId: t.id, isRequired: !req })}
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:opacity-60 ${
+                            req ? 'border-green-300 bg-green-100 text-green-700 hover:bg-green-200' : 'border-slate-200 bg-slate-50 text-slate-300 hover:bg-slate-100'
+                          }`}
+                        >
+                          {req ? <Check className="h-4 w-4" /> : <span className="text-xs">–</span>}
+                        </button>
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
+              {topics.length === 0 && (
+                <tr><td colSpan={data.designations.length + 1} className="px-3 py-6 text-center text-sm text-slate-400">No topics match "{q}".</td></tr>
+              )}
             </tbody>
           </table>
         </div>
       )}
+
       <ESignatureModal
         open={signOpen}
         onClose={() => setSignOpen(false)}

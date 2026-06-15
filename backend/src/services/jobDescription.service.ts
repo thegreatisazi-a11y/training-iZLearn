@@ -46,14 +46,20 @@ export async function listJDs(q: PaginationQuery & { userId?: string }) {
     }),
     prisma.jobDescription.count({ where }),
   ]);
-  // Resolve approver id → name so the list shows "Approved By" as a person, not a UUID.
-  const approverIds = Array.from(new Set(data.map((d) => d.approvedBy).filter(Boolean) as string[]));
-  const approvers = approverIds.length
-    ? await prisma.user.findMany({ where: { id: { in: approverIds } }, select: { id: true, fullName: true } })
+  // Resolve user + approver ids → names so the list shows people, not UUIDs (CR-JD3).
+  const ids = Array.from(
+    new Set([...data.map((d) => d.userId), ...data.map((d) => d.approvedBy)].filter(Boolean) as string[]),
+  );
+  const people = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } })
     : [];
-  const nameById = new Map(approvers.map((u) => [u.id, u.fullName]));
-  const withApproverNames = data.map((d) => ({ ...d, approvedByName: d.approvedBy ? nameById.get(d.approvedBy) ?? null : null }));
-  return { data: withApproverNames, total, page: q.page, pageSize: q.pageSize };
+  const nameById = new Map(people.map((u) => [u.id, u.fullName]));
+  const withNames = data.map((d) => ({
+    ...d,
+    userFullName: nameById.get(d.userId) ?? null,
+    approvedByName: d.approvedBy ? nameById.get(d.approvedBy) ?? null : null,
+  }));
+  return { data: withNames, total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function getJD(id: string) {
@@ -321,9 +327,16 @@ export async function createTemplate(input: JDTemplateInput, createdBy: string) 
   });
 }
 
-export async function updateTemplate(id: string, input: JDTemplateInput) {
+/**
+ * CR-JD6: editing a master template is a controlled action — it requires a
+ * two-component electronic signature plus a reason for change, and records an
+ * explicit UPDATE audit action.
+ */
+export async function updateTemplate(id: string, input: JDTemplateInput, req: Request) {
   const template = await prisma.jDTemplate.findFirst({ where: { id, isDeleted: false } });
   if (!template) throw AppError.notFound('Job-description template not found');
+  await signFromRequest(req, 'JDTemplate', id, 'Approved');
+  auditContext.setActionOverride('UPDATE');
   return prisma.jDTemplate.update({
     where: { id },
     data: {

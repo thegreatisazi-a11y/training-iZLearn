@@ -13,6 +13,10 @@ export interface ReportFilters {
   departmentId?: string;
   roleId?: string;
   userId?: string;
+  // CR-R2: additional org filters
+  locationId?: string;
+  designationId?: string; // functional role
+  supervisorId?: string; // reporting manager
   from?: Date;
   to?: Date;
   includeInactive?: boolean;
@@ -46,15 +50,54 @@ export const REPORT_TYPES = [
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 async function maps() {
-  const [users, topics, depts] = await Promise.all([
+  const [users, topics, depts, locations, designations] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false } }),
     prisma.trainingTopic.findMany({ where: { isDeleted: false } }),
     prisma.department.findMany({ where: { isDeleted: false } }),
+    prisma.location.findMany({ where: { isDeleted: false } }),
+    prisma.designationMaster.findMany({ where: { isDeleted: false } }),
   ]);
   return {
     users: new Map(users.map((u) => [u.id, u])),
     topics: new Map(topics.map((t) => [t.id, t])),
     depts: new Map(depts.map((d) => [d.id, d])),
+    locations: new Map(locations.map((l) => [l.id, l])),
+    designations: new Map(designations.map((d) => [d.id, d])),
+  };
+}
+
+type Maps = Awaited<ReturnType<typeof maps>>;
+
+/** CR-R1 name resolution helpers (resolve raw ids to readable names). */
+function deptName(m: Maps, id?: string | null) {
+  return id ? m.depts.get(id)?.name ?? '' : '';
+}
+function locationName(m: Maps, id?: string | null) {
+  return id ? m.locations.get(id)?.name ?? '' : '';
+}
+function designationDisplay(m: Maps, id?: string | null) {
+  return id ? m.designations.get(id)?.displayName ?? '' : '';
+}
+function supervisorName(m: Maps, id?: string | null) {
+  return id ? m.users.get(id)?.fullName ?? '' : '';
+}
+
+/** A user's functional-role ids: primary designationId plus designationIds[] array. */
+function userDesignationIds(u: { designationId?: string | null; designationIds?: unknown }): string[] {
+  const ids = new Set<string>();
+  if (u.designationId) ids.add(u.designationId);
+  if (Array.isArray(u.designationIds)) for (const d of u.designationIds) if (typeof d === 'string') ids.add(d);
+  return [...ids];
+}
+
+/** CR-R1: readable org columns for a user, used by user/training reports. */
+function userOrgCols(m: Maps, userId: string) {
+  const u = m.users.get(userId);
+  return {
+    department: deptName(m, u?.departmentId),
+    location: locationName(m, u?.locationId),
+    functionalRole: designationDisplay(m, u?.designationId),
+    reportingManager: supervisorName(m, u?.supervisorId),
   };
 }
 
@@ -71,18 +114,32 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
   const m = await maps();
   const activeUser = (id: string) => (f.includeInactive ? true : m.users.get(id)?.isActive ?? false);
 
+  // CR-R2: org-scope predicate over a user id (location / department / functional role / reporting manager).
+  const matchesUserScope = (id: string) => {
+    const u = m.users.get(id);
+    if (!u) return false;
+    if (f.locationId && u.locationId !== f.locationId) return false;
+    if (f.departmentId && u.departmentId !== f.departmentId) return false;
+    if (f.supervisorId && u.supervisorId !== f.supervisorId) return false;
+    if (f.designationId && !userDesignationIds(u).includes(f.designationId)) return false;
+    return true;
+  };
+  /** Combined gate: active (unless includeInactive) AND in org scope. */
+  const userPasses = (id: string) => activeUser(id) && matchesUserScope(id);
+
   switch (type) {
     case 'topic-wise-status': {
       const a = await prisma.trainingAssignment.findMany({
         where: { isDeleted: false, ...(f.topicId ? { topicId: f.topicId } : {}), ...dateRange('createdAt', f) },
       });
       const rows = a
-        .filter((x) => activeUser(x.userId))
+        .filter((x) => userPasses(x.userId))
         .map((x) => ({
           topicCode: m.topics.get(x.topicId)?.topicCode ?? '',
           topicTitle: m.topics.get(x.topicId)?.title ?? '',
           employee: m.users.get(x.userId)?.fullName ?? '',
           employeeId: m.users.get(x.userId)?.employeeId ?? '',
+          ...userOrgCols(m, x.userId),
           status: x.status,
           dueDate: formatDate(x.dueDate),
         }));
@@ -93,6 +150,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Topic', key: 'topicTitle' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Status', key: 'status' },
           { header: 'Due Date', key: 'dueDate' },
         ],
@@ -104,6 +165,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const x of a) {
+        if (!userPasses(x.userId)) continue;
         const dept = m.users.get(x.userId)?.departmentId ?? 'unknown';
         const e = agg.get(dept) ?? { total: 0, completed: 0 };
         e.total++;
@@ -133,10 +195,11 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         where: { isDeleted: false, ...(f.userId ? { userId: f.userId } : {}) },
       });
       const rows = a
-        .filter((x) => activeUser(x.userId))
+        .filter((x) => userPasses(x.userId))
         .map((x) => ({
           employee: m.users.get(x.userId)?.fullName ?? '',
           employeeId: m.users.get(x.userId)?.employeeId ?? '',
+          ...userOrgCols(m, x.userId),
           topic: m.topics.get(x.topicId)?.title ?? '',
           status: x.status,
           dueDate: formatDate(x.dueDate),
@@ -146,6 +209,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Topic', key: 'topic' },
           { header: 'Status', key: 'status' },
           { header: 'Due Date', key: 'dueDate' },
@@ -165,9 +232,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         if (x.status === 'COMPLETED') e.completed++;
         agg.set(x.userId, e);
       }
-      const rows = [...agg.entries()].filter(([id]) => activeUser(id)).map(([id, v]) => ({
+      const rows = [...agg.entries()].filter(([id]) => userPasses(id)).map(([id, v]) => ({
         employee: m.users.get(id)?.fullName ?? '',
         employeeId: m.users.get(id)?.employeeId ?? '',
+        ...userOrgCols(m, id),
         totalAssigned: v.total,
         completed: v.completed,
         compliancePercent: v.total ? Number(((v.completed / v.total) * 100).toFixed(1)) : 0,
@@ -177,6 +245,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Total Assigned', key: 'totalAssigned' },
           { header: 'Completed', key: 'completed' },
           { header: 'Compliance %', key: 'compliancePercent' },
@@ -191,7 +263,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const x of a) {
-        if (!activeUser(x.userId)) continue;
+        if (!userPasses(x.userId)) continue;
         const dz = m.users.get(x.userId)?.designationId ?? 'unassigned';
         const e = agg.get(dz) ?? { total: 0, completed: 0 };
         e.total++;
@@ -220,11 +292,12 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const attempts = await prisma.assessmentAttempt.findMany({
         where: { isDeleted: false, isPassed: true, ...(f.topicId ? { topicId: f.topicId } : {}) },
       });
-      const rows = attempts.map((x) => ({
+      const rows = attempts.filter((x) => userPasses(x.userId)).map((x) => ({
         topic: m.topics.get(x.topicId)?.title ?? '',
         topicVersion: x.topicVersion,
         employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
+        ...userOrgCols(m, x.userId),
         completedAt: formatDate(x.completedAt),
         score: x.score,
       }));
@@ -235,6 +308,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Version', key: 'topicVersion' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Completed', key: 'completedAt' },
           { header: 'Score', key: 'score' },
         ],
@@ -247,7 +324,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         where: { ...(f.userId ? { userId: f.userId } : {}) },
         orderBy: [{ userId: 'asc' }, { version: 'desc' }],
       });
-      const rows = jds.map((j) => ({
+      const rows = jds.filter((j) => userPasses(j.userId)).map((j) => ({
         employee: m.users.get(j.userId)?.fullName ?? '',
         title: j.title,
         version: j.version,
@@ -273,9 +350,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const a = await prisma.trainingAssignment.findMany({
         where: { isDeleted: false, status: 'COMPLETED', ...(f.topicId ? { topicId: f.topicId } : {}), ...(f.userId ? { userId: f.userId } : {}) },
       });
-      const rows = a.filter((x) => activeUser(x.userId)).map((x) => ({
+      const rows = a.filter((x) => userPasses(x.userId)).map((x) => ({
         employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
+        ...userOrgCols(m, x.userId),
         topic: m.topics.get(x.topicId)?.title ?? '',
         topicCode: m.topics.get(x.topicId)?.topicCode ?? '',
         completedAt: formatDate(x.updatedAt),
@@ -285,6 +363,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Topic', key: 'topic' },
           { header: 'Topic Code', key: 'topicCode' },
           { header: 'Completed', key: 'completedAt' },
@@ -295,8 +377,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
 
     case 'overdue': {
       const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: 'OVERDUE' } });
-      const rows = a.filter((x) => activeUser(x.userId)).map((x) => ({
-        department: m.depts.get(m.users.get(x.userId)?.departmentId ?? '')?.name ?? '',
+      const rows = a.filter((x) => userPasses(x.userId)).map((x) => ({
+        ...userOrgCols(m, x.userId),
         employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
         topic: m.topics.get(x.topicId)?.title ?? '',
@@ -306,6 +388,9 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         title: 'Overdue Training Report',
         columns: [
           { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
           { header: 'Topic', key: 'topic' },
@@ -457,18 +542,25 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         if (!cur || (at.score ?? -1) > (cur.score ?? -1)) best.set(k, at);
       }
       const rows = a
-        .filter((x) => activeUser(x.userId))
+        .filter((x) => userPasses(x.userId))
         .map((x) => {
           const at = best.get(key(x.userId, x.topicId));
+          const topic = m.topics.get(x.topicId);
+          const eff = topic?.effectiveDate ?? null;
+          const comp = at?.completedAt ?? null;
+          const days = eff && comp ? Math.round((comp.getTime() - eff.getTime()) / 86_400_000) : '';
           return {
             employee: m.users.get(x.userId)?.fullName ?? '',
             employeeId: m.users.get(x.userId)?.employeeId ?? '',
-            topic: m.topics.get(x.topicId)?.title ?? '',
-            topicCode: m.topics.get(x.topicId)?.topicCode ?? '',
-            version: at?.topicVersion ?? m.topics.get(x.topicId)?.currentVersion ?? '',
+            ...userOrgCols(m, x.userId),
+            topic: topic?.title ?? '',
+            topicCode: topic?.topicCode ?? '',
+            version: at?.topicVersion ?? topic?.currentVersion ?? '',
             status: x.status,
             score: at?.score ?? '',
-            completedAt: formatDate(at?.completedAt ?? null),
+            effectiveDate: formatDate(eff),
+            completedAt: formatDate(comp),
+            daysToComplete: days,
             dueDate: formatDate(x.dueDate),
           };
         });
@@ -477,12 +569,18 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Topic', key: 'topic' },
           { header: 'Topic Code', key: 'topicCode' },
           { header: 'Version', key: 'version' },
           { header: 'Status', key: 'status' },
           { header: 'Score', key: 'score' },
+          { header: 'Effective Date', key: 'effectiveDate' },
           { header: 'Completed', key: 'completedAt' },
+          { header: 'Days to Complete', key: 'daysToComplete' },
           { header: 'Due Date', key: 'dueDate' },
         ],
         rows,
@@ -496,7 +594,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         orderBy: { completedAt: 'desc' },
       });
       const rows = attempts
-        .filter((at) => activeUser(at.userId))
+        .filter((at) => userPasses(at.userId))
         .map((at) => {
           const topic = m.topics.get(at.topicId);
           const eff = topic?.effectiveDate ?? null;
@@ -505,6 +603,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           return {
             employee: m.users.get(at.userId)?.fullName ?? '',
             employeeId: m.users.get(at.userId)?.employeeId ?? '',
+            ...userOrgCols(m, at.userId),
             topic: topic?.title ?? '',
             topicCode: topic?.topicCode ?? '',
             effectiveDate: formatDate(eff),
@@ -517,6 +616,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
+          { header: 'Department', key: 'department' },
+          { header: 'Location', key: 'location' },
+          { header: 'Functional Role', key: 'functionalRole' },
+          { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Topic', key: 'topic' },
           { header: 'Topic Code', key: 'topicCode' },
           { header: 'Effective Date', key: 'effectiveDate' },
@@ -532,7 +635,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const assignments = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const a of assignments) {
-        if (!activeUser(a.userId)) continue;
+        if (!userPasses(a.userId)) continue;
         const tt = m.topics.get(a.topicId)?.trainingType ?? 'UNKNOWN';
         const cur = agg.get(tt) ?? { total: 0, completed: 0 };
         cur.total += 1;
