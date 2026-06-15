@@ -336,10 +336,10 @@ export default function RolesPage() {
   }
   function handlePrintList() {
     const body =
-      `<h1>Roles &amp; Permissions</h1>` +
+      `<h1>Roles &amp; Access Control</h1>` +
       `<div class="meta">Printed by ${me?.fullName ?? '—'} • Filter: ${statusFilter}</div>` +
       printTable(['Role', 'Description', 'Status'], rows.map((r) => [r.roleName, r.description ?? '', r.isActive ? 'Active' : 'Inactive']));
-    printHtml('Roles & Permissions', body);
+    printHtml('Roles & Access Control', body);
   }
 
   const columns: Column<RoleRow>[] = [
@@ -370,7 +370,7 @@ export default function RolesPage() {
   return (
     <div>
       <PageHeader
-        title="Roles & Permissions"
+        title="Roles & Access Control"
         description="Define identity, scope, and per-module permissions. All changes are e-signed and audited."
         actions={
           <div className="flex gap-2">

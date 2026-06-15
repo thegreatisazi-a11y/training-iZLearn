@@ -118,10 +118,42 @@ async function withRoleNames<T extends { id: string }>(rows: T[]) {
 
 // ---- User-creation requests -------------------------------------------------
 
+/** D8: derive a `first.last` (lowercase, alphanumeric) base username from a full name. */
+function baseUsername(fullName: string): string {
+  const parts = fullName.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const first = (parts[0] ?? 'user').replace(/[^a-z0-9]/g, '');
+  const last = parts.length > 1 ? parts[parts.length - 1].replace(/[^a-z0-9]/g, '') : '';
+  return (last ? `${first}.${last}` : first) || 'user';
+}
+
+/**
+ * D8: return a unique username for `base`, appending a numeric suffix on collision
+ * (first.last → first.last1 → first.last2). Checks both existing users and other
+ * pending creation requests so two pending requests can't claim the same name.
+ */
+async function uniqueUsername(base: string): Promise<string> {
+  let candidate = base;
+  let n = 0;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const [user, pending] = await Promise.all([
+      prisma.user.findFirst({ where: { windowsUsername: candidate } }),
+      prisma.userCreationRequest.findFirst({ where: { windowsUsername: candidate, status: 'PENDING_APPROVAL', isDeleted: false } }),
+    ]);
+    if (!user && !pending) return candidate;
+    n += 1;
+    candidate = `${base}${n}`;
+  }
+}
+
 export async function createUserRequest(input: CreateUserInput, createdBy: string) {
+  // D8: auto-generate the username from the full name unless an explicit one is given.
+  const requested = (input.windowsUsername ?? '').trim();
+  const windowsUsername = requested ? await uniqueUsername(requested.toLowerCase()) : await uniqueUsername(baseUsername(input.fullName));
+
   if (await getBool('ldap.enabled')) {
     const { userExists } = await import('./ldap.service');
-    if (!(await userExists(input.windowsUsername))) {
+    if (!(await userExists(windowsUsername))) {
       throw AppError.badRequest('windowsUsername not found in Active Directory');
     }
   }
@@ -131,7 +163,7 @@ export async function createUserRequest(input: CreateUserInput, createdBy: strin
       userType: input.userType,
       fullName: input.fullName,
       employeeId: input.employeeId,
-      windowsUsername: input.windowsUsername,
+      windowsUsername,
       email: input.email ?? null,
       departmentId: input.departmentId,
       locationId: input.locationId,
@@ -520,6 +552,8 @@ export async function bulkPreview(buffer: Buffer): Promise<BulkPreviewResult> {
     if (!fullName) messages.push('FullName is required');
     if (!employeeId) messages.push('EmployeeID is required');
     if (!windowsUsername) messages.push('WindowsUsername is required');
+    // D9: email is mandatory (temporary password is delivered by email).
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) messages.push('A valid EmailID is required');
 
     const departmentId = deptByName.get(departmentName.toLowerCase());
     if (!departmentId) messages.push(`Unknown Department "${departmentName}"`);
@@ -538,7 +572,7 @@ export async function bulkPreview(buffer: Buffer): Promise<BulkPreviewResult> {
       fullName,
       employeeId,
       windowsUsername,
-      email: email || undefined,
+      email,
       departmentId,
       locationId,
       roleIds: [roleId],

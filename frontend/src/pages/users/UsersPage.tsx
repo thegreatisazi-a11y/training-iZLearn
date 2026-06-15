@@ -221,8 +221,9 @@ export default function UsersPage() {
   const rows = statusFilter === 'inactive' ? rawRows.filter((r) => !r.isActive) : rawRows;
 
   // CR-13: mandatory-field gating for the create/edit forms.
+  // D8: username is auto-generated server-side (not required here). D9: email mandatory.
   const createFormValid =
-    !!form.fullName && !!form.employeeId && !!form.windowsUsername && !!form.departmentId && !!form.locationId && form.roleIds.length > 0;
+    !!form.fullName && !!form.employeeId && !!form.email && !!form.departmentId && !!form.locationId && form.roleIds.length > 0;
   const editFormValid = !!editForm.fullName && !!editForm.departmentId && !!editForm.locationId;
 
   const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
@@ -586,7 +587,7 @@ export default function UsersPage() {
             <dd className="col-span-2">{viewUser.locationName || '—'}</dd>
             <dt className="font-medium text-slate-500">Functional Role(s)</dt>
             <dd className="col-span-2">{viewUser.functionalRoleNames && viewUser.functionalRoleNames.length ? viewUser.functionalRoleNames.join(', ') : '—'}</dd>
-            <dt className="font-medium text-slate-500">Supervisor</dt>
+            <dt className="font-medium text-slate-500">Reporting Manager</dt>
             <dd className="col-span-2">
               {(() => {
                 const sup = ((allUsers.data?.data ?? []) as { id: string; fullName: string; employeeId: string }[]).find((u) => u.id === viewUser.supervisorId);
@@ -644,9 +645,9 @@ export default function UsersPage() {
             onChange={(e) => setEditForm((f) => ({ ...f, locationId: e.target.value }))}
           />
         </Field>
-        <Field label="Supervisor">
+        <Field label="Reporting Manager">
           <SearchableSelect
-            placeholder="Select supervisor…"
+            placeholder="Select reporting manager…"
             options={supervisorOptions(editUser?.id)}
             value={editForm.supervisorId}
             onChange={(supervisorId) => setEditForm((f) => ({ ...f, supervisorId }))}
@@ -796,8 +797,8 @@ export default function UsersPage() {
                   userType: form.userType,
                   fullName: form.fullName,
                   employeeId: form.employeeId,
-                  windowsUsername: form.windowsUsername,
-                  email: form.email || undefined,
+                  windowsUsername: form.windowsUsername || undefined,
+                  email: form.email,
                   departmentId: form.departmentId,
                   locationId: form.locationId,
                   supervisorId: form.supervisorId || undefined,
@@ -822,10 +823,13 @@ export default function UsersPage() {
         <Field label="Employee ID" required error={!form.employeeId ? 'Employee ID is required.' : undefined}>
           <Input value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} />
         </Field>
-        <Field label="Windows Username" required error={!form.windowsUsername ? 'Windows username is required.' : undefined}>
-          <Input value={form.windowsUsername} onChange={(e) => setForm((f) => ({ ...f, windowsUsername: e.target.value }))} />
+        <Field
+          label="Username (auto-generated)"
+          hint={`Leave blank to auto-generate${form.fullName.trim() ? `: ${form.fullName.trim().toLowerCase().split(/\s+/).filter(Boolean).map((p) => p.replace(/[^a-z0-9]/g, '')).filter(Boolean).slice(0, 2).join('.')}` : ' as first.last'} — a number is added if it already exists.`}
+        >
+          <Input placeholder="auto" value={form.windowsUsername} onChange={(e) => setForm((f) => ({ ...f, windowsUsername: e.target.value }))} />
         </Field>
-        <Field label="Email">
+        <Field label="Email" required error={!form.email ? 'Email is required (the temporary password is emailed here).' : undefined}>
           <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
         </Field>
         <Field label="Department" required error={!form.departmentId ? 'Department is required.' : undefined}>
@@ -844,9 +848,9 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))}
           />
         </Field>
-        <Field label="Supervisor (optional — for training notifications)">
+        <Field label="Reporting Manager (optional — for training notifications)">
           <SearchableSelect
-            placeholder="Select supervisor…"
+            placeholder="Select reporting manager…"
             options={supervisorOptions()}
             value={form.supervisorId}
             onChange={(supervisorId) => setForm((f) => ({ ...f, supervisorId }))}

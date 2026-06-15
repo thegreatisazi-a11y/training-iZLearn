@@ -13,8 +13,11 @@ export const createUserSchema = z.object({
   userType,
   fullName: nonEmptyString,
   employeeId: nonEmptyString,
-  windowsUsername: nonEmptyString,
-  email: z.string().email().optional().or(z.literal('').transform(() => undefined)),
+  // D8: username is auto-generated server-side from the full name (first.last);
+  // any supplied value is optional and overridden if blank/taken.
+  windowsUsername: optionalString,
+  // D9: email is mandatory — the temporary password is delivered by email.
+  email: z.string().email({ message: 'A valid email is required' }),
   departmentId: uuid,
   locationId: uuid,
   supervisorId: uuid.optional(), // UR-42: direct line manager for training notifications

@@ -61,7 +61,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
       A('create', 'Create / New User Request'),
       A('edit', 'Edit User'),
       A('approve', 'Activate / Deactivate / Change Roles'),
-      A('assign', 'Assign Supervisor / Functional Role'),
+      A('assign', 'Assign Reporting Manager / Functional Role'),
       A('reset_password', 'Reset Password'),
       A('bulk_upload', 'Bulk Upload Users'),
       A('print', 'Print Users'),
@@ -70,7 +70,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
   },
   {
     module: 'team',
-    label: 'Team (Supervisor)',
+    label: 'Team (Reporting Manager)',
     category: 'userAccess',
     actions: [
       A('view', 'View Assigned Team'),
@@ -81,7 +81,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
   },
   {
     module: 'roleManagement',
-    label: 'Roles & Permissions',
+    label: 'Roles & Access Control',
     category: 'userAccess',
     actions: [
       A('view', 'View Roles'),

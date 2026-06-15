@@ -51,13 +51,11 @@ const STATUS_FILTERS = [
 const emptyForm = {
   title: '',
   topicNumber: '',
-  sopNumber: '',
   description: '',
   trainingType: trainingType.options[0],
   departmentId: '',
   designationId: '',
   designationIds: [] as string[],
-  roleId: '',
   durationMinutes: '',
   passingScorePercent: '',
   maxAttempts: '',
@@ -98,10 +96,8 @@ export default function TopicsPage() {
   });
   const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: creating });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: creating });
-  const roles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }), enabled: creating });
   const deptOptions = ((departments.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
-  const roleOptions = ((roles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
   const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
   const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
 
@@ -110,13 +106,11 @@ export default function TopicsPage() {
       svc.topics.create({
         title: form.title,
         topicNumber: form.topicNumber || undefined,
-        sopNumber: form.sopNumber || undefined,
         description: form.description || undefined,
         trainingType: form.trainingType,
         status,
         departmentId: form.departmentId || undefined,
         designationIds: form.designationIds,
-        roleId: form.roleId || undefined,
         durationMinutes: Number(form.durationMinutes),
         passingScorePercent: Number(form.passingScorePercent),
         maxAttempts: Number(form.maxAttempts),
@@ -173,7 +167,7 @@ export default function TopicsPage() {
       `topic-${r.topicNumber || r.topicCode}.csv`,
       ['Field', 'Value'],
       [
-        ['Topic No.', r.topicNumber || r.topicCode],
+        ['SOP No.', r.topicNumber || r.topicCode],
         ['Title', r.title],
         ['Type', r.trainingType],
         ['Duration (min)', r.durationMinutes],
@@ -189,7 +183,7 @@ export default function TopicsPage() {
     const body =
       `<h1>Training Topics</h1><div class="sub">${rows.length} topic(s) · printed from izLearn</div>` +
       printTable(
-        ['Topic No.', 'Title', 'Type', 'Duration', 'Pass %', 'Version', 'Status'],
+        ['SOP No.', 'Title', 'Type', 'Duration', 'Pass %', 'Version', 'Status'],
         rows.map((r) => [r.topicNumber || r.topicCode, r.title, r.trainingType, r.durationMinutes, `${r.passingScorePercent}%`, `v${r.currentVersion}`, r.status]),
       );
     printHtml('Training Topics', body);
@@ -212,7 +206,7 @@ export default function TopicsPage() {
   }
 
   const columns: Column<Topic>[] = [
-    { key: 'topicNumber', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber || r.topicCode}</span> },
+    { key: 'topicNumber', header: 'SOP No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber || r.topicCode}</span> },
     {
       key: 'title',
       header: 'Title',
@@ -346,14 +340,9 @@ export default function TopicsPage() {
         <Field label="Title">
           <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Topic No. (shown to users; optional)">
-            <Input value={form.topicNumber} onChange={(e) => setForm({ ...form, topicNumber: e.target.value })} placeholder="e.g. SOP-014" />
-          </Field>
-          <Field label="SOP / Document No. (optional)">
-            <Input value={form.sopNumber} onChange={(e) => setForm({ ...form, sopNumber: e.target.value })} placeholder="e.g. QA-SOP-014" />
-          </Field>
-        </div>
+        <Field label="SOP Number (optional)">
+          <Input value={form.topicNumber} onChange={(e) => setForm({ ...form, topicNumber: e.target.value })} placeholder="e.g. QA-SOP-014" />
+        </Field>
         <Field label="Description">
           <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </Field>
@@ -365,14 +354,9 @@ export default function TopicsPage() {
             <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Functional Role(s) (optional)">
-            <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
-          </Field>
-          <Field label="Role (optional)">
-            <Select placeholder="Select role…" options={roleOptions} value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })} />
-          </Field>
-        </div>
+        <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
+          <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
+        </Field>
         <div className="grid grid-cols-4 gap-3">
           <Field label="Duration (min)">
             <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />

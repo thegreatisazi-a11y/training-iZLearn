@@ -54,7 +54,7 @@ const FIELD_LABELS: Record<string, string> = {
   refresherDueDate: 'Refresher Due',
   effectiveDate: 'Effective Date',
   reviewDate: 'Review Date',
-  supervisorId: 'Supervisor',
+  supervisorId: 'Reporting Manager',
   departmentId: 'Department',
   locationId: 'Location',
   userType: 'User Type',
