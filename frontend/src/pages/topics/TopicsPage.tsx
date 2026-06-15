@@ -52,7 +52,7 @@ const emptyForm = {
   title: '',
   topicNumber: '',
   description: '',
-  trainingType: trainingType.options[0],
+  trainingTypes: [trainingType.options[0]] as string[],
   departmentId: '',
   designationId: '',
   designationIds: [] as string[],
@@ -107,7 +107,8 @@ export default function TopicsPage() {
         title: form.title,
         topicNumber: form.topicNumber || undefined,
         description: form.description || undefined,
-        trainingType: form.trainingType,
+        trainingType: form.trainingTypes[0] ?? trainingType.options[0],
+        trainingTypes: form.trainingTypes,
         status,
         departmentId: form.departmentId || undefined,
         designationIds: form.designationIds,
@@ -323,13 +324,13 @@ export default function TopicsPage() {
             <Button
               variant="outline"
               onClick={() => createMut.mutate('DRAFT')}
-              disabled={createMut.isPending || !form.title || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
+              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
             >
               {createMut.isPending ? 'Saving…' : 'Save as Draft'}
             </Button>
             <Button
               onClick={() => createMut.mutate('PUBLISHED')}
-              disabled={createMut.isPending || !form.title || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
+              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
             >
               {createMut.isPending ? 'Saving…' : 'Create & Publish'}
             </Button>
@@ -347,8 +348,8 @@ export default function TopicsPage() {
           <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Training Type">
-            <Select options={TRAINING_TYPE_OPTIONS} value={form.trainingType} onChange={(e) => setForm({ ...form, trainingType: e.target.value as typeof form.trainingType })} />
+          <Field label="Training Type(s)">
+            <MultiSelect options={TRAINING_TYPE_OPTIONS} value={form.trainingTypes} onChange={(trainingTypes) => setForm({ ...form, trainingTypes })} placeholder="Select training type(s)…" heightClass="h-32" />
           </Field>
           <Field label="Department (optional)">
             <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />

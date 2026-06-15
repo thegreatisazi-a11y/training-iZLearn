@@ -127,7 +127,8 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       sopNumber: input.sopNumber ?? null,
       title: input.title,
       description: input.description ?? null,
-      trainingType: input.trainingType,
+      trainingType: input.trainingTypes?.[0] ?? input.trainingType,
+      trainingTypes: (input.trainingTypes ?? [input.trainingType]) as Prisma.InputJsonValue,
       status: input.status ?? 'DRAFT', // "Save as Draft" (default) vs "Create & Publish"
       departmentId: input.departmentId ?? null,
       designationId: input.designationId ?? input.designationIds?.[0] ?? null,
@@ -168,7 +169,11 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.topicNumber !== undefined ? { topicNumber: input.topicNumber ?? null } : {}),
       ...(input.sopNumber !== undefined ? { sopNumber: input.sopNumber ?? null } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.trainingType !== undefined ? { trainingType: input.trainingType } : {}),
+      ...(input.trainingTypes !== undefined
+        ? { trainingTypes: input.trainingTypes as Prisma.InputJsonValue, ...(input.trainingTypes[0] ? { trainingType: input.trainingTypes[0] } : {}) }
+        : input.trainingType !== undefined
+          ? { trainingType: input.trainingType }
+          : {}),
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId ?? null } : {}),
       ...(input.designationIds !== undefined
         ? { designationIds: input.designationIds as Prisma.InputJsonValue, designationId: input.designationIds[0] ?? null }
@@ -329,6 +334,7 @@ export async function reviseTopic(id: string, req: Request) {
       title: old.title,
       description: old.description,
       trainingType: old.trainingType,
+      trainingTypes: (old.trainingTypes ?? [old.trainingType]) as Prisma.InputJsonValue,
       status: old.status === 'ARCHIVED' ? 'PUBLISHED' : old.status,
       departmentId: old.departmentId,
       designationId: old.designationId,

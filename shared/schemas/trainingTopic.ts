@@ -8,6 +8,7 @@ export const createTopicSchema = z.object({
   sopNumber: optionalString, // controlled SOP / document number
   description: optionalString,
   trainingType,
+  trainingTypes: z.array(trainingType).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
@@ -43,6 +44,7 @@ export const updateTopicSchema = z.object({
   sopNumber: optionalString,
   description: optionalString,
   trainingType: trainingType.optional(),
+  trainingTypes: z.array(trainingType).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets

@@ -160,7 +160,8 @@ model TrainingTopic {
   sopNumber               String? // controlled SOP / document number (distinct from internal topicCode)
   title                   String
   description             String?
-  trainingType            TrainingType
+  trainingType            TrainingType // primary type (back-compat)
+  trainingTypes           Json         @default("[]") // D6: a topic may have multiple training types
   status                  TopicStatus  @default(DRAFT) // draft topics are hidden from trainees
   departmentId            String? // optional department this SOP/topic belongs to
   designationId           String? // primary functional role (back-compat)
