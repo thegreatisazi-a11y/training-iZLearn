@@ -112,7 +112,7 @@ export default function TopicsPage() {
         status,
         departmentId: form.departmentId || undefined,
         designationIds: form.designationIds,
-        durationMinutes: Number(form.durationMinutes),
+        durationMinutes: form.durationMinutes ? Number(form.durationMinutes) : undefined,
         passingScorePercent: Number(form.passingScorePercent),
         maxAttempts: Number(form.maxAttempts),
         questionLimit: form.questionLimit ? Number(form.questionLimit) : undefined,
@@ -321,18 +321,12 @@ export default function TopicsPage() {
             <Button variant="outline" onClick={() => setCreating(false)} disabled={createMut.isPending}>
               Cancel
             </Button>
+            {/* Page 8: only Save as Draft on creation; publishing happens via the controlled signatory workflow afterwards. */}
             <Button
-              variant="outline"
               onClick={() => createMut.mutate('DRAFT')}
-              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
+              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.passingScorePercent || !form.maxAttempts}
             >
               {createMut.isPending ? 'Saving…' : 'Save as Draft'}
-            </Button>
-            <Button
-              onClick={() => createMut.mutate('PUBLISHED')}
-              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.durationMinutes || !form.passingScorePercent || !form.maxAttempts}
-            >
-              {createMut.isPending ? 'Saving…' : 'Create & Publish'}
             </Button>
           </>
         }
@@ -355,10 +349,7 @@ export default function TopicsPage() {
             <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
           </Field>
         </div>
-        <div className="grid grid-cols-4 gap-3">
-          <Field label="Duration (min)">
-            <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />
-          </Field>
+        <div className="grid grid-cols-3 gap-3">
           <Field label="Passing Score %">
             <Input type="number" min={0} max={100} value={form.passingScorePercent} onChange={(e) => setForm({ ...form, passingScorePercent: e.target.value })} />
           </Field>
@@ -394,7 +385,10 @@ export default function TopicsPage() {
           </div>
         </div>
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Duration (min)">
+            <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />
+          </Field>
           <Field label="Department (used for reporting & filtering)">
             <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
           </Field>

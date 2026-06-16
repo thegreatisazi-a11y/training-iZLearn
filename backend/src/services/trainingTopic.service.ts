@@ -140,7 +140,7 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       signatoryUserIds: (input.signatories?.length ? input.signatories.map((s) => s.userId) : input.signatoryUserIds ?? []) as Prisma.InputJsonValue,
       signatories: (input.signatories ?? []) as Prisma.InputJsonValue,
       sequenceIndex: input.sequenceIndex ?? null,
-      durationMinutes: input.durationMinutes,
+      durationMinutes: input.durationMinutes ?? 0, // Page 8: optional; defaults to 0 when omitted
       passingScorePercent: input.passingScorePercent,
       maxAttempts: input.maxAttempts,
       questionLimit: input.questionLimit ?? null,
