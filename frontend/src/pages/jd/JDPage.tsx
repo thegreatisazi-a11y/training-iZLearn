@@ -57,6 +57,7 @@ export default function JDPage() {
   const [tab, setTab] = useState('jds');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editing, setEditing] = useState<JD | null>(null);
@@ -107,7 +108,7 @@ export default function JDPage() {
   const createMut = useMutation({
     mutationFn: () => svc.jds.create(form),
     onSuccess: () => {
-      toast.success('Job description created');
+      toast.success('JD assigned');
       qc.invalidateQueries({ queryKey: ['jds'] });
       setCreating(false);
       setForm(emptyForm);
@@ -198,6 +199,9 @@ export default function JDPage() {
     printHtml(jd.title, body, { printedBy: currentUserName });
   };
 
+  // A JD is "active" once it is approved/under review and not obsoleted.
+  const isJdActive = (r: JD) => r.status === 'APPROVED' || r.status === 'UNDER_REVIEW';
+
   const columns: Column<JD>[] = [
     {
       key: 'userFullName',
@@ -232,7 +236,7 @@ export default function JDPage() {
     {
       key: 'active',
       header: 'Active',
-      render: (r) => (r.status === 'APPROVED' || r.status === 'UNDER_REVIEW' ? 'Yes' : 'No'),
+      render: (r) => (isJdActive(r) ? <Badge tone="APPROVED">Active</Badge> : <Badge tone="WAIVED">Inactive</Badge>),
     },
     {
       key: 'actions',
@@ -274,6 +278,11 @@ export default function JDPage() {
                 Reject
               </Button>
             </>
+          )}
+          {canWrite && isJdActive(r) && (
+            <Button size="sm" variant="danger" onClick={() => transitionMut.mutate({ id: r.id, body: { action: 'OBSOLETE' } })}>
+              Deactivate
+            </Button>
           )}
         </div>
       ),
@@ -319,7 +328,7 @@ export default function JDPage() {
           tab === 'jds'
             ? canWrite && (
                 <Button onClick={() => setCreating(true)}>
-                  <Plus className="h-4 w-4" /> New JD
+                  <Plus className="h-4 w-4" /> Assign JD
                 </Button>
               )
             : canWrite && (
@@ -341,7 +350,7 @@ export default function JDPage() {
 
       {tab === 'jds' && (
         <>
-          <div className="my-4">
+          <div className="my-4 flex flex-wrap items-center gap-3">
             <Input
               className="max-w-xs"
               placeholder="Search…"
@@ -351,10 +360,22 @@ export default function JDPage() {
                 setPage(1);
               }}
             />
+            <Select
+              className="max-w-[180px]"
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+              ]}
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value as 'all' | 'active' | 'inactive')}
+            />
           </div>
           <DataTable<JD>
             columns={columns}
-            rows={(data?.data ?? []) as unknown as JD[]}
+            rows={((data?.data ?? []) as unknown as JD[]).filter((r) =>
+              activeFilter === 'all' ? true : activeFilter === 'active' ? isJdActive(r) : !isJdActive(r),
+            )}
             loading={isLoading}
             page={data?.page}
             pageSize={data?.pageSize}
@@ -376,7 +397,7 @@ export default function JDPage() {
         open={creating}
         onClose={() => setCreating(false)}
         className="max-w-2xl"
-        title="New Job Description"
+        title="Assign JD"
         footer={
           <>
             <Button variant="outline" onClick={() => setCreating(false)} disabled={createMut.isPending}>
@@ -386,7 +407,7 @@ export default function JDPage() {
               onClick={() => createMut.mutate()}
               disabled={createMut.isPending || !form.userId || !form.departmentId || !form.roleId || !form.title || !form.content}
             >
-              {createMut.isPending ? 'Saving…' : 'Create'}
+              {createMut.isPending ? 'Saving…' : 'Assign JD'}
             </Button>
           </>
         }

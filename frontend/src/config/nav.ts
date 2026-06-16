@@ -1,6 +1,6 @@
 import {
   Home, Users, Shield, MapPin, BookOpen, FolderOpen, FileText, ClipboardList,
-  CalendarDays, CheckSquare, Award, MessageSquare, Megaphone, BarChart3, ScrollText, Settings, UserCircle, Stamp, GraduationCap,
+  CalendarDays, CheckSquare, Award, MessageSquare, Megaphone, BarChart3, ScrollText, Settings, UserCircle, Stamp, GraduationCap, UserPlus,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PermissionAction } from '@izlearn/shared';
@@ -22,6 +22,7 @@ export const NAV: NavItem[] = [
   { to: '/team', label: 'My Team', icon: Users, module: 'team', action: 'read' },
   { to: '/team-cvs', label: 'Team CVs', icon: Users, module: 'team', action: 'read' },
   { to: '/users', label: 'Users', icon: Users, module: 'userManagement', action: 'read' },
+  { to: '/users/requests', label: 'User Requests', icon: UserPlus, module: 'userManagement', action: 'read' },
   { to: '/roles', label: 'Roles & Access Control', icon: Shield, module: 'roleManagement', action: 'read' },
   { to: '/masters', label: 'Master Setup', icon: MapPin, module: 'masterSetup', action: 'read' },
   { to: '/topics', label: 'Courses', icon: BookOpen, module: 'courseManagement', action: 'read' },

@@ -67,9 +67,16 @@ export default function MyCVPage() {
   useEffect(() => {
     const cv = data?.cv;
     if (!cv) return;
+    // #4: prefer the structured array; if empty but a legacy free-text string
+    // exists, seed one row per comma-separated language for editing back-compat.
+    const seededLanguages: LanguageItem[] = cv.languages?.length
+      ? cv.languages
+      : cv.languagesKnown
+        ? cv.languagesKnown.split(',').map((s) => s.trim()).filter(Boolean).map((language) => ({ language }))
+        : [];
     setForm({
       languagesKnown: cv.languagesKnown ?? '',
-      languages: cv.languages?.length ? cv.languages : [{}],
+      languages: seededLanguages.length ? seededLanguages : [{}],
       qualifications: cv.qualifications?.length ? cv.qualifications : [{}],
       currentRole: cv.currentRole ?? '',
       currentTenureFrom: cv.currentTenureFrom ?? '',
@@ -104,11 +111,15 @@ export default function MyCVPage() {
 
   function handlePrint() {
     if (!header) return;
+    // #4: prefer the structured array; fall back to the legacy free-text string.
+    const langs = form.languages.filter((l) => l.language);
+    const languagesBlock = langs.length
+      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
+      : `<p>${form.languagesKnown || '—'}</p>`;
     const body =
       `<h1>Curriculum Vitae</h1>` +
       `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''}</div>` +
-      `<div class="section">Languages Known</div>` +
-      printTable(['Language', 'Read', 'Write', 'Understand'], form.languages.filter((l) => l.language).map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—'])) +
+      `<div class="section">Languages Known</div>${languagesBlock}` +
       `<div class="section">Educational Qualifications</div>` +
       printTable(['Year', 'Degree', 'Specialization', 'Institute'], form.qualifications.map((q) => [q.year, q.degree, q.specialization, q.institute])) +
       `<div class="section">Current Role</div><p>${form.currentRole || '—'} (${form.currentTenureFrom || '?'} → ${form.currentTenureTo || 'present'})</p><p>${form.currentResponsibilities || ''}</p>` +

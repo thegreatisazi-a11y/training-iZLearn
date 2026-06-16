@@ -50,6 +50,62 @@ function StatusToggleButton({ isActive, onClick }: { isActive: boolean; onClick:
   );
 }
 
+/** CR Section 3: per-tab client-side search + status filter. */
+type StatusFilter = 'active' | 'inactive' | 'all';
+
+const STATUS_FILTER_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+  { value: 'all', label: 'All' },
+];
+
+/** "Active" => server returns active only; "Inactive"/"All" => server includes inactive rows. */
+function statusWantsInactive(status: StatusFilter): boolean {
+  return status !== 'active';
+}
+
+/** Filter the currently loaded rows by free-text (displayName/code/name) and status. */
+function filterMasterRows<T extends { isActive: boolean; displayName?: string; code?: string; name?: string }>(
+  rows: T[],
+  search: string,
+  status: StatusFilter,
+): T[] {
+  const q = search.trim().toLowerCase();
+  return rows.filter((r) => {
+    if (status === 'active' && !r.isActive) return false;
+    if (status === 'inactive' && r.isActive) return false;
+    if (!q) return true;
+    return (r.displayName ?? '').toLowerCase().includes(q) || (r.code ?? '').toLowerCase().includes(q) || (r.name ?? '').toLowerCase().includes(q);
+  });
+}
+
+/** Search input + status Select + "X of Y" count, rendered above each tab's DataTable. */
+function MasterToolbar({
+  search,
+  onSearch,
+  status,
+  onStatus,
+  shown,
+  total,
+}: {
+  search: string;
+  onSearch: (v: string) => void;
+  status: StatusFilter;
+  onStatus: (v: StatusFilter) => void;
+  shown: number;
+  total: number;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <Input className="w-64" placeholder="Search by name or code…" value={search} onChange={(e) => onSearch(e.target.value)} />
+      <Select className="w-40" options={STATUS_FILTER_OPTIONS} value={status} onChange={(e) => onStatus(e.target.value as StatusFilter)} />
+      <span className="text-sm text-slate-500">
+        {shown} of {total}
+      </span>
+    </div>
+  );
+}
+
 function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
@@ -59,9 +115,13 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
   const [editForm, setEditForm] = useState({ name: '', description: '' });
   // Both editing and toggling active status require a reason for change (21 CFR Part 11).
   const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: MasterRow } | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive };
+  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['locations', params], queryFn: () => svc.locations.list(params) });
+  const allRows = (data?.data ?? []) as unknown as MasterRow[];
+  const rows = filterMasterRows(allRows, search, status);
 
   const createMutation = useMutation({
     mutationFn: (body: unknown) => svc.locations.create(body),
@@ -120,9 +180,10 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
           </Button>
         </div>
       )}
+      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as MasterRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}
@@ -210,9 +271,13 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
   const [editForm, setEditForm] = useState({ name: '', locationId: '' });
   // Both editing and toggling active status require a reason for change (21 CFR Part 11).
   const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: MasterRow } | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive };
+  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['departments', params], queryFn: () => svc.departments.list(params) });
+  const allRows = (data?.data ?? []) as unknown as MasterRow[];
+  const rows = filterMasterRows(allRows, search, status);
   const locations = useQuery({ queryKey: ['locations', 'all'], queryFn: () => svc.locations.list({ pageSize: 200 }) });
   const locationList = (locations.data?.data ?? []) as unknown as { id: string; name: string }[];
   const locationOptions = locationList.map((l) => ({ value: l.id, label: l.name }));
@@ -275,9 +340,10 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
           </Button>
         </div>
       )}
+      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as MasterRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}
@@ -365,9 +431,13 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
   // Both editing and toggling active status require a reason for change (21 CFR Part 11).
   const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive };
+  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['training-types', params], queryFn: () => svc.master.listTrainingTypes(params) });
+  const allRows = (data?.data ?? []) as unknown as TypeRow[];
+  const rows = filterMasterRows(allRows, search, status);
 
   const createMutation = useMutation({
     mutationFn: (body: unknown) => svc.master.createTrainingType(body),
@@ -424,9 +494,10 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           </Button>
         </div>
       )}
+      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as TypeRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}
@@ -517,9 +588,13 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
   // Both editing and toggling active status require a reason for change (21 CFR Part 11).
   const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive };
+  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['document-types', params], queryFn: () => svc.master.listDocumentTypes(params) });
+  const allRows = (data?.data ?? []) as unknown as TypeRow[];
+  const rows = filterMasterRows(allRows, search, status);
 
   const createMutation = useMutation({
     mutationFn: (body: unknown) => svc.master.createDocumentType(body),
@@ -575,9 +650,10 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           </Button>
         </div>
       )}
+      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as TypeRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}
@@ -668,9 +744,13 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
   const [editForm, setEditForm] = useState({ displayName: '', description: '', isActive: true });
   // Both editing and toggling active status require a reason for change (21 CFR Part 11).
   const [reasonAction, setReasonAction] = useState<{ type: 'edit' | 'toggle'; row: TypeRow } | null>(null);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive };
+  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['designations', params], queryFn: () => svc.master.listDesignations(params) });
+  const allRows = (data?.data ?? []) as unknown as TypeRow[];
+  const rows = filterMasterRows(allRows, search, status);
 
   const createMutation = useMutation({
     mutationFn: (body: unknown) => svc.master.createDesignation(body),
@@ -726,9 +806,10 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
           </Button>
         </div>
       )}
+      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
       <DataTable
         columns={columns}
-        rows={(data?.data ?? []) as unknown as TypeRow[]}
+        rows={rows}
         loading={isLoading}
         page={data?.page ?? page}
         pageSize={data?.pageSize ?? 50}

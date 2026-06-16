@@ -12,6 +12,12 @@ import { PageLoader } from '@/components/ui/spinner';
 import { svc } from '@/services';
 import { printHtml, printTable } from '@/lib/print';
 
+// #4: "English — R/W/U" (only the abilities that are set).
+function langLabel(l: LanguageItem): string {
+  const caps = [l.read && 'R', l.write && 'W', l.understand && 'U'].filter(Boolean).join('/');
+  return l.language ? `${l.language}${caps ? ` — ${caps}` : ''}` : '';
+}
+
 interface TeamRow {
   id: string;
   fullName: string;
@@ -21,8 +27,10 @@ interface TeamRow {
   hasCv: boolean;
 }
 interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null }
+interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
 interface CvData {
   languagesKnown?: string | null;
+  languages?: LanguageItem[];
   qualifications?: { year?: string; degree?: string; specialization?: string; institute?: string }[];
   currentRole?: string | null;
   currentResponsibilities?: string | null;
@@ -94,10 +102,14 @@ export default function TeamCVsPage() {
     const h = cvData?.header;
     const cv = cvData?.cv;
     if (!h) return;
+    const langs = (cv?.languages ?? []).filter((l) => l.language);
+    const languagesBlock = langs.length
+      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
+      : `<p>${cv?.languagesKnown || '—'}</p>`;
     const body =
       `<h1>Curriculum Vitae</h1>` +
       `<div class="meta">${h.employeeName} (${h.employeeCode}) · ${h.functionalRole ?? ''} · ${h.departmentName ?? ''}</div>` +
-      `<div class="section">Languages Known</div><p>${cv?.languagesKnown || '—'}</p>` +
+      `<div class="section">Languages Known</div>${languagesBlock}` +
       `<div class="section">Educational Qualifications</div>` +
       printTable(['Year', 'Degree', 'Specialization', 'Institute'], (cv?.qualifications ?? []).map((q) => [q.year, q.degree, q.specialization, q.institute])) +
       `<div class="section">Current Role</div><p>${cv?.currentRole || '—'}</p><p>${cv?.currentResponsibilities || ''}</p>` +
@@ -170,7 +182,12 @@ export default function TeamCVsPage() {
           <p className="text-sm text-slate-500">This user has not created a CV yet.</p>
         ) : (
           <div className="space-y-3 text-sm text-slate-700">
-            <p><span className="text-slate-500">Languages:</span> {cvData.cv.languagesKnown || '—'}</p>
+            <p>
+              <span className="text-slate-500">Languages:</span>{' '}
+              {(cvData.cv.languages ?? []).filter((l) => l.language).length
+                ? (cvData.cv.languages ?? []).filter((l) => l.language).map(langLabel).join('; ')
+                : cvData.cv.languagesKnown || '—'}
+            </p>
             <div>
               <div className="text-xs font-semibold uppercase text-slate-400">Qualifications</div>
               <ul className="list-disc pl-5">
