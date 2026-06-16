@@ -55,6 +55,12 @@ export class ErrorBoundary extends Component<Props, State> {
             ? 'The app was updated. Reload to get the latest version.'
             : 'An unexpected error occurred while rendering this page.'}
         </p>
+        {!isChunk && (
+          <pre className="max-h-60 max-w-2xl overflow-auto whitespace-pre-wrap rounded bg-slate-100 p-3 text-left text-xs text-red-700">
+            {error.message}
+            {error.stack ? `\n\n${error.stack.split('\n').slice(1, 5).join('\n')}` : ''}
+          </pre>
+        )}
         <button
           type="button"
           className="rounded bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
