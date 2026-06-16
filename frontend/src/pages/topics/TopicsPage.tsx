@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Eye, Pencil, RefreshCw, Archive, Download, Printer } from 'lucide-react';
+import { Plus, Eye, Pencil, RefreshCw, Archive, Download, Printer, Trash2 } from 'lucide-react';
 import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -65,7 +65,7 @@ const emptyForm = {
   effectiveDate: '',
   reviewDate: '',
   sequenceIndex: '', // CR-29
-  signatoryUserIds: [] as string[], // CR-51
+  signatories: [] as { userId: string; role: string; date: string }[], // CR-T9
   randomizeQuestions: true,
   showExplanations: true,
   blockAfterMaxAttempts: true,
@@ -124,7 +124,7 @@ export default function TopicsPage() {
         effectiveDate: form.effectiveDate || undefined,
         reviewDate: form.reviewDate || undefined,
         sequenceIndex: form.sequenceIndex ? Number(form.sequenceIndex) : undefined,
-        signatoryUserIds: form.signatoryUserIds.length ? form.signatoryUserIds : undefined,
+        signatories: form.signatories.filter((s) => s.userId),
       }),
     onSuccess: (_d, status) => {
       toast.success(status === 'PUBLISHED' ? 'Topic created & published' : 'Draft topic created');
@@ -351,13 +351,10 @@ export default function TopicsPage() {
           <Field label="Training Type(s)">
             <MultiSelect options={TRAINING_TYPE_OPTIONS} value={form.trainingTypes} onChange={(trainingTypes) => setForm({ ...form, trainingTypes })} placeholder="Select training type(s)…" heightClass="h-32" />
           </Field>
-          <Field label="Department (optional)">
-            <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
+          <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
+            <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
           </Field>
         </div>
-        <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
-          <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
-        </Field>
         <div className="grid grid-cols-4 gap-3">
           <Field label="Duration (min)">
             <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />
@@ -372,42 +369,53 @@ export default function TopicsPage() {
             <Input type="number" min={1} value={form.questionLimit} onChange={(e) => setForm({ ...form, questionLimit: e.target.value })} placeholder="default" />
           </Field>
         </div>
+        {/* CR-T9: structured signatories (User · Prepared/Reviewed/Approved · Date) — auto-completed on publish, they don't take the course. */}
+        <div className="mt-1">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="iz-label">Signatories</span>
+            <Button size="sm" variant="outline" onClick={() => setForm((f) => ({ ...f, signatories: [...f.signatories, { userId: '', role: 'PREPARED', date: '' }] }))}>
+              <Plus className="h-4 w-4" /> Add signatory
+            </Button>
+          </div>
+          {form.signatories.length === 0 && (
+            <p className="text-xs text-slate-400">Signatories are auto-marked complete on publish and don't take the course.</p>
+          )}
+          <div className="space-y-2">
+            {form.signatories.map((s, i) => (
+              <div key={i} className="grid grid-cols-[1fr_150px_150px_auto] items-center gap-2">
+                <Select placeholder="Select user…" options={signatoryOptions} value={s.userId} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, userId: e.target.value } : x)) }))} />
+                <Select options={[{ value: 'PREPARED', label: 'Prepared' }, { value: 'REVIEWED', label: 'Reviewed' }, { value: 'APPROVED', label: 'Approved' }]} value={s.role} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) }))} />
+                <Input type="date" value={s.date} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))} />
+                <button type="button" className="text-red-600" aria-label="Remove signatory" onClick={() => setForm((f) => ({ ...f, signatories: f.signatories.filter((_, j) => j !== i) }))}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Refresher Interval (months, optional)">
+          <Field label="Department (used for reporting & filtering)">
+            <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
+          </Field>
+          <Field label="Refresher Interval (months)">
             <Input type="number" min={1} value={form.refresherIntervalMonths} onChange={(e) => setForm({ ...form, refresherIntervalMonths: e.target.value })} />
           </Field>
-          <Field label="Min. material reading time (seconds, optional)">
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Min. material reading time (seconds)" hint="Compliance reading gate.">
             <Input type="number" min={0} value={form.materialViewSeconds} onChange={(e) => setForm({ ...form, materialViewSeconds: e.target.value })} />
           </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Effective Date (optional)">
+          <Field label="Effective Date">
             <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
           </Field>
-          <Field label="Next Review Date (optional)">
+          <Field label="Next Review Date">
             <Input type="date" value={form.reviewDate} onChange={(e) => setForm({ ...form, reviewDate: e.target.value })} />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Sequence order (optional)">
-            <Input
-              type="number"
-              min={1}
-              value={form.sequenceIndex}
-              onChange={(e) => setForm({ ...form, sequenceIndex: e.target.value })}
-              placeholder="e.g. 1 — must be completed before higher numbers"
-            />
-          </Field>
-          <Field label="Signatories — prepared / reviewed / approved (optional)">
-            <MultiSelect
-              options={signatoryOptions}
-              value={form.signatoryUserIds}
-              onChange={(ids) => setForm({ ...form, signatoryUserIds: ids })}
-              placeholder="Search users…"
-              heightClass="h-32"
-            />
-          </Field>
-        </div>
+        <Field label="Sequence order" hint="Must be completed before higher numbers.">
+          <Input type="number" min={1} value={form.sequenceIndex} onChange={(e) => setForm({ ...form, sequenceIndex: e.target.value })} placeholder="e.g. 1" />
+        </Field>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
           <div className="text-xs font-medium uppercase text-slate-500">Assessment settings</div>
           <label className="flex items-center gap-2 text-sm text-slate-700">
