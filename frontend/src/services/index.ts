@@ -178,7 +178,10 @@ export const svc = {
   cv: {
     mine: () => data(api.get('/cv/mine')),
     save: (body: unknown) => data(api.post('/cv/mine', body)),
-    team: (params?: ListParams) => api.get('/cv/team', { params }).then((r) => r.data),
+    // cv/team is sent via sendSuccess ({success,data:payload}) — unlike other list
+    // endpoints that use sendPaginated — so unwrap the extra level to the paginated
+    // payload, letting the page read data.data as the rows array (matches createCrud).
+    team: (params?: ListParams) => api.get('/cv/team', { params }).then((r) => r.data.data),
     user: (userId: string) => data(api.get(`/cv/user/${userId}`)),
   },
 
