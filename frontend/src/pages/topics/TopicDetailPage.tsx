@@ -211,7 +211,7 @@ export default function TopicDetailPage() {
   const [editTopicOpen, setEditTopicOpen] = useState(false);
   const [editTopicReasonOpen, setEditTopicReasonOpen] = useState(false);
   const [editTopicForm, setEditTopicForm] = useState({
-    title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM',
+    title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM', trainingTypes: [] as string[],
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
     questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
     requiresAssessment: true, assessmentTimeMinutes: '',
@@ -365,10 +365,10 @@ export default function TopicDetailPage() {
         topicNumber: editTopicForm.topicNumber || undefined,
         sopNumber: editTopicForm.sopNumber || undefined,
         description: editTopicForm.description || undefined,
-        trainingType: editTopicForm.trainingType,
+        trainingType: editTopicForm.trainingTypes[0] || editTopicForm.trainingType,
+        trainingTypes: editTopicForm.trainingTypes,
         departmentId: editTopicForm.departmentId || undefined,
         designationIds: editTopicForm.designationIds,
-        roleIds: editTopicForm.roleIds,
         requiresAssessment: editTopicForm.requiresAssessment,
         assessmentTimeMinutes: editTopicForm.assessmentTimeMinutes ? Number(editTopicForm.assessmentTimeMinutes) : null,
         durationMinutes: Number(editTopicForm.durationMinutes),
@@ -442,6 +442,7 @@ export default function TopicDetailPage() {
       sopNumber: String(t.sopNumber ?? ''),
       description: String(t.description ?? ''),
       trainingType: String(t.trainingType ?? 'CLASSROOM'),
+      trainingTypes: Array.isArray(t.trainingTypes) && (t.trainingTypes as string[]).length ? (t.trainingTypes as string[]) : t.trainingType ? [String(t.trainingType)] : [],
       departmentId: String(t.departmentId ?? ''),
       designationId: String(t.designationId ?? ''),
       designationIds: Array.isArray(t.designationIds) && (t.designationIds as string[]).length
@@ -1159,31 +1160,30 @@ export default function TopicDetailPage() {
       >
         <p className="mb-2 text-xs text-slate-500">Topic code is system-owned and locked. Passing score is changed via its own e-signed action.</p>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Title"><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>
-          <Field label="Topic No."><Input value={editTopicForm.topicNumber} onChange={(e) => setEditTopicForm((f) => ({ ...f, topicNumber: e.target.value }))} /></Field>
-          <Field label="SOP / Document No."><Input value={editTopicForm.sopNumber} onChange={(e) => setEditTopicForm((f) => ({ ...f, sopNumber: e.target.value }))} /></Field>
-          <Field label="Training Type">
-            <Select options={trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))} value={editTopicForm.trainingType} onChange={(e) => setEditTopicForm((f) => ({ ...f, trainingType: e.target.value }))} />
-          </Field>
+          <Field label="Title" required><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>
+          <Field label="SOP Number"><Input value={editTopicForm.topicNumber} onChange={(e) => setEditTopicForm((f) => ({ ...f, topicNumber: e.target.value }))} /></Field>
         </div>
-        <Field label="Description"><Textarea value={editTopicForm.description} onChange={(e) => setEditTopicForm((f) => ({ ...f, description: e.target.value }))} /></Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Department"><Select placeholder="—" options={editDeptOpts} value={editTopicForm.departmentId} onChange={(e) => setEditTopicForm((f) => ({ ...f, departmentId: e.target.value }))} /></Field>
-          <Field label="Functional Role(s)"><MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" /></Field>
-        </div>
-        <Field label="Roles (one or more)" hint="The topic is assigned to users holding any of these roles.">
+        <Field label="Training Type(s)" hint="Select one or more.">
           <MultiSelect
-            options={editRoleOpts}
-            value={editTopicForm.roleIds}
-            onChange={(roleIds) => setEditTopicForm((f) => ({ ...f, roleIds }))}
-            placeholder="Search roles…"
-            emptyText="No roles available"
+            options={trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))}
+            value={editTopicForm.trainingTypes}
+            onChange={(trainingTypes) => setEditTopicForm((f) => ({ ...f, trainingTypes }))}
+            placeholder="Search training types…"
+            heightClass="h-32"
           />
+        </Field>
+        <Field label="Description"><Textarea value={editTopicForm.description} onChange={(e) => setEditTopicForm((f) => ({ ...f, description: e.target.value }))} /></Field>
+        <Field label="Functional Role(s)" hint="Assignment is via Functional Role / TNI / JD.">
+          <MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)</label>
           <Field label="Assessment time limit (min)" hint="Blank = no timer."><Input type="number" min={1} value={editTopicForm.assessmentTimeMinutes} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, assessmentTimeMinutes: e.target.value }))} /></Field>
         </div>
+        <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
+        <Field label="Department (used for reporting & filtering)">
+          <Select placeholder="—" options={editDeptOpts} value={editTopicForm.departmentId} onChange={(e) => setEditTopicForm((f) => ({ ...f, departmentId: e.target.value }))} />
+        </Field>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Duration (min)"><Input type="number" min={1} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} /></Field>
           <Field label="Max Attempts"><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
