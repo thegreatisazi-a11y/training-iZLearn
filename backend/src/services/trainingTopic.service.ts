@@ -137,7 +137,8 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue,
       requiresAssessment: input.requiresAssessment ?? true,
       assessmentTimeMinutes: input.assessmentTimeMinutes ?? null,
-      signatoryUserIds: (input.signatoryUserIds ?? []) as Prisma.InputJsonValue,
+      signatoryUserIds: (input.signatories?.length ? input.signatories.map((s) => s.userId) : input.signatoryUserIds ?? []) as Prisma.InputJsonValue,
+      signatories: (input.signatories ?? []) as Prisma.InputJsonValue,
       sequenceIndex: input.sequenceIndex ?? null,
       durationMinutes: input.durationMinutes,
       passingScorePercent: input.passingScorePercent,
@@ -184,7 +185,11 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.roleIds !== undefined ? { roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue } : {}),
       ...(input.requiresAssessment !== undefined ? { requiresAssessment: input.requiresAssessment } : {}),
       ...(input.assessmentTimeMinutes !== undefined ? { assessmentTimeMinutes: input.assessmentTimeMinutes ?? null } : {}),
-      ...(input.signatoryUserIds !== undefined ? { signatoryUserIds: (input.signatoryUserIds ?? []) as Prisma.InputJsonValue } : {}),
+      ...(input.signatories !== undefined
+        ? { signatories: input.signatories as Prisma.InputJsonValue, signatoryUserIds: input.signatories.map((s) => s.userId) as Prisma.InputJsonValue }
+        : input.signatoryUserIds !== undefined
+          ? { signatoryUserIds: (input.signatoryUserIds ?? []) as Prisma.InputJsonValue }
+          : {}),
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex ?? null } : {}),
       ...(input.durationMinutes !== undefined ? { durationMinutes: input.durationMinutes } : {}),
       ...(input.refresherIntervalMonths !== undefined
@@ -344,6 +349,7 @@ export async function reviseTopic(id: string, req: Request) {
       requiresAssessment: old.requiresAssessment,
       assessmentTimeMinutes: old.assessmentTimeMinutes,
       signatoryUserIds: old.signatoryUserIds as Prisma.InputJsonValue,
+      signatories: old.signatories as Prisma.InputJsonValue,
       sequenceIndex: old.sequenceIndex,
       durationMinutes: old.durationMinutes,
       passingScorePercent: old.passingScorePercent,

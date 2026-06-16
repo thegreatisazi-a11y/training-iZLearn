@@ -215,6 +215,7 @@ export default function TopicDetailPage() {
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
     questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
     requiresAssessment: true, assessmentTimeMinutes: '',
+    signatories: [] as { userId: string; role: string; date: string }[],
     randomizeQuestions: true, showExplanations: true, blockAfterMaxAttempts: true,
   });
 
@@ -253,6 +254,8 @@ export default function TopicDetailPage() {
   const editDepts = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: editTopicOpen });
   const editDesigs = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: editTopicOpen });
   const editRoles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }), enabled: editTopicOpen });
+  const editUsers = useQuery({ queryKey: ['users', 'topic-signatories'], queryFn: () => svc.users.list({ pageSize: 1000 }), enabled: editTopicOpen });
+  const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
   const editDeptOpts = ((editDepts.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
@@ -370,6 +373,7 @@ export default function TopicDetailPage() {
         departmentId: editTopicForm.departmentId || undefined,
         designationIds: editTopicForm.designationIds,
         requiresAssessment: editTopicForm.requiresAssessment,
+        signatories: editTopicForm.signatories.filter((s) => s.userId),
         assessmentTimeMinutes: editTopicForm.assessmentTimeMinutes ? Number(editTopicForm.assessmentTimeMinutes) : null,
         durationMinutes: Number(editTopicForm.durationMinutes),
         maxAttempts: Number(editTopicForm.maxAttempts),
@@ -443,6 +447,11 @@ export default function TopicDetailPage() {
       description: String(t.description ?? ''),
       trainingType: String(t.trainingType ?? 'CLASSROOM'),
       trainingTypes: Array.isArray(t.trainingTypes) && (t.trainingTypes as string[]).length ? (t.trainingTypes as string[]) : t.trainingType ? [String(t.trainingType)] : [],
+      signatories: Array.isArray(t.signatories)
+        ? (t.signatories as { userId: string; role: string; date?: string }[]).map((s) => ({ userId: s.userId, role: s.role || 'PREPARED', date: s.date ?? '' }))
+        : Array.isArray(t.signatoryUserIds)
+          ? (t.signatoryUserIds as string[]).map((uid) => ({ userId: uid, role: 'PREPARED', date: '' }))
+          : [],
       departmentId: String(t.departmentId ?? ''),
       designationId: String(t.designationId ?? ''),
       designationIds: Array.isArray(t.designationIds) && (t.designationIds as string[]).length
@@ -1179,6 +1188,39 @@ export default function TopicDetailPage() {
         <div className="grid grid-cols-2 gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)</label>
           <Field label="Assessment time limit (min)" hint="Blank = no timer."><Input type="number" min={1} value={editTopicForm.assessmentTimeMinutes} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, assessmentTimeMinutes: e.target.value }))} /></Field>
+        </div>
+        {/* CR-T9: structured signatories (User · Prepared/Reviewed/Approved · Date) — auto-completed on publish, they don't take the course. */}
+        <div className="mt-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="iz-label">Signatories</span>
+            <Button size="sm" variant="outline" onClick={() => setEditTopicForm((f) => ({ ...f, signatories: [...f.signatories, { userId: '', role: 'PREPARED', date: '' }] }))}>
+              <Plus className="h-4 w-4" /> Add signatory
+            </Button>
+          </div>
+          {editTopicForm.signatories.length === 0 && (
+            <p className="text-xs text-slate-400">No signatories. Signatories are auto-marked complete on publish and don't take the course.</p>
+          )}
+          <div className="space-y-2">
+            {editTopicForm.signatories.map((s, i) => (
+              <div key={i} className="grid grid-cols-[1fr_150px_150px_auto] items-center gap-2">
+                <Select
+                  placeholder="Select user…"
+                  options={editUserOpts}
+                  value={s.userId}
+                  onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, userId: e.target.value } : x)) }))}
+                />
+                <Select
+                  options={[{ value: 'PREPARED', label: 'Prepared' }, { value: 'REVIEWED', label: 'Reviewed' }, { value: 'APPROVED', label: 'Approved' }]}
+                  value={s.role}
+                  onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) }))}
+                />
+                <Input type="date" value={s.date} onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))} />
+                <button type="button" className="text-red-600" aria-label="Remove signatory" onClick={() => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.filter((_, j) => j !== i) }))}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <Field label="Department (used for reporting & filtering)">

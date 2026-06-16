@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, XCircle, ArrowLeft, Clock } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowLeft, Clock, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { printHtml } from '@/lib/print';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -387,7 +388,31 @@ export default function TakeAssessmentPage() {
   if (result) {
     return (
       <div>
-        <PageHeader title="Assessment Result" description={start.data?.topicTitle ?? topicTitle} />
+        <PageHeader
+          title="Assessment Result"
+          description={start.data?.topicTitle ?? topicTitle}
+          actions={
+            <Button
+              variant="outline"
+              onClick={() =>
+                printHtml(
+                  'Assessment Result',
+                  `<h2>${(start.data?.topicTitle ?? topicTitle) || 'Assessment'}</h2>
+                   <table>
+                     <tr><th>Result</th><td>${result.isPassed ? 'Passed' : 'Failed'}</td></tr>
+                     <tr><th>Score</th><td>${result.score}%</td></tr>
+                     <tr><th>Passing score</th><td>${result.passingScorePercent}%</td></tr>
+                     <tr><th>Correct</th><td>${result.correctCount}</td></tr>
+                     <tr><th>Incorrect</th><td>${result.incorrectCount}</td></tr>
+                     <tr><th>Attempt</th><td>${result.attemptNumber} of ${result.maxAttempts}</td></tr>
+                   </table>`,
+                )
+              }
+            >
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+          }
+        />
         <Card className="mb-4">
           <CardContent className="flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-3">

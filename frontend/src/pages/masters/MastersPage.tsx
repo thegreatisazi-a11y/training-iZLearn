@@ -443,17 +443,15 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           <>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
             <Button
-              disabled={createMutation.isPending || !form.code || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.code, displayName: form.displayName, description: form.description || undefined })}
+              disabled={createMutation.isPending || !form.displayName}
+              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
             >
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
         }
       >
-        <Field label="Code (unique, e.g. SIMULATION)" required>
-          <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="SIMULATION" />
-        </Field>
+        {/* CR-M2: code is auto-generated from the display name; no manual entry. */}
         <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
@@ -596,17 +594,15 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
           <>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
             <Button
-              disabled={createMutation.isPending || !form.code || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.code, displayName: form.displayName, description: form.description || undefined })}
+              disabled={createMutation.isPending || !form.displayName}
+              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
             >
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
         }
       >
-        <Field label="Code (unique, e.g. TRAINING_RECORD)" required>
-          <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="TRAINING_RECORD" />
-        </Field>
+        {/* CR-M2: code is auto-generated from the display name; no manual entry. */}
         <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>
@@ -749,17 +745,15 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
           <>
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
             <Button
-              disabled={createMutation.isPending || !form.code || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.code, displayName: form.displayName, description: form.description || undefined })}
+              disabled={createMutation.isPending || !form.displayName}
+              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
             >
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
         }
       >
-        <Field label="Code (unique, e.g. SR_MANAGER)" required>
-          <Input value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase().replace(/\s+/g, '_') }))} placeholder="SR_MANAGER" />
-        </Field>
+        {/* CR-M2: code is auto-generated from the display name; no manual entry. */}
         <Field label="Display Name" required>
           <Input value={form.displayName} onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))} />
         </Field>

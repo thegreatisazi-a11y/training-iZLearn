@@ -2,6 +2,14 @@ import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
 import { trainingType, topicStatus } from './enums';
 
+/** CR-T9: a structured topic signatory (User · Prepared/Reviewed/Approved · Date). */
+export const topicSignatory = z.object({
+  userId: uuid,
+  role: z.enum(['PREPARED', 'REVIEWED', 'APPROVED']),
+  date: optionalString,
+});
+export type TopicSignatory = z.infer<typeof topicSignatory>;
+
 export const createTopicSchema = z.object({
   title: nonEmptyString,
   topicNumber: optionalString, // user-entered display number (topicCode stays system-owned)
@@ -25,6 +33,7 @@ export const createTopicSchema = z.object({
   blockAfterMaxAttempts: z.coerce.boolean().optional(),
   refresherIntervalMonths: z.coerce.number().int().positive().optional(),
   signatoryUserIds: z.array(uuid).optional(), // CR-51: prepared/reviewed/approved-by signatories
+  signatories: z.array(topicSignatory).optional(), // CR-T9: structured signatories
   sequenceIndex: z.coerce.number().int().min(0).optional(), // CR-29: course ordering
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),
@@ -60,6 +69,7 @@ export const updateTopicSchema = z.object({
   showExplanations: z.coerce.boolean().optional(),
   blockAfterMaxAttempts: z.coerce.boolean().optional(),
   signatoryUserIds: z.array(uuid).optional(), // CR-51
+  signatories: z.array(topicSignatory).optional(), // CR-T9: structured signatories
   sequenceIndex: z.coerce.number().int().min(0).optional(), // CR-29
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),

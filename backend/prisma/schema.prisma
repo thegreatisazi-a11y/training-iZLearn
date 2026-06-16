@@ -178,7 +178,8 @@ model TrainingTopic {
   showExplanations        Boolean      @default(true) // show incorrect-answer explanations after a failed attempt
   blockAfterMaxAttempts   Boolean      @default(true) // block the assessment after the configured max attempts
   refresherIntervalMonths Int?
-  signatoryUserIds        Json         @default("[]") // CR-51: prepared/reviewed/approved-by signatories — training auto-completed, they don't take it
+  signatoryUserIds        Json         @default("[]") // CR-51: signatory userIds (drives auto-complete; derived from signatories)
+  signatories             Json         @default("[]") // CR-T9: structured signatories [{ userId, role: PREPARED|REVIEWED|APPROVED, date }]
   sequenceIndex           Int? // CR-29: optional ordering for course-in-sequence
   materialViewSeconds     Int? // minimum seconds the material must stay open before the assessment unlocks
   effectiveDate           DateTime? // date the (published) version becomes effective
