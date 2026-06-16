@@ -820,7 +820,7 @@ export default function MastersPage() {
 
   return (
     <div>
-      <PageHeader title="Master Setup" description="Manage locations, departments, designations, training types, and document types." />
+      <PageHeader title="Master Setup" description="Manage locations, departments, functional roles, training types, and document types." />
 
       <div className="mb-4 flex items-center justify-between">
         <Tabs tabs={TABS} value={tab} onChange={setTab} />
