@@ -229,21 +229,18 @@ export default function UsersPage() {
   const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
   const locations = useQuery({ queryKey: ['locations', 'all'], queryFn: () => svc.locations.list({ pageSize: 200 }) });
   const roles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }) });
-  // Admins may include inactive users in the Supervisor picker (off by default).
-  const [inclInactiveSup, setInclInactiveSup] = useState(false);
+  // D2: Reporting Manager picker shows ACTIVE users only (no include-inactive option).
   const allUsers = useQuery({
-    queryKey: ['users', 'supervisors', inclInactiveSup],
-    queryFn: () => svc.users.list({ pageSize: 500, includeInactive: inclInactiveSup }),
+    queryKey: ['users', 'supervisors'],
+    queryFn: () => svc.users.list({ pageSize: 500, includeInactive: false }),
   });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
 
-  // Supervisor options = users from User Management, rich label
-  // (name · ID · dept · functional roles · status), self excluded. Inactive users are
-  // hidden unless an admin enables "Include inactive".
+  // Reporting Manager options = active users, rich label (name · ID · dept · roles), self excluded.
   type SupRow = { id: string; fullName: string; employeeId: string; departmentName?: string | null; functionalRoleNames?: string[]; isActive?: boolean };
   const supervisorOptions = (excludeId?: string): SearchOption[] =>
     ((allUsers.data?.data ?? []) as SupRow[])
-      .filter((u) => u.id !== excludeId && (inclInactiveSup || u.isActive !== false))
+      .filter((u) => u.id !== excludeId && u.isActive !== false)
       .map((u) => ({
         value: u.id,
         label: `${u.fullName} (${u.employeeId})`,
@@ -256,14 +253,6 @@ export default function UsersPage() {
             .filter(Boolean)
             .join(' · ') || undefined,
       }));
-
-  // Admin-only "Include inactive supervisors" toggle, rendered next to a Supervisor field.
-  const supervisorInactiveToggle = canApprove ? (
-    <label className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-      <input type="checkbox" checked={inclInactiveSup} onChange={(e) => setInclInactiveSup(e.target.checked)} />
-      Include inactive users
-    </label>
-  ) : null;
 
   const actionMutation = useMutation({
     mutationFn: ({ action, id, body }: { action: ActionKind; id: string; body: unknown }) => svc.users[action](id, body),
@@ -653,7 +642,6 @@ export default function UsersPage() {
             onChange={(supervisorId) => setEditForm((f) => ({ ...f, supervisorId }))}
             emptyText="No matching users"
           />
-          {supervisorInactiveToggle}
         </Field>
         <Field label="Functional Role(s)">
           <MultiSelect
@@ -848,7 +836,7 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))}
           />
         </Field>
-        <Field label="Reporting Manager (optional — for training notifications)">
+        <Field label="Reporting Manager">
           <SearchableSelect
             placeholder="Select reporting manager…"
             options={supervisorOptions()}
@@ -856,7 +844,6 @@ export default function UsersPage() {
             onChange={(supervisorId) => setForm((f) => ({ ...f, supervisorId }))}
             emptyText="No matching users"
           />
-          {supervisorInactiveToggle}
         </Field>
         <Field label="Functional Role(s)">
           <MultiSelect

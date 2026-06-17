@@ -94,9 +94,7 @@ export default function TopicsPage() {
     queryKey: ['topics', { page, search, statusFilter }],
     queryFn: () => svc.topics.list({ page, search: search || undefined, status: statusFilter }),
   });
-  const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: creating });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: creating });
-  const deptOptions = ((departments.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
   const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
@@ -384,31 +382,10 @@ export default function TopicsPage() {
             ))}
           </div>
         </div>
+        {/* G1: Duration / Department / Refresher / Min-reading / Next-Review / Sequence removed from the form. */}
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Duration (min)">
-            <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />
-          </Field>
-          <Field label="Department (used for reporting & filtering)">
-            <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
-          </Field>
-          <Field label="Refresher Interval (months)">
-            <Input type="number" min={1} value={form.refresherIntervalMonths} onChange={(e) => setForm({ ...form, refresherIntervalMonths: e.target.value })} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Min. material reading time (seconds)" hint="Compliance reading gate.">
-            <Input type="number" min={0} value={form.materialViewSeconds} onChange={(e) => setForm({ ...form, materialViewSeconds: e.target.value })} />
-          </Field>
-          <Field label="Effective Date">
-            <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
-          </Field>
-          <Field label="Next Review Date">
-            <Input type="date" value={form.reviewDate} onChange={(e) => setForm({ ...form, reviewDate: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Sequence order" hint="Must be completed before higher numbers.">
-          <Input type="number" min={1} value={form.sequenceIndex} onChange={(e) => setForm({ ...form, sequenceIndex: e.target.value })} placeholder="e.g. 1" />
+        <Field label="Effective Date">
+          <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
         </Field>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
           <div className="text-xs font-medium uppercase text-slate-500">Assessment settings</div>

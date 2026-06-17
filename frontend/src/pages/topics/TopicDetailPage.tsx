@@ -251,12 +251,10 @@ export default function TopicDetailPage() {
     queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }),
     enabled: (tab === 'materials' && canMaterialWrite) || tab === 'history',
   });
-  const editDepts = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: editTopicOpen });
   const editDesigs = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: editTopicOpen });
   const editRoles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }), enabled: editTopicOpen });
   const editUsers = useQuery({ queryKey: ['users', 'topic-signatories'], queryFn: () => svc.users.list({ pageSize: 1000 }), enabled: editTopicOpen });
   const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
-  const editDeptOpts = ((editDepts.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
 
@@ -1222,19 +1220,12 @@ export default function TopicDetailPage() {
             ))}
           </div>
         </div>
+        {/* G1: Department / Duration / Refresher / Review-date / reading-time / sequence removed from the form. */}
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <Field label="Department (used for reporting & filtering)">
-          <Select placeholder="—" options={editDeptOpts} value={editTopicForm.departmentId} onChange={(e) => setEditTopicForm((f) => ({ ...f, departmentId: e.target.value }))} />
-        </Field>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Duration (min)"><Input type="number" min={1} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} /></Field>
           <Field label="Max Attempts"><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
           <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Refresher (months)"><Input type="number" min={1} value={editTopicForm.refresherIntervalMonths} onChange={(e) => setEditTopicForm((f) => ({ ...f, refresherIntervalMonths: e.target.value }))} /></Field>
           <Field label="Effective Date"><Input type="date" value={editTopicForm.effectiveDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></Field>
-          <Field label="Review Date"><Input type="date" value={editTopicForm.reviewDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, reviewDate: e.target.value }))} /></Field>
         </div>
         <div className="space-y-1.5 rounded border border-slate-200 p-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.randomizeQuestions} onChange={(e) => setEditTopicForm((f) => ({ ...f, randomizeQuestions: e.target.checked }))} /> Randomize questions</label>
