@@ -366,8 +366,18 @@ export async function setRequiredViewSeconds(id: string, seconds: number) {
 }
 
 /** Soft-delete (the only kind of delete in izLearn). */
+/** H1: a material attached to a PUBLISHED topic is part of the controlled record and
+ * cannot be deleted by anyone (delete is only allowed while the topic is unpublished). */
+async function assertMaterialDeletable(material: { topicId: string }) {
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId, isDeleted: false }, select: { status: true } });
+  if (topic?.status === 'PUBLISHED') {
+    throw AppError.conflict('This material is linked to a published course and cannot be deleted. Unpublish/archive the course first, or replace the file through the controlled version flow.');
+  }
+}
+
 export async function deleteMaterial(id: string) {
-  await getMaterial(id);
+  const material = await getMaterial(id);
+  await assertMaterialDeletable(material);
   return prisma.trainingMaterial.update({ where: { id }, data: { isDeleted: true } });
 }
 
