@@ -57,35 +57,38 @@ function emptyForm(): FormState {
   };
 }
 
+/** Map a saved CV (or null) into the editable form shape; falls back to legacy free-text languages. */
+function seedForm(cv: CvData | null | undefined): FormState {
+  if (!cv) return emptyForm();
+  const seededLanguages: LanguageItem[] = cv.languages?.length
+    ? cv.languages
+    : cv.languagesKnown
+      ? cv.languagesKnown.split(',').map((s) => s.trim()).filter(Boolean).map((language) => ({ language }))
+      : [];
+  return {
+    languagesKnown: cv.languagesKnown ?? '',
+    languages: seededLanguages.length ? seededLanguages : [{}],
+    qualifications: cv.qualifications?.length ? cv.qualifications : [{}],
+    currentRole: cv.currentRole ?? '',
+    currentTenureFrom: cv.currentTenureFrom ?? '',
+    currentTenureTo: cv.currentTenureTo ?? '',
+    currentResponsibilities: cv.currentResponsibilities ?? '',
+    experience: cv.experience?.length ? cv.experience : [{}],
+    trainings: cv.trainings?.length ? cv.trainings : [{}],
+    publications: cv.publications?.length ? cv.publications : [{}],
+  };
+}
+
 export default function MyCVPage() {
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [editing, setEditing] = useState(false); // C1: read-only until Edit is clicked
   const { data, isLoading } = useQuery({
     queryKey: ['my-cv'],
     queryFn: () => svc.cv.mine() as unknown as Promise<{ header: CvHeader; cv: CvData | null }>,
   });
 
   useEffect(() => {
-    const cv = data?.cv;
-    if (!cv) return;
-    // #4: prefer the structured array; if empty but a legacy free-text string
-    // exists, seed one row per comma-separated language for editing back-compat.
-    const seededLanguages: LanguageItem[] = cv.languages?.length
-      ? cv.languages
-      : cv.languagesKnown
-        ? cv.languagesKnown.split(',').map((s) => s.trim()).filter(Boolean).map((language) => ({ language }))
-        : [];
-    setForm({
-      languagesKnown: cv.languagesKnown ?? '',
-      languages: seededLanguages.length ? seededLanguages : [{}],
-      qualifications: cv.qualifications?.length ? cv.qualifications : [{}],
-      currentRole: cv.currentRole ?? '',
-      currentTenureFrom: cv.currentTenureFrom ?? '',
-      currentTenureTo: cv.currentTenureTo ?? '',
-      currentResponsibilities: cv.currentResponsibilities ?? '',
-      experience: cv.experience?.length ? cv.experience : [{}],
-      trainings: cv.trainings?.length ? cv.trainings : [{}],
-      publications: cv.publications?.length ? cv.publications : [{}],
-    });
+    if (data?.cv) setForm(seedForm(data.cv));
   }, [data?.cv]);
 
   const save = useMutation({
@@ -102,7 +105,7 @@ export default function MyCVPage() {
         trainings: form.trainings.filter((t) => t.detail),
         publications: form.publications.filter((p) => p.detail),
       }),
-    onSuccess: () => toast.success('CV saved.'),
+    onSuccess: () => { toast.success('CV saved.'); setEditing(false); },
     onError: (e) => toast.error(apiError(e)),
   });
 
@@ -144,9 +147,18 @@ export default function MyCVPage() {
             <Button variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" /> Print / PDF
             </Button>
-            <Button disabled={save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? 'Saving…' : 'Save CV'}
-            </Button>
+            {editing ? (
+              <>
+                <Button variant="outline" onClick={() => { setForm(seedForm(data?.cv)); setEditing(false); }} disabled={save.isPending}>
+                  Cancel
+                </Button>
+                <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                  {save.isPending ? 'Saving…' : 'Save CV'}
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => setEditing(true)}>Edit</Button>
+            )}
           </div>
         }
       />
@@ -161,6 +173,9 @@ export default function MyCVPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* C1: everything below is read-only until Edit is clicked. */}
+      <fieldset disabled={!editing} className="min-w-0 border-0 p-0 disabled:opacity-70">
 
       {/* #4: structured Language(s) Known — name + Read / Write / Understand */}
       <RepeatableSection
@@ -245,6 +260,7 @@ export default function MyCVPage() {
           <Input placeholder="Detail or 'Not Applicable'" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
         )}
       />
+      </fieldset>
     </div>
   );
 }
