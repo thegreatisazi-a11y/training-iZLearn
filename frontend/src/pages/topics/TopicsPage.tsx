@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Eye, Pencil, RefreshCw, Archive, Download, Printer, Trash2 } from 'lucide-react';
+import { Plus, Eye, Pencil, Archive, Download, Printer, Trash2 } from 'lucide-react';
 import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -77,7 +77,6 @@ export default function TopicsPage() {
   const can = useAuthStore((s) => s.hasPermission);
   const canCreate = can('courseManagement', 'create');
   const canEdit = can('courseManagement', 'edit');
-  const canRevise = can('courseManagement', 'revise');
   const canArchive = can('courseManagement', 'archive');
   const canExport = can('courseManagement', 'export');
   const canPrint = can('courseManagement', 'print');
@@ -87,7 +86,6 @@ export default function TopicsPage() {
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
-  const [reviseTarget, setReviseTarget] = useState<Topic | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Topic | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -129,19 +127,6 @@ export default function TopicsPage() {
       qc.invalidateQueries({ queryKey: ['topics'] });
       setCreating(false);
       setForm(emptyForm);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const reviseMut = useMutation({
-    mutationFn: (signature: ESignaturePayload) => {
-      const { reason, ...sig } = signature;
-      return svc.topics.revise(reviseTarget!.id, { reasonForChange: (reason ?? '').trim(), signature: sig });
-    },
-    onSuccess: () => {
-      toast.success('New version created — previous version moved to Archived/Obsolete');
-      qc.invalidateQueries({ queryKey: ['topics'] });
-      setReviseTarget(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -231,7 +216,7 @@ export default function TopicsPage() {
           <div className="flex flex-wrap justify-end gap-1">
             <Button size="sm" variant="ghost" title="View" onClick={() => navigate(`/topics/${r.id}`)}><Eye className="h-4 w-4" /></Button>
             {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/topics/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
-            {canRevise && !isArchived && <Button size="sm" variant="ghost" title="Revise (new version)" onClick={() => setReviseTarget(r)}><RefreshCw className="h-4 w-4" /></Button>}
+            {/* G2/G3: full-course "Revise" removed — Archive only; material changes auto-version. */}
             {canArchive && !isArchived && <Button size="sm" variant="ghost" title="Archive" onClick={() => setArchiveTarget(r)}><Archive className="h-4 w-4" /></Button>}
             {canExport && <Button size="sm" variant="ghost" title="Export (CSV)" onClick={() => exportOne(r)}><Download className="h-4 w-4" /></Button>}
             {canPrint && <Button size="sm" variant="ghost" title="Print" onClick={() => printOne(r)}><Printer className="h-4 w-4" /></Button>}
@@ -289,15 +274,6 @@ export default function TopicsPage() {
         total={data?.total}
         onPageChange={setPage}
         emptyText="No topics found."
-      />
-
-      {/* Revise (e-signature + reason) */}
-      <ESignatureModal
-        open={!!reviseTarget}
-        onClose={() => setReviseTarget(null)}
-        onConfirm={async (sig) => { await reviseMut.mutateAsync(sig); }}
-        title={`Revise "${reviseTarget?.title ?? ''}" — New Version (e-signature required)`}
-        requireReason
       />
 
       {/* Archive (e-signature + reason) */}
