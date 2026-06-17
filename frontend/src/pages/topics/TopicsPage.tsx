@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Eye, Pencil, RefreshCw, Archive, Download, Printer, Trash2 } from 'lucide-react';
+import { Plus, Eye, Pencil, Archive, Download, Printer, Trash2 } from 'lucide-react';
 import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -77,7 +77,6 @@ export default function TopicsPage() {
   const can = useAuthStore((s) => s.hasPermission);
   const canCreate = can('courseManagement', 'create');
   const canEdit = can('courseManagement', 'edit');
-  const canRevise = can('courseManagement', 'revise');
   const canArchive = can('courseManagement', 'archive');
   const canExport = can('courseManagement', 'export');
   const canPrint = can('courseManagement', 'print');
@@ -87,16 +86,13 @@ export default function TopicsPage() {
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
-  const [reviseTarget, setReviseTarget] = useState<Topic | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Topic | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['topics', { page, search, statusFilter }],
     queryFn: () => svc.topics.list({ page, search: search || undefined, status: statusFilter }),
   });
-  const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: creating });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: creating });
-  const deptOptions = ((departments.data?.data ?? []) as unknown as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
   const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
@@ -131,19 +127,6 @@ export default function TopicsPage() {
       qc.invalidateQueries({ queryKey: ['topics'] });
       setCreating(false);
       setForm(emptyForm);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const reviseMut = useMutation({
-    mutationFn: (signature: ESignaturePayload) => {
-      const { reason, ...sig } = signature;
-      return svc.topics.revise(reviseTarget!.id, { reasonForChange: (reason ?? '').trim(), signature: sig });
-    },
-    onSuccess: () => {
-      toast.success('New version created — previous version moved to Archived/Obsolete');
-      qc.invalidateQueries({ queryKey: ['topics'] });
-      setReviseTarget(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -233,7 +216,7 @@ export default function TopicsPage() {
           <div className="flex flex-wrap justify-end gap-1">
             <Button size="sm" variant="ghost" title="View" onClick={() => navigate(`/topics/${r.id}`)}><Eye className="h-4 w-4" /></Button>
             {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/topics/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
-            {canRevise && !isArchived && <Button size="sm" variant="ghost" title="Revise (new version)" onClick={() => setReviseTarget(r)}><RefreshCw className="h-4 w-4" /></Button>}
+            {/* G2/G3: full-course "Revise" removed — Archive only; material changes auto-version. */}
             {canArchive && !isArchived && <Button size="sm" variant="ghost" title="Archive" onClick={() => setArchiveTarget(r)}><Archive className="h-4 w-4" /></Button>}
             {canExport && <Button size="sm" variant="ghost" title="Export (CSV)" onClick={() => exportOne(r)}><Download className="h-4 w-4" /></Button>}
             {canPrint && <Button size="sm" variant="ghost" title="Print" onClick={() => printOne(r)}><Printer className="h-4 w-4" /></Button>}
@@ -291,15 +274,6 @@ export default function TopicsPage() {
         total={data?.total}
         onPageChange={setPage}
         emptyText="No topics found."
-      />
-
-      {/* Revise (e-signature + reason) */}
-      <ESignatureModal
-        open={!!reviseTarget}
-        onClose={() => setReviseTarget(null)}
-        onConfirm={async (sig) => { await reviseMut.mutateAsync(sig); }}
-        title={`Revise "${reviseTarget?.title ?? ''}" — New Version (e-signature required)`}
-        requireReason
       />
 
       {/* Archive (e-signature + reason) */}
@@ -384,31 +358,10 @@ export default function TopicsPage() {
             ))}
           </div>
         </div>
+        {/* G1: Duration / Department / Refresher / Min-reading / Next-Review / Sequence removed from the form. */}
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Duration (min)">
-            <Input type="number" min={1} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} />
-          </Field>
-          <Field label="Department (used for reporting & filtering)">
-            <Select placeholder="Select department…" options={deptOptions} value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
-          </Field>
-          <Field label="Refresher Interval (months)">
-            <Input type="number" min={1} value={form.refresherIntervalMonths} onChange={(e) => setForm({ ...form, refresherIntervalMonths: e.target.value })} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Min. material reading time (seconds)" hint="Compliance reading gate.">
-            <Input type="number" min={0} value={form.materialViewSeconds} onChange={(e) => setForm({ ...form, materialViewSeconds: e.target.value })} />
-          </Field>
-          <Field label="Effective Date">
-            <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
-          </Field>
-          <Field label="Next Review Date">
-            <Input type="date" value={form.reviewDate} onChange={(e) => setForm({ ...form, reviewDate: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Sequence order" hint="Must be completed before higher numbers.">
-          <Input type="number" min={1} value={form.sequenceIndex} onChange={(e) => setForm({ ...form, sequenceIndex: e.target.value })} placeholder="e.g. 1" />
+        <Field label="Effective Date">
+          <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
         </Field>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
           <div className="text-xs font-medium uppercase text-slate-500">Assessment settings</div>

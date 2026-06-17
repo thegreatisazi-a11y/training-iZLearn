@@ -181,14 +181,14 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   const key = materialKey(file.filename);
   await storage.putFile(key, file.path, file.mimetype);
 
-  const staged = isPublished(topic.status);
-  if (!staged) {
-    // Draft topic: supersede the selected/current files immediately (kept as history).
-    await prisma.trainingMaterial.updateMany({
-      where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
-      data: { isCurrentVersion: false, isObsolete: true },
-    });
-  }
+  // G2/G3: material-level auto-versioning. Replacing a file ALWAYS supersedes the
+  // current file immediately — the new file becomes current, the old one moves to
+  // the material version history (obsolete + archived stamp). No full-course revise.
+  const reason = auditContext.getStore()?.reasonForChange ?? null;
+  await prisma.trainingMaterial.updateMany({
+    where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
+    data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
+  });
 
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
   const material = await prisma.trainingMaterial.create({
@@ -200,10 +200,9 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       fileType: getExtension(file.originalname),
       fileSize: file.size,
       version: lastVersion + 1,
-      isStaged: staged,
-      isCurrentVersion: !staged,
-      // On a published topic, record which current file this staged upload replaces.
-      replacesMaterialId: staged ? old.id : null,
+      isStaged: false,
+      isCurrentVersion: true,
+      replacesMaterialId: old.id,
       createdBy,
     },
   });
@@ -212,20 +211,17 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
     action: 'FILE_UPLOAD',
     entityType: 'TrainingMaterial',
     entityId: material.id,
-    newValue: { topicId: old.topicId, replacedMaterialId: old.id, originalFileName: file.originalname, fileSize: file.size, staged },
+    newValue: { topicId: old.topicId, replacedMaterialId: old.id, originalFileName: file.originalname, fileSize: file.size },
   });
 
-  // For a draft, the supersession happened now → snapshot it. For a published
-  // topic the supersession is deferred to revise, so no snapshot here.
-  if (!staged) {
-    await snapshotVersion({
-      topicId: old.topicId,
-      version: topic.currentVersion,
-      changedBy: createdBy,
-      reason: auditContext.getStore()?.reasonForChange ?? null,
-      note: `Replaced file "${old.originalFileName}" with "${file.originalname}"`,
-    });
-  }
+  // The superseded file is now in version history — snapshot the change.
+  await snapshotVersion({
+    topicId: old.topicId,
+    version: topic.currentVersion,
+    changedBy: createdBy,
+    reason,
+    note: `Replaced file "${old.originalFileName}" with "${file.originalname}"`,
+  });
 
   return material;
 }
@@ -366,8 +362,18 @@ export async function setRequiredViewSeconds(id: string, seconds: number) {
 }
 
 /** Soft-delete (the only kind of delete in izLearn). */
+/** H1: a material attached to a PUBLISHED topic is part of the controlled record and
+ * cannot be deleted by anyone (delete is only allowed while the topic is unpublished). */
+async function assertMaterialDeletable(material: { topicId: string }) {
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId, isDeleted: false }, select: { status: true } });
+  if (topic?.status === 'PUBLISHED') {
+    throw AppError.conflict('This material is linked to a published course and cannot be deleted. Unpublish/archive the course first, or replace the file through the controlled version flow.');
+  }
+}
+
 export async function deleteMaterial(id: string) {
-  await getMaterial(id);
+  const material = await getMaterial(id);
+  await assertMaterialDeletable(material);
   return prisma.trainingMaterial.update({ where: { id }, data: { isDeleted: true } });
 }
 

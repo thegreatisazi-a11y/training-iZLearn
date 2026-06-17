@@ -28,6 +28,7 @@ export function ESignatureModal({
   title = 'Electronic Signature Required',
   defaultMeaning = 'Approved',
   requireReason = false,
+  hideMeaning = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,6 +37,8 @@ export function ESignatureModal({
   defaultMeaning?: string;
   /** When true, a mandatory "Reason for Change" (≥5 chars) is collected and returned. */
   requireReason?: boolean;
+  /** B2: hide the Meaning dropdown and force `defaultMeaning` (e.g. acknowledge flow). */
+  hideMeaning?: boolean;
 }) {
   const expectedUser = useAuthStore((s) => s.user?.windowsUsername ?? '');
   const [username, setUsername] = useState('');
@@ -98,9 +101,11 @@ export function ESignatureModal({
       <Field label="Signature Password">
         <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
       </Field>
-      <Field label="Meaning">
-        <Select options={MEANINGS} value={meaning} onChange={(e) => setMeaning(e.target.value)} />
-      </Field>
+      {!hideMeaning && (
+        <Field label="Meaning">
+          <Select options={MEANINGS} value={meaning} onChange={(e) => setMeaning(e.target.value)} />
+        </Field>
+      )}
       {requireReason && (
         <Field label="Reason for Change" required hint="Minimum 5 characters — required to enable Sign.">
           <Textarea

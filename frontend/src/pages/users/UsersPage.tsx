@@ -65,6 +65,13 @@ const ACTION_MEANING: Record<ActionKind, string> = {
 
 const USER_TYPE_OPTIONS = userTypeEnum.options.map((v) => ({ value: v, label: v }));
 
+/** D1/D8: derive the auto-username preview (first.last, lowercase) shown live in the field. */
+function genUsername(fullName: string): string {
+  const parts = fullName.trim().toLowerCase().split(/\s+/).filter(Boolean).map((p) => p.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+  if (!parts.length) return '';
+  return parts.length > 1 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0];
+}
+
 const EMPTY_FORM = {
   userType: 'INTERNAL',
   fullName: '',
@@ -194,6 +201,7 @@ export default function UsersPage() {
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [usernameTouched, setUsernameTouched] = useState(false);
   const [resetPwdDialog, setResetPwdDialog] = useState<{ username: string; tempPassword: string } | null>(null);
 
   // CR-12: read-only View dialog
@@ -229,21 +237,18 @@ export default function UsersPage() {
   const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
   const locations = useQuery({ queryKey: ['locations', 'all'], queryFn: () => svc.locations.list({ pageSize: 200 }) });
   const roles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }) });
-  // Admins may include inactive users in the Supervisor picker (off by default).
-  const [inclInactiveSup, setInclInactiveSup] = useState(false);
+  // D2: Reporting Manager picker shows ACTIVE users only (no include-inactive option).
   const allUsers = useQuery({
-    queryKey: ['users', 'supervisors', inclInactiveSup],
-    queryFn: () => svc.users.list({ pageSize: 500, includeInactive: inclInactiveSup }),
+    queryKey: ['users', 'supervisors'],
+    queryFn: () => svc.users.list({ pageSize: 500, includeInactive: false }),
   });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
 
-  // Supervisor options = users from User Management, rich label
-  // (name · ID · dept · functional roles · status), self excluded. Inactive users are
-  // hidden unless an admin enables "Include inactive".
+  // Reporting Manager options = active users, rich label (name · ID · dept · roles), self excluded.
   type SupRow = { id: string; fullName: string; employeeId: string; departmentName?: string | null; functionalRoleNames?: string[]; isActive?: boolean };
   const supervisorOptions = (excludeId?: string): SearchOption[] =>
     ((allUsers.data?.data ?? []) as SupRow[])
-      .filter((u) => u.id !== excludeId && (inclInactiveSup || u.isActive !== false))
+      .filter((u) => u.id !== excludeId && u.isActive !== false)
       .map((u) => ({
         value: u.id,
         label: `${u.fullName} (${u.employeeId})`,
@@ -256,14 +261,6 @@ export default function UsersPage() {
             .filter(Boolean)
             .join(' · ') || undefined,
       }));
-
-  // Admin-only "Include inactive supervisors" toggle, rendered next to a Supervisor field.
-  const supervisorInactiveToggle = canApprove ? (
-    <label className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-      <input type="checkbox" checked={inclInactiveSup} onChange={(e) => setInclInactiveSup(e.target.checked)} />
-      Include inactive users
-    </label>
-  ) : null;
 
   const actionMutation = useMutation({
     mutationFn: ({ action, id, body }: { action: ActionKind; id: string; body: unknown }) => svc.users[action](id, body),
@@ -287,6 +284,7 @@ export default function UsersPage() {
       toast.success('User request submitted for approval.');
       setCreateOpen(false);
       setForm(EMPTY_FORM);
+      setUsernameTouched(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -653,7 +651,6 @@ export default function UsersPage() {
             onChange={(supervisorId) => setEditForm((f) => ({ ...f, supervisorId }))}
             emptyText="No matching users"
           />
-          {supervisorInactiveToggle}
         </Field>
         <Field label="Functional Role(s)">
           <MultiSelect
@@ -818,16 +815,20 @@ export default function UsersPage() {
           <Select options={USER_TYPE_OPTIONS} value={form.userType} onChange={(e) => setForm((f) => ({ ...f, userType: e.target.value }))} />
         </Field>
         <Field label="Full Name" required error={!form.fullName ? 'Full name is required.' : undefined}>
-          <Input value={form.fullName} onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))} />
+          <Input
+            value={form.fullName}
+            onChange={(e) => {
+              const fullName = e.target.value;
+              // D1: auto-fill the username field live from the name until the user edits it.
+              setForm((f) => ({ ...f, fullName, ...(usernameTouched ? {} : { windowsUsername: genUsername(fullName) }) }));
+            }}
+          />
         </Field>
         <Field label="Employee ID" required error={!form.employeeId ? 'Employee ID is required.' : undefined}>
           <Input value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} />
         </Field>
-        <Field
-          label="Username (auto-generated)"
-          hint={`Leave blank to auto-generate${form.fullName.trim() ? `: ${form.fullName.trim().toLowerCase().split(/\s+/).filter(Boolean).map((p) => p.replace(/[^a-z0-9]/g, '')).filter(Boolean).slice(0, 2).join('.')}` : ' as first.last'} — a number is added if it already exists.`}
-        >
-          <Input placeholder="auto" value={form.windowsUsername} onChange={(e) => setForm((f) => ({ ...f, windowsUsername: e.target.value }))} />
+        <Field label="Username (auto-generated, editable)" hint="Filled from the full name (first.last). Edit to override; a number is added automatically if it already exists.">
+          <Input value={form.windowsUsername} onChange={(e) => { setUsernameTouched(true); setForm((f) => ({ ...f, windowsUsername: e.target.value })); }} />
         </Field>
         <Field label="Email" required error={!form.email ? 'Email is required (the temporary password is emailed here).' : undefined}>
           <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
@@ -848,7 +849,7 @@ export default function UsersPage() {
             onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))}
           />
         </Field>
-        <Field label="Reporting Manager (optional — for training notifications)">
+        <Field label="Reporting Manager">
           <SearchableSelect
             placeholder="Select reporting manager…"
             options={supervisorOptions()}
@@ -856,7 +857,6 @@ export default function UsersPage() {
             onChange={(supervisorId) => setForm((f) => ({ ...f, supervisorId }))}
             emptyText="No matching users"
           />
-          {supervisorInactiveToggle}
         </Field>
         <Field label="Functional Role(s)">
           <MultiSelect

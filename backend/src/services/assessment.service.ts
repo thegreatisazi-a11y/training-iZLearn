@@ -323,8 +323,9 @@ export async function submitAttempt(
     isBlocked,
     attemptNumber: attempt.attemptNumber,
     maxAttempts: topic.maxAttempts,
-    // Show incorrect-answer explanations only when the topic enables it.
-    incorrectDetails: isPassed || !topic.showExplanations ? undefined : incorrectDetails,
+    // A2: after submission, show every wrong answer (selected + correct + explanation)
+    // for BOTH pass and fail. Explanation text is included where the question has one.
+    incorrectDetails,
     certificateId,
   };
 }

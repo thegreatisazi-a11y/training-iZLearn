@@ -151,6 +151,7 @@ export default function MyJobDescriptionPage() {
         onClose={() => setSignOpen(false)}
         title="Sign to Acknowledge Job Description"
         defaultMeaning="Acknowledged"
+        hideMeaning
         onConfirm={async (sig) => {
           await ackMut.mutateAsync(sig);
           setSignOpen(false);

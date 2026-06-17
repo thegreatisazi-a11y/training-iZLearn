@@ -53,6 +53,7 @@ interface StartResult {
 interface IncorrectDetail {
   questionId: string;
   questionText: string;
+  userAnswer?: unknown;
   correctAnswer: unknown;
   explanation?: string | null;
 }
@@ -446,13 +447,15 @@ export default function TakeAssessmentPage() {
           <p className="mb-4 text-sm text-red-600">You have reached the maximum number of attempts. This assessment is now blocked pending coordinator review.</p>
         )}
 
-        {!result.isPassed && result.incorrectDetails && result.incorrectDetails.length > 0 && (
+        {/* A2: show every wrong answer (selected + correct + explanation) on pass AND fail. */}
+        {result.incorrectDetails && result.incorrectDetails.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase text-slate-500">Review</h2>
+            <h2 className="text-sm font-semibold uppercase text-slate-500">Review — incorrect answers</h2>
             {result.incorrectDetails.map((d) => (
               <Card key={d.questionId}>
                 <CardContent>
                   <p className="font-medium text-slate-800">{d.questionText}</p>
+                  <p className="mt-1 text-sm text-red-700">Your answer: {formatCorrect(d.userAnswer) || '—'}</p>
                   <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>
                   {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
                 </CardContent>
