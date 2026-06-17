@@ -65,6 +65,13 @@ const ACTION_MEANING: Record<ActionKind, string> = {
 
 const USER_TYPE_OPTIONS = userTypeEnum.options.map((v) => ({ value: v, label: v }));
 
+/** D1/D8: derive the auto-username preview (first.last, lowercase) shown live in the field. */
+function genUsername(fullName: string): string {
+  const parts = fullName.trim().toLowerCase().split(/\s+/).filter(Boolean).map((p) => p.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+  if (!parts.length) return '';
+  return parts.length > 1 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0];
+}
+
 const EMPTY_FORM = {
   userType: 'INTERNAL',
   fullName: '',
@@ -194,6 +201,7 @@ export default function UsersPage() {
   });
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [usernameTouched, setUsernameTouched] = useState(false);
   const [resetPwdDialog, setResetPwdDialog] = useState<{ username: string; tempPassword: string } | null>(null);
 
   // CR-12: read-only View dialog
@@ -276,6 +284,7 @@ export default function UsersPage() {
       toast.success('User request submitted for approval.');
       setCreateOpen(false);
       setForm(EMPTY_FORM);
+      setUsernameTouched(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -806,16 +815,20 @@ export default function UsersPage() {
           <Select options={USER_TYPE_OPTIONS} value={form.userType} onChange={(e) => setForm((f) => ({ ...f, userType: e.target.value }))} />
         </Field>
         <Field label="Full Name" required error={!form.fullName ? 'Full name is required.' : undefined}>
-          <Input value={form.fullName} onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))} />
+          <Input
+            value={form.fullName}
+            onChange={(e) => {
+              const fullName = e.target.value;
+              // D1: auto-fill the username field live from the name until the user edits it.
+              setForm((f) => ({ ...f, fullName, ...(usernameTouched ? {} : { windowsUsername: genUsername(fullName) }) }));
+            }}
+          />
         </Field>
         <Field label="Employee ID" required error={!form.employeeId ? 'Employee ID is required.' : undefined}>
           <Input value={form.employeeId} onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value }))} />
         </Field>
-        <Field
-          label="Username (auto-generated)"
-          hint={`Leave blank to auto-generate${form.fullName.trim() ? `: ${form.fullName.trim().toLowerCase().split(/\s+/).filter(Boolean).map((p) => p.replace(/[^a-z0-9]/g, '')).filter(Boolean).slice(0, 2).join('.')}` : ' as first.last'} — a number is added if it already exists.`}
-        >
-          <Input placeholder="auto" value={form.windowsUsername} onChange={(e) => setForm((f) => ({ ...f, windowsUsername: e.target.value }))} />
+        <Field label="Username (auto-generated, editable)" hint="Filled from the full name (first.last). Edit to override; a number is added automatically if it already exists.">
+          <Input value={form.windowsUsername} onChange={(e) => { setUsernameTouched(true); setForm((f) => ({ ...f, windowsUsername: e.target.value })); }} />
         </Field>
         <Field label="Email" required error={!form.email ? 'Email is required (the temporary password is emailed here).' : undefined}>
           <Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
