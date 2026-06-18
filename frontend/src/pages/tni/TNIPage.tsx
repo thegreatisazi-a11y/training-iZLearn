@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
 import { MultiSelect } from '@/components/common/MultiSelect';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Field } from '@/components/ui/input';
@@ -231,6 +232,10 @@ export default function TNIPage() {
   const [decision, setDecision] = useState<{ tni: TNI; type: 'APPROVE' | 'REJECT' } | null>(null);
   const [signOpen, setSignOpen] = useState(false);
   const [dueDate, setDueDate] = useState('');
+  // Edit (pending justification) + withdraw/archive a TNI.
+  const [editTni, setEditTni] = useState<TNI | null>(null);
+  const [editJustification, setEditJustification] = useState('');
+  const [archiveTni, setArchiveTni] = useState<TNI | null>(null);
 
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 200 }) });
   const { data: topics } = useQuery({ queryKey: ['topics', 'all'], queryFn: () => svc.topics.list({ pageSize: 200 }) });
@@ -268,6 +273,26 @@ export default function TNIPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  const editMut = useMutation({
+    mutationFn: () => svc.tni.update(editTni!.id, { justification: editJustification.trim() }),
+    onSuccess: () => {
+      toast.success('TNI updated');
+      qc.invalidateQueries({ queryKey: ['tni'] });
+      setEditTni(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const archiveMut = useMutation({
+    mutationFn: () => svc.tni.remove(archiveTni!.id, ''),
+    onSuccess: () => {
+      toast.success(archiveTni?.status === 'PENDING' ? 'TNI withdrawn' : 'TNI archived');
+      qc.invalidateQueries({ queryKey: ['tni'] });
+      setArchiveTni(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
   const columns: Column<TNI>[] = [
     { key: 'user', header: 'User', render: (r) => <span className="font-medium text-slate-800">{r.userFullName ?? '—'}</span> },
     { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? '—' },
@@ -277,30 +302,31 @@ export default function TNIPage() {
       key: 'actions',
       header: '',
       className: 'text-right',
-      render: (r) =>
-        canApprove && r.status === 'PENDING' ? (
-          <div className="flex justify-end gap-2">
-            <Button
-              size="sm"
-              onClick={() => {
-                setDueDate('');
-                setDecision({ tni: r, type: 'APPROVE' });
-              }}
-            >
-              Approve
+      render: (r) => (
+        <div className="flex flex-wrap justify-end gap-2">
+          {canApprove && r.status === 'PENDING' && (
+            <>
+              <Button size="sm" onClick={() => { setDueDate(''); setDecision({ tni: r, type: 'APPROVE' }); }}>
+                Approve
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => { setDecision({ tni: r, type: 'REJECT' }); setSignOpen(true); }}>
+                Reject
+              </Button>
+            </>
+          )}
+          {canWrite && r.status === 'PENDING' && (
+            <Button size="sm" variant="outline" onClick={() => { setEditTni(r); setEditJustification(r.justification ?? ''); }}>
+              Edit
             </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => {
-                setDecision({ tni: r, type: 'REJECT' });
-                setSignOpen(true);
-              }}
-            >
-              Reject
+          )}
+          {/* Withdraw a pending TNI; Archive a decided one — both soft-delete (record kept). */}
+          {canWrite && (
+            <Button size="sm" variant="outline" onClick={() => setArchiveTni(r)}>
+              {r.status === 'PENDING' ? 'Withdraw' : 'Archive'}
             </Button>
-          </div>
-        ) : null,
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -418,6 +444,40 @@ export default function TNIPage() {
         title={decision?.type === 'REJECT' ? 'Sign — Reject TNI' : 'Sign — Approve TNI'}
         onConfirm={async (sig) => { await decideMut.mutateAsync(sig); }}
       />
+
+      {/* Edit a pending TNI's justification */}
+      <Dialog
+        open={!!editTni}
+        onClose={() => setEditTni(null)}
+        title="Edit Training Need"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditTni(null)} disabled={editMut.isPending}>Cancel</Button>
+            <Button onClick={() => editMut.mutate()} disabled={editMut.isPending || !editJustification.trim()}>
+              {editMut.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <Field label="Justification">
+          <Textarea value={editJustification} onChange={(e) => setEditJustification(e.target.value)} />
+        </Field>
+      </Dialog>
+
+      {/* Withdraw / Archive a TNI (soft-delete, record kept) */}
+      <ConfirmDialog
+        open={!!archiveTni}
+        onClose={() => setArchiveTni(null)}
+        title={archiveTni?.status === 'PENDING' ? 'Withdraw this TNI?' : 'Archive this TNI?'}
+        confirmLabel={archiveTni?.status === 'PENDING' ? 'Withdraw' : 'Archive'}
+        onConfirm={async () => { await archiveMut.mutateAsync(); }}
+      >
+        <p className="text-sm text-slate-600">
+          {archiveTni?.status === 'PENDING'
+            ? 'This pending training need will be withdrawn and removed from the list. The record is retained for audit.'
+            : 'This training need will be archived and removed from the active list. The record is retained for audit.'}
+        </p>
+      </ConfirmDialog>
       </>
       )}
     </div>

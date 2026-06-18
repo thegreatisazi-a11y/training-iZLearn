@@ -4,7 +4,7 @@ import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
-import { createTNISchema, tniDecisionSchema, setTniRequirementSchema, applyTniMatrixSchema } from '@izlearn/shared';
+import { createTNISchema, updateTNISchema, tniDecisionSchema, setTniRequirementSchema, applyTniMatrixSchema } from '@izlearn/shared';
 
 const router = Router();
 router.use(authenticate);
@@ -16,6 +16,9 @@ router.post('/requirements', requirePermission('tni', 'edit'), validate(setTniRe
 router.post('/requirements/apply', requirePermission('tni', 'assign'), captureReasonIfPresent, validate(applyTniMatrixSchema), c.applyMatrix);
 router.get('/:id', requirePermission('tni', 'read'), c.get);
 router.post('/', requirePermission('tni', 'write'), validate(createTNISchema), c.create);
+// Edit a pending TNI's justification; withdraw/archive (soft-delete) a TNI.
+router.patch('/:id', requirePermission('tni', 'write'), validate(updateTNISchema), c.update);
+router.delete('/:id', requirePermission('tni', 'write'), c.archive);
 router.post('/:id/decision', requirePermission('tni', 'approve'), captureReasonIfPresent, validate(tniDecisionSchema), c.decide);
 
 export default router;

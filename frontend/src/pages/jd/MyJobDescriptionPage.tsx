@@ -9,7 +9,8 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input, Field } from '@/components/ui/input';
+import { Field, Textarea } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
 import { ESignatureModal } from '@/components/common/ESignatureModal';
@@ -30,11 +31,17 @@ interface MyJD {
   assignedAt?: string | null;
   acknowledgedAt?: string | null;
   acknowledgementText?: string | null;
+  acknowledgementComment?: string | null;
 }
+
+type Decision = 'APPROVE' | 'REJECT';
 
 export default function MyJobDescriptionPage() {
   const qc = useQueryClient();
-  const [typed, setTyped] = useState('');
+  // Acknowledge form: tick the statement (Approve) or pick Reject + a comment to send back.
+  const [accepted, setAccepted] = useState(false);
+  const [decision, setDecision] = useState<Decision>('APPROVE');
+  const [comment, setComment] = useState('');
   const [signOpen, setSignOpen] = useState(false);
   // B1: when the user holds more than one JD, this is the one they opened from the list.
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -54,11 +61,19 @@ export default function MyJobDescriptionPage() {
   const selected = jds.find((j) => j.id === selectedId) ?? (jds.length === 1 ? jds[0] : null);
 
   const ackMut = useMutation({
-    mutationFn: (sig: unknown) => svc.jds.acknowledge((selected as MyJD).id, { acknowledgementText: typed.trim(), signature: sig }),
+    mutationFn: (sig: unknown) =>
+      svc.jds.acknowledge((selected as MyJD).id, {
+        decision,
+        acknowledgementText: decision === 'APPROVE' ? JD_ACK_SENTENCE : undefined,
+        comment: comment.trim() || undefined,
+        signature: sig,
+      }),
     onSuccess: () => {
-      toast.success('Job Description acknowledged.');
+      toast.success(decision === 'APPROVE' ? 'Job Description acknowledged.' : 'Job Description returned to the assigner.');
       qc.invalidateQueries({ queryKey: ['my-jd-list'] });
-      setTyped('');
+      setAccepted(false);
+      setComment('');
+      setDecision('APPROVE');
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -124,7 +139,9 @@ export default function MyJobDescriptionPage() {
 
   const jd = selected;
   const acknowledged = !!jd.acknowledgedAt;
-  const exactMatch = typed.trim() === JD_ACK_SENTENCE;
+  const rejected = !acknowledged && jd.status === 'REJECTED';
+  // Approve requires the tick; Reject requires a comment to send back to the assigner.
+  const canSubmit = decision === 'APPROVE' ? accepted : comment.trim().length > 0;
 
   return (
     <div>
@@ -167,7 +184,7 @@ export default function MyJobDescriptionPage() {
 
       {!acknowledged && (
         <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Please read your Job Description below and acknowledge it. You must type the acknowledgement sentence and sign with your signature password.
+          Please read your Job Description below, then tick to accept (or choose Reject with a comment) and sign with your signature password.
         </div>
       )}
 
@@ -192,12 +209,34 @@ export default function MyJobDescriptionPage() {
         </Card>
       ) : (
         <Card>
-          <CardContent>
-            <Field label={`Type exactly: "${JD_ACK_SENTENCE}"`} required>
-              <Input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={JD_ACK_SENTENCE} />
+          <CardContent className="space-y-3">
+            {rejected && jd.acknowledgementComment && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                You returned this Job Description to the assigner — "{jd.acknowledgementComment}". They will review and re-assign.
+              </div>
+            )}
+            {/* Tick to accept (no typing) */}
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="mt-0.5" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} disabled={decision !== 'APPROVE'} />
+              <span>{JD_ACK_SENTENCE}</span>
+            </label>
+            {/* Decision dropdown: Approve / Reject */}
+            <Field label="Decision" required>
+              <Select
+                value={decision}
+                onChange={(e) => setDecision(e.target.value as Decision)}
+                options={[
+                  { value: 'APPROVE', label: 'Approve / Acknowledge' },
+                  { value: 'REJECT', label: 'Reject (send back to assigner)' },
+                ]}
+              />
             </Field>
-            <Button disabled={!exactMatch} onClick={() => setSignOpen(true)}>
-              Acknowledge &amp; Sign
+            {/* Comment — required when rejecting; sent back to the assigner. */}
+            <Field label={decision === 'REJECT' ? 'Comment (required — sent to the assigner)' : 'Comment (optional)'} required={decision === 'REJECT'}>
+              <Textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder={decision === 'REJECT' ? 'Why are you returning this Job Description?' : 'Optional note…'} />
+            </Field>
+            <Button disabled={!canSubmit} onClick={() => setSignOpen(true)}>
+              Submit
             </Button>
           </CardContent>
         </Card>
@@ -206,8 +245,8 @@ export default function MyJobDescriptionPage() {
       <ESignatureModal
         open={signOpen}
         onClose={() => setSignOpen(false)}
-        title="Sign to Acknowledge Job Description"
-        defaultMeaning="Acknowledged"
+        title={decision === 'REJECT' ? 'Sign to Return Job Description' : 'Sign to Acknowledge Job Description'}
+        defaultMeaning={decision === 'REJECT' ? 'Rejected' : 'Acknowledged'}
         hideMeaning
         onConfirm={async (sig) => {
           await ackMut.mutateAsync(sig);

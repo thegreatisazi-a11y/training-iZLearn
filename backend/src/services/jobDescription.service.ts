@@ -218,10 +218,29 @@ export async function assignFunctionalRole(userId: string, functionalRoleId: str
  */
 export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req: Request) {
   const jd = await getJD(jdId);
-  if (jd.userId !== req.user!.id) throw AppError.forbidden('You can only acknowledge your own Job Description.');
+  if (jd.userId !== req.user!.id) throw AppError.forbidden('You can only respond to your own Job Description.');
   if (jd.acknowledgedAt) throw AppError.conflict('This Job Description has already been acknowledged.');
-  if (input.acknowledgementText.trim() !== JD_ACK_SENTENCE) {
-    throw AppError.badRequest(`Please type the acknowledgement exactly: "${JD_ACK_SENTENCE}"`);
+
+  const decision = input.decision ?? 'APPROVE';
+  const comment = (input.comment ?? '').trim();
+  const assignerId = jd.assignedBy ?? jd.approvedBy ?? jd.createdBy;
+
+  // REJECT: the owner sends the JD back to the assigner with a required comment.
+  if (decision === 'REJECT') {
+    if (!comment) throw AppError.badRequest('Please add a comment explaining why you are rejecting the Job Description.');
+    const signatureId = await signFromRequest(req, 'JobDescription', jdId, 'Rejected');
+    auditContext.setActionOverride('REJECT');
+    const updated = await prisma.jobDescription.update({
+      where: { id: jdId },
+      data: { status: 'REJECTED', acknowledgementComment: comment, signatureId },
+    });
+    if (assignerId) await notifyJdDecision(assignerId, jd.title, `returned by the assignee — "${comment}"`);
+    return updated;
+  }
+
+  // APPROVE: the owner ticks the acknowledgement sentence.
+  if ((input.acknowledgementText ?? '').trim() !== JD_ACK_SENTENCE) {
+    throw AppError.badRequest('Please tick the acknowledgement statement before submitting.');
   }
   const signatureId = await signFromRequest(req, 'JobDescription', jdId, 'Acknowledged');
   auditContext.setActionOverride('ACKNOWLEDGE');
@@ -229,7 +248,8 @@ export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req
     where: { id: jdId },
     data: {
       acknowledgedAt: new Date(),
-      acknowledgementText: input.acknowledgementText.trim(),
+      acknowledgementText: (input.acknowledgementText ?? '').trim(),
+      acknowledgementComment: comment || null,
       acknowledgementSignatureId: signatureId,
     },
   });
