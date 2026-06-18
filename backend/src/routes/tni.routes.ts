@@ -19,6 +19,7 @@ router.post('/', requirePermission('tni', 'write'), validate(createTNISchema), c
 // Edit a pending TNI's justification; withdraw/archive (soft-delete) a TNI.
 router.patch('/:id', requirePermission('tni', 'write'), validate(updateTNISchema), c.update);
 router.delete('/:id', requirePermission('tni', 'write'), c.archive);
+router.post('/:id/restore', requirePermission('tni', 'write'), c.restore);
 router.post('/:id/decision', requirePermission('tni', 'approve'), captureReasonIfPresent, validate(tniDecisionSchema), c.decide);
 
 export default router;

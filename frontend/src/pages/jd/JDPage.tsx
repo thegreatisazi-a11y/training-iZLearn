@@ -68,7 +68,7 @@ export default function JDPage() {
   const [editing, setEditing] = useState<JD | null>(null);
   const [editForm, setEditForm] = useState({ title: '', content: '', departmentId: '', functionalRoleId: '' });
   const [editSignOpen, setEditSignOpen] = useState(false);
-  const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' } | null>(null);
+  const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' | 'REACTIVATE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
   const [viewing, setViewing] = useState<JD | null>(null);
 
@@ -288,6 +288,12 @@ export default function JDPage() {
           {canWrite && isJdActive(r) && (
             <Button size="sm" variant="danger" onClick={() => setSignTarget({ jd: r, action: 'OBSOLETE' })}>
               Deactivate
+            </Button>
+          )}
+          {/* Restore: reactivate a deactivated (obsolete) JD — e-signed. */}
+          {canWrite && r.status === 'OBSOLETE' && (
+            <Button size="sm" variant="outline" onClick={() => setSignTarget({ jd: r, action: 'REACTIVATE' })}>
+              Activate
             </Button>
           )}
         </div>
@@ -536,6 +542,8 @@ export default function JDPage() {
             ? 'Sign — Reject JD'
             : signTarget?.action === 'OBSOLETE'
             ? 'Sign — Deactivate JD'
+            : signTarget?.action === 'REACTIVATE'
+            ? 'Sign — Activate JD'
             : 'Sign — Approve JD'
         }
         onConfirm={async (sig) => {
@@ -544,6 +552,8 @@ export default function JDPage() {
               ? 'Job description approved'
               : signTarget!.action === 'REJECT'
               ? 'Job description rejected'
+              : signTarget!.action === 'REACTIVATE'
+              ? 'Job description reactivated'
               : 'Job description deactivated';
           await signMut.mutateAsync({ sig, reason });
         }}

@@ -16,10 +16,13 @@ import type {
 } from '@izlearn/shared';
 
 export async function listTNI(q: PaginationQuery & { userId?: string; status?: string }) {
+  // "ARCHIVED" is a pseudo-status: it lists withdrawn/archived (soft-deleted) TNIs so
+  // they can be restored. Otherwise only active (non-deleted) TNIs are shown.
+  const archived = q.status === 'ARCHIVED';
   const where: Prisma.TNIWhereInput = {
-    isDeleted: false,
+    isDeleted: archived,
     ...(q.userId ? { userId: q.userId } : {}),
-    ...(q.status ? { status: q.status as Prisma.EnumTNIStatusFilter['equals'] } : {}),
+    ...(q.status && !archived ? { status: q.status as Prisma.EnumTNIStatusFilter['equals'] } : {}),
   };
   const [rows, total] = await Promise.all([
     prisma.tNI.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
@@ -96,6 +99,13 @@ export async function updateTNI(id: string, input: UpdateTNIInput) {
 export async function archiveTNI(id: string) {
   await getTNI(id);
   return prisma.tNI.update({ where: { id }, data: { isDeleted: true } });
+}
+
+/** Restore a withdrawn/archived (soft-deleted) TNI back to the active list. */
+export async function restoreTNI(id: string) {
+  const tni = await prisma.tNI.findFirst({ where: { id } });
+  if (!tni) throw AppError.notFound('TNI not found');
+  return prisma.tNI.update({ where: { id }, data: { isDeleted: false } });
 }
 
 /**

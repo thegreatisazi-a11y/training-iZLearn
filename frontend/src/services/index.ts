@@ -192,6 +192,7 @@ export const svc = {
 
   tni: {
     ...createCrud('/tni'),
+    restore: (id: string) => data(api.post(`/tni/${id}/restore`, {})),
     decide: (id: string, body: unknown) => data(api.post(`/tni/${id}/decision`, body)),
     matrix: () => data(api.get('/tni/requirements/matrix')),
     setRequirement: (body: unknown) => data(api.post('/tni/requirements', body)),
