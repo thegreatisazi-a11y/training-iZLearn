@@ -614,6 +614,7 @@ model JobDescription {
   acknowledgedAt DateTime? // CR-50: when the user acknowledged their assigned JD
   acknowledgementText        String? // exact sentence the user typed when acknowledging (immutable)
   acknowledgementSignatureId String? // e-signature captured on acknowledgement
+  acknowledgementComment     String? // optional comment the owner sends back (esp. on reject)
   parentJdId   String? // previous version, for history chains
   isDeleted    Boolean   @default(false)
   createdAt    DateTime  @default(now())

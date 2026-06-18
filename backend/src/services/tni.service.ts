@@ -8,6 +8,7 @@ import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import type {
   CreateTNIInput,
+  UpdateTNIInput,
   TNIDecisionInput,
   SetTniRequirementInput,
   ApplyTniMatrixInput,
@@ -79,6 +80,22 @@ export async function createTNI(input: CreateTNIInput, identifiedBy: string) {
     ),
   );
   return { created: created.length, skipped: skip.size, items: created };
+}
+
+/** Edit a still-PENDING TNI's justification. Decided TNIs are part of the record. */
+export async function updateTNI(id: string, input: UpdateTNIInput) {
+  const tni = await getTNI(id);
+  if (tni.status !== 'PENDING') throw AppError.conflict('Only a pending TNI can be edited.');
+  return prisma.tNI.update({ where: { id }, data: { justification: input.justification } });
+}
+
+/**
+ * Withdraw (if pending) or archive (if decided) a TNI — a soft-delete that removes it
+ * from the active list while keeping the record. No hard delete.
+ */
+export async function archiveTNI(id: string) {
+  await getTNI(id);
+  return prisma.tNI.update({ where: { id }, data: { isDeleted: true } });
 }
 
 /**

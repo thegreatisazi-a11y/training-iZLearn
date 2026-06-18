@@ -772,8 +772,37 @@ export default function TopicDetailPage() {
             </div>
           )}
 
-          {/* CR-25 (D4): superseded files are NOT shown as a separate "Archived Materials"
-              workflow — old versions live only in the Version History tab. */}
+          {/* G3: when a file is replaced/superseded, the old version stays on this page
+              under "Previous Versions" (read-only) — the latest is the active version above,
+              the old one moves here / to Version History. */}
+          {archivedMaterials.length > 0 && (
+            <div className="mt-2">
+              <div className="mb-2 text-sm font-semibold uppercase text-slate-500">Previous Versions ({archivedMaterials.length})</div>
+              <p className="mb-2 text-xs text-slate-500">Superseded files. The current version is shown under Active Materials above; full detail is also in the Version History tab.</p>
+              <DataTable<Material>
+                columns={[
+                  { key: 'originalFileName', header: 'File', render: (r) => <span className="text-slate-700">{r.originalFileName}</span> },
+                  { key: 'fileType', header: 'Type', render: (r) => <span className="uppercase">{r.fileType}</span> },
+                  { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
+                  { key: 'changeReason', header: 'Reason', render: (r) => r.changeReason || '—' },
+                  { key: 'archivedAt', header: 'Superseded', render: (r) => (r.archivedAt ? formatDateTime(r.archivedAt) : '—') },
+                  {
+                    key: 'actions',
+                    header: '',
+                    className: 'text-right',
+                    render: (r) => (
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setViewingMaterial(r)} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Eye className="h-4 w-4" /> View</button>
+                        <button type="button" onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Download className="h-4 w-4" /> Download</button>
+                      </div>
+                    ),
+                  },
+                ]}
+                rows={archivedMaterials}
+                emptyText="No previous versions."
+              />
+            </div>
+          )}
 
           {/* Hidden input for per-file Replace/Update (4.1) */}
           <input

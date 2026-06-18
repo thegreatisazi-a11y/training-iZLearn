@@ -19,6 +19,12 @@ export const createTNISchema = z
   });
 export type CreateTNIInput = z.infer<typeof createTNISchema>;
 
+/** Edit a still-PENDING TNI's justification. */
+export const updateTNISchema = z.object({
+  justification: nonEmptyString,
+});
+export type UpdateTNIInput = z.infer<typeof updateTNISchema>;
+
 /** Approve / reject a TNI — APPROVE activates the training assignment (e-signed). */
 export const tniDecisionSchema = z.object({
   decision: z.enum(['APPROVE', 'REJECT']),
