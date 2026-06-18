@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Save } from 'lucide-react';
+import {
+  Save, ClipboardCheck, Lock, Database, Network, KeyRound, Mail, Building2, Upload,
+  ShieldCheck, Clock, Bell, SlidersHorizontal, type LucideIcon,
+} from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { RichTextEditor } from '@/components/common/RichTextEditor';
@@ -178,9 +181,86 @@ const GROUP_LABELS: Record<string, string> = {
   assessment: 'Assessments',
 };
 
+const GROUP_ICONS: Record<string, LucideIcon> = {
+  password: KeyRound,
+  session: Clock,
+  auth: Lock,
+  reminder: Bell,
+  org: Building2,
+  system: SlidersHorizontal,
+  ldap: Network,
+  smtp: Mail,
+  backup: Database,
+  upload: Upload,
+  security: ShieldCheck,
+  assessment: ClipboardCheck,
+};
+
+function prefixOf(key: string) {
+  return key.split('.')[0];
+}
 function groupOf(key: string) {
-  const prefix = key.split('.')[0];
-  return GROUP_LABELS[prefix] ?? prefix;
+  return GROUP_LABELS[prefixOf(key)] ?? prefixOf(key);
+}
+
+/** Turn "assessment.default_question_count" into a friendly "Default Question Count". */
+function friendlyLabel(key: string): string {
+  const tail = key.includes('.') ? key.slice(key.indexOf('.') + 1) : key;
+  return tail
+    .replace(/[._]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Small on/off switch matching the Roles permission editor. */
+function Toggle({ on, disabled, onClick }: { on: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onClick}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${on ? 'bg-primary' : 'bg-slate-300'}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  );
+}
+
+/** One configuration entry: friendly label + description + key, with a typed control
+ *  (toggle for true/false, number input for numerics, text otherwise). */
+function SettingField({ item, value, disabled, onChange }: { item: ConfigItem; value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const v = value ?? '';
+  const isBool = v === 'true' || v === 'false';
+  const isNum = !isBool && v.trim() !== '' && /^-?\d+(\.\d+)?$/.test(v.trim());
+  return (
+    <div className="border-t border-slate-100 pt-3 first:border-0 first:pt-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-slate-800">{friendlyLabel(item.key)}</div>
+          {item.description && <div className="mt-0.5 text-xs text-slate-500">{item.description}</div>}
+          <div className="mt-0.5 font-mono text-[10px] text-slate-400">{item.key}</div>
+        </div>
+        {isBool && (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className={`text-xs font-medium ${v === 'true' ? 'text-green-700' : 'text-slate-400'}`}>{v === 'true' ? 'On' : 'Off'}</span>
+            <Toggle on={v === 'true'} disabled={disabled} onClick={() => onChange(v === 'true' ? 'false' : 'true')} />
+          </div>
+        )}
+      </div>
+      {!isBool && (
+        <Input
+          type={isNum ? 'number' : 'text'}
+          className="mt-2"
+          value={v}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
 }
 
 export default function SystemConfigPage() {
@@ -265,26 +345,35 @@ export default function SystemConfigPage() {
       {tab === 'notifications' ? (
         <NotificationSettingsTab canWrite={canWrite} />
       ) : (
-        <div className="grid gap-5 md:grid-cols-2">
-          {groups.map(([group, items]) => (
-            <Card key={group}>
-              <CardHeader>
-                <CardTitle>{group}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {items.map((item) => (
-                  <Field key={item.key} label={item.key}>
-                    <Input
-                      value={values[item.key] ?? ''}
-                      disabled={!canWrite}
-                      onChange={(e) => setValues((v) => ({ ...v, [item.key]: e.target.value }))}
-                    />
-                    {item.description && <p className="mt-1 text-xs text-slate-500">{item.description}</p>}
-                  </Field>
-                ))}
-              </CardContent>
-            </Card>
-          ))}
+        <div className="grid items-start gap-5 md:grid-cols-2">
+          {groups.map(([group, items]) => {
+            const Icon = GROUP_ICONS[prefixOf(items[0].key)] ?? SlidersHorizontal;
+            return (
+              <Card key={group}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    {group}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {items.map((item) => (
+                      <SettingField
+                        key={item.key}
+                        item={item}
+                        value={values[item.key] ?? ''}
+                        disabled={!canWrite}
+                        onChange={(val) => setValues((v) => ({ ...v, [item.key]: val }))}
+                      />
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
