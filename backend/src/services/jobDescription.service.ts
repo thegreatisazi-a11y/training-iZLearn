@@ -101,12 +101,19 @@ export async function listMyJDs(userId: string) {
     where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
     orderBy: [{ assignedAt: 'desc' }, { version: 'desc' }, { createdAt: 'desc' }],
   });
-  const assignerIds = Array.from(new Set(jds.map((j) => j.assignedBy).filter(Boolean) as string[]));
-  const people = assignerIds.length
-    ? await prisma.user.findMany({ where: { id: { in: assignerIds } }, select: { id: true, fullName: true } })
+  // B1: "Assigned by" = whoever assigned it; fall back to the approver, then the creator,
+  // so JDs that became APPROVED via the review flow (assignedBy unset) still show a name.
+  const assignerOf = (j: { assignedBy: string | null; approvedBy: string | null; createdBy: string }) =>
+    j.assignedBy ?? j.approvedBy ?? j.createdBy ?? null;
+  const ids = Array.from(new Set(jds.map(assignerOf).filter(Boolean) as string[]));
+  const people = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } })
     : [];
   const nameById = new Map(people.map((u) => [u.id, u.fullName]));
-  return jds.map((j) => ({ ...j, assignedByName: j.assignedBy ? nameById.get(j.assignedBy) ?? null : null }));
+  return jds.map((j) => {
+    const aid = assignerOf(j);
+    return { ...j, assignedByName: aid ? nameById.get(aid) ?? null : null };
+  });
 }
 
 /**

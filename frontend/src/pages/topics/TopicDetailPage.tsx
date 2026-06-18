@@ -179,15 +179,13 @@ export default function TopicDetailPage() {
   const qc = useQueryClient();
   const can = useAuthStore((s) => s.hasPermission);
   const canEdit = can('courseManagement', 'edit');
-  const canRevise = can('courseManagement', 'revise');
   const canArchive = can('courseManagement', 'archive');
   const canBundleEdit = can('bundleManagement', 'edit');
-  const canManage = canEdit || canRevise || canArchive || canBundleEdit;
+  const canManage = canEdit || canArchive || canBundleEdit;
   const canMaterialWrite = can('materialManagement', 'write');
   const canQuestionWrite = can('questionBank', 'write');
 
   const [tab, setTab] = useState('materials');
-  const [revising, setRevising] = useState(false);
   const [changingScore, setChangingScore] = useState(false);
   const [signScore, setSignScore] = useState(false);
   const [newScore, setNewScore] = useState('');
@@ -258,23 +256,6 @@ export default function TopicDetailPage() {
   const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
-
-  const reviseMut = useMutation({
-    mutationFn: (signature: ESignaturePayload) => {
-      const { reason, ...sig } = signature;
-      return svc.topics.revise(id, { reasonForChange: (reason ?? '').trim(), signature: sig });
-    },
-    onSuccess: (created) => {
-      toast.success('New version created — previous version moved to Archived/Obsolete');
-      qc.invalidateQueries({ queryKey: ['topics'] });
-      setRevising(false);
-      // Revise creates a NEW topic row; jump to it (this row is now archived).
-      const newId = (created as { id?: string } | null)?.id;
-      if (newId && newId !== id) navigate(`/topics/${newId}`);
-      else qc.invalidateQueries({ queryKey: ['topic', id] });
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
 
   const scoreMut = useMutation({
     mutationFn: (sig: ESignaturePayload) =>
@@ -653,11 +634,8 @@ export default function TopicDetailPage() {
                   <Layers className="h-4 w-4" /> Add to bundle(s)
                 </Button>
               )}
-              {canRevise && (
-                <Button variant="outline" onClick={() => setRevising(true)}>
-                  Revise (new version)
-                </Button>
-              )}
+              {/* G2: full-course "Revise (new version)" removed — Archive only; material/draft
+                  changes are published in place via "Publish changes" (no full-course clone). */}
               {canEdit && (
                 <Button
                   variant="outline"
@@ -685,7 +663,7 @@ export default function TopicDetailPage() {
             {stagedMaterials.length > 0 && `${stagedMaterials.length} material change(s) staged. `}
             These are <strong>not yet live</strong> — the published course is unchanged until you publish the changes.
           </span>
-          {canEdit && hasDraftMeta && (
+          {canEdit && (
             <Button size="sm" onClick={() => setPublishDraftOpen(true)}>Publish changes</Button>
           )}
         </div>
@@ -747,10 +725,10 @@ export default function TopicDetailPage() {
             </div>
           )}
 
-          {/* On a PUBLISHED topic, added/replaced files are STAGED until revise. */}
+          {/* On a PUBLISHED topic, added/attached files are STAGED until published. */}
           {canMaterialWrite && isPublished && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              This topic is published. New, replaced or attached files are held as <span className="font-medium">pending changes</span> and do not affect the live version. They go live only when you click <span className="font-medium">Revise (new version)</span>.
+              This topic is published. New or attached files are held as <span className="font-medium">pending changes</span> and do not affect the live version. They go live only when you click <span className="font-medium">Publish changes</span> (top of the page).
             </div>
           )}
 
@@ -764,7 +742,7 @@ export default function TopicDetailPage() {
           {stagedMaterials.length > 0 && (
             <div>
               <div className="mb-2 text-sm font-semibold uppercase text-amber-600">Pending Changes ({stagedMaterials.length})</div>
-              <p className="mb-2 text-xs text-slate-500">These files are staged and will be committed to a new version when you click “Revise (new version)”. Leaving this page does not commit them.</p>
+              <p className="mb-2 text-xs text-slate-500">These files are staged and go live when you click “Publish changes” (top of the page). Leaving this page does not commit them.</p>
               <DataTable<Material>
                 columns={[
                   { key: 'originalFileName', header: 'File', render: (r) => <span className="font-medium text-slate-800">{r.originalFileName}</span> },
@@ -868,14 +846,6 @@ export default function TopicDetailPage() {
           <DataTable<Question> columns={questionColumns} rows={(questions?.data ?? []) as unknown as Question[]} loading={qLoading} emptyText="No questions yet." />
         </div>
       )}
-
-      <ESignatureModal
-        open={revising}
-        onClose={() => setRevising(false)}
-        onConfirm={async (sig) => { await reviseMut.mutateAsync(sig); }}
-        title="Revise Topic — New Version (e-signature required)"
-        requireReason
-      />
 
       <ReasonForChangeDialog
         open={!!deletingMaterial}

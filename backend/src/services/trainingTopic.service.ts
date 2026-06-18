@@ -216,17 +216,29 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
 }
 
 /**
- * G4: promote a published topic's staged draft edits to the live record (and clear the
- * draft). Controlled — two-component e-signature; the caller confirms first. The live
- * version is unchanged until this runs, satisfying "published stays live until republish".
+ * G2/G4: promote a published topic's pending draft changes to the live record — both
+ * the staged metadata (draftMeta) AND any staged material files — then clear the draft.
+ * This replaces the old full-course "Revise (new version)" clone: the published course
+ * stays the same id and stays live; edits are applied in place only on this controlled,
+ * e-signed publish. The caller confirms first.
  */
 export async function publishDraftChanges(id: string, req: Request) {
   const topic = await getTopic(id);
   if (topic.status !== 'PUBLISHED') throw AppError.conflict('Only a published course can publish draft changes.');
-  if (!topic.draftMeta) throw AppError.badRequest('There are no pending draft changes to publish.');
+  const stagedCount = await prisma.trainingMaterial.count({ where: { topicId: id, isDeleted: false, isStaged: true } });
+  if (!topic.draftMeta && stagedCount === 0) throw AppError.badRequest('There are no pending draft changes to publish.');
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
-  const draft = topic.draftMeta as Prisma.TrainingTopicUpdateInput;
+
+  // G3/G4: promote staged material files to live (they become the current version).
+  if (stagedCount > 0) {
+    await prisma.trainingMaterial.updateMany({
+      where: { topicId: id, isDeleted: false, isStaged: true },
+      data: { isStaged: false, isCurrentVersion: true },
+    });
+  }
+
+  const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
   return prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
 }
 
