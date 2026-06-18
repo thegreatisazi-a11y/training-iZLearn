@@ -30,6 +30,7 @@ interface JD {
   content: string;
   userId?: string;
   userFullName?: string | null;
+  departmentId?: string | null;
   functionalRoleId?: string | null;
   approvedBy?: string | null;
   approvedByName?: string | null;
@@ -515,6 +516,8 @@ export default function JDPage() {
             </div>
             <dl className="grid grid-cols-2 gap-2 text-slate-700">
               <div><dt className="text-xs text-slate-400">User</dt><dd>{viewing.userFullName ?? (viewing.userId ? userName.get(viewing.userId) ?? '—' : '—')}</dd></div>
+              <div><dt className="text-xs text-slate-400">Functional Role</dt><dd>{viewing.functionalRoleId ? frName.get(viewing.functionalRoleId) ?? '—' : '—'}</dd></div>
+              <div><dt className="text-xs text-slate-400">Department</dt><dd>{viewing.departmentId ? deptName.get(viewing.departmentId) ?? '—' : 'Any'}</dd></div>
               <div><dt className="text-xs text-slate-400">Approved By</dt><dd>{viewing.approvedByName ?? '—'}</dd></div>
               <div><dt className="text-xs text-slate-400">Acknowledged</dt><dd>{viewing.acknowledgedAt ? `Yes · ${formatDate(viewing.acknowledgedAt)}` : 'Pending'}</dd></div>
             </dl>
