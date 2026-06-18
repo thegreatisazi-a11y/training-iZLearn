@@ -14,6 +14,8 @@ export type CreateJDInput = z.infer<typeof createJDSchema>;
 export const updateJDSchema = z.object({
   title: nonEmptyString.optional(),
   content: nonEmptyString.optional(),
+  departmentId: uuid.optional(),
+  functionalRoleId: uuid.optional(),
   reasonForChange,
 });
 export type UpdateJDInput = z.infer<typeof updateJDSchema>;

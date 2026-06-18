@@ -16,7 +16,7 @@ export const create = asyncHandler(async (req, res) =>
 );
 
 export const update = asyncHandler(async (req, res) =>
-  sendSuccess(res, await svc.updateJD(req.params.id, req.body), 'Job description updated'),
+  sendSuccess(res, await svc.updateJD(req.params.id, req.body, req), 'Job description updated'),
 );
 
 export const transition = asyncHandler(async (req, res) =>

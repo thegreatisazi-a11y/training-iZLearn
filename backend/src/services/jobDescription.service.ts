@@ -262,17 +262,22 @@ export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req
  * locked. Editing an already-acknowledged JD clears the acknowledgement so the user
  * must re-acknowledge the revised responsibilities.
  */
-export async function updateJD(id: string, input: UpdateJDInput) {
+export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
   const jd = await getJD(id);
   if (jd.status === 'OBSOLETE') {
     throw AppError.conflict('An obsolete job description cannot be edited.');
   }
+  // "Ask approval before change" — every JD edit is a controlled, e-signed action.
+  await signFromRequest(req, 'JobDescription', id, 'Approved');
+  auditContext.setActionOverride('UPDATE');
   const reAcknowledge = jd.status === 'APPROVED' && !!jd.acknowledgedAt;
   return prisma.jobDescription.update({
     where: { id },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.content !== undefined ? { content: DOMPurify.sanitize(input.content) } : {}),
+      ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
+      ...(input.functionalRoleId !== undefined ? { functionalRoleId: input.functionalRoleId } : {}),
       ...(reAcknowledge ? { acknowledgedAt: null, acknowledgementText: null, acknowledgementSignatureId: null } : {}),
     },
   });

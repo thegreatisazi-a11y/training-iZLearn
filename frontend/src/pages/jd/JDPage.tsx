@@ -6,7 +6,6 @@ import DOMPurify from 'dompurify';
 import { printHtml, printTable, escapeHtml } from '@/lib/print';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
-import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
 import { SearchableSelect, type SearchOption } from '@/components/common/SearchableSelect';
 import { SignatureBlock, SignatureRecord } from '@/components/common/SignatureBlock';
@@ -66,8 +65,8 @@ export default function JDPage() {
   const [assignForm, setAssignForm] = useState(emptyAssign);
   const [assignSignOpen, setAssignSignOpen] = useState(false);
   const [editing, setEditing] = useState<JD | null>(null);
-  const [editForm, setEditForm] = useState({ title: '', content: '' });
-  const [editReasonOpen, setEditReasonOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ title: '', content: '', departmentId: '', functionalRoleId: '' });
+  const [editSignOpen, setEditSignOpen] = useState(false);
   const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
   const [viewing, setViewing] = useState<JD | null>(null);
@@ -149,11 +148,22 @@ export default function JDPage() {
   });
 
   const editMut = useMutation({
-    mutationFn: (reason: string) => svc.jds.update(editing!.id, { ...editForm, reasonForChange: reason }),
+    mutationFn: (signature: ESignaturePayload) => {
+      const { reason, ...sig } = signature;
+      return svc.jds.update(editing!.id, {
+        title: editForm.title,
+        content: editForm.content,
+        departmentId: editForm.departmentId || undefined,
+        functionalRoleId: editForm.functionalRoleId || undefined,
+        reasonForChange: (reason ?? '').trim(),
+        signature: sig,
+      });
+    },
     onSuccess: () => {
       toast.success('Job description updated');
       qc.invalidateQueries({ queryKey: ['jds'] });
       setEditing(null);
+      setEditSignOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -252,7 +262,12 @@ export default function JDPage() {
               variant="outline"
               onClick={() => {
                 setEditing(r);
-                setEditForm({ title: r.title, content: r.content });
+                setEditForm({
+                  title: r.title,
+                  content: r.content,
+                  departmentId: r.departmentId ?? '',
+                  functionalRoleId: r.functionalRoleId ?? '',
+                });
               }}
             >
               Edit
@@ -426,39 +441,51 @@ export default function JDPage() {
         }}
       />
 
-      {/* Edit JD (reason for change) */}
+      {/* Edit JD — full assigned details; e-signed (approval before change). */}
       <Dialog
         open={!!editing}
         onClose={() => setEditing(null)}
         className="max-w-2xl"
-        title="Edit Job Description"
+        title={`Edit Job Description${editing?.userFullName ? ` — ${editing.userFullName}` : ''}`}
         footer={
           <>
             <Button variant="outline" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.title || !editForm.content} onClick={() => setEditReasonOpen(true)}>
-              Continue
+            <Button disabled={!editForm.title || !editForm.content} onClick={() => setEditSignOpen(true)}>
+              Save &amp; Sign…
             </Button>
           </>
         }
       >
+        {editing?.acknowledgedAt && (
+          <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            This JD was already acknowledged. Saving a change will clear the acknowledgement so the user must acknowledge the updated version again.
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Department">
+            <Select options={[{ value: '', label: 'Any department' }, ...departmentOptions]} value={editForm.departmentId} onChange={(e) => setEditForm({ ...editForm, departmentId: e.target.value })} />
+          </Field>
+          <Field label="Functional Role">
+            <Select options={[{ value: '', label: 'None' }, ...functionalRoleOptions]} value={editForm.functionalRoleId} onChange={(e) => setEditForm({ ...editForm, functionalRoleId: e.target.value })} />
+          </Field>
+        </div>
         <Field label="Title">
           <Input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
         </Field>
         <Field label="Content">
-          <Textarea className="min-h-[160px]" value={editForm.content} onChange={(e) => setEditForm({ ...editForm, content: e.target.value })} />
+          <Textarea className="min-h-[200px]" value={editForm.content} onChange={(e) => setEditForm({ ...editForm, content: e.target.value })} />
         </Field>
       </Dialog>
 
-      <ReasonForChangeDialog
-        open={editReasonOpen}
-        onClose={() => setEditReasonOpen(false)}
-        onConfirm={async (r) => {
-          await editMut.mutateAsync(r);
-          setEditReasonOpen(false);
-        }}
-        title="Edit JD — Reason for Change"
+      <ESignatureModal
+        open={editSignOpen}
+        onClose={() => setEditSignOpen(false)}
+        title="Sign — Edit Job Description"
+        defaultMeaning="Approved"
+        requireReason
+        onConfirm={async (sig) => { await editMut.mutateAsync(sig); }}
       />
 
       {/* I6: JD templates are created/edited on a full-page designer route (RichTextEditor + Word/Excel import). */}

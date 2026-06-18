@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -128,12 +129,15 @@ function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: ()
 export default function ProfilePage() {
   const me = useAuthStore((s) => s.user);
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<'training' | 'certificates' | 'documents'>('training');
   const [sigOpen, setSigOpen] = useState(false);
 
+  // Use the enriched "my trainings" endpoint so topic name/number resolve (the raw
+  // assignments list returns ids only — which showed "—" in the Topic column).
   const training = useQuery({
     queryKey: ['profile', 'training', me?.id],
-    queryFn: () => svc.assignments.list({ userId: me?.id, pageSize: 200 }),
+    queryFn: () => svc.assignments.mine() as unknown as Promise<Assignment[]>,
     enabled: !!me?.id && tab === 'training',
   });
   const certificates = useQuery({
@@ -165,7 +169,19 @@ export default function ProfilePage() {
   });
 
   const trainingColumns: Column<Assignment>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle || r.topicNumber || '—' },
+    {
+      key: 'topic',
+      header: 'Topic',
+      // Link to the course topic; falls back to plain text if there's no topic id.
+      render: (r) =>
+        r.topicId ? (
+          <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/topics/${r.topicId}`)}>
+            {r.topicTitle || r.topicNumber || r.topicId}
+          </button>
+        ) : (
+          r.topicTitle || r.topicNumber || '—'
+        ),
+    },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
   ];
@@ -243,7 +259,7 @@ export default function ProfilePage() {
       </div>
 
       {tab === 'training' && (
-        <DataTable columns={trainingColumns} rows={(training.data?.data ?? []) as unknown as Assignment[]} loading={training.isLoading} emptyText="No training assigned." />
+        <DataTable columns={trainingColumns} rows={(training.data ?? []) as unknown as Assignment[]} loading={training.isLoading} emptyText="No training assigned." />
       )}
 
       {tab === 'certificates' && (
