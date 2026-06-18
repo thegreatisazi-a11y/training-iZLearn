@@ -846,6 +846,18 @@ model SystemConfig {
   updatedAt   DateTime @updatedAt
 }
 
+/// Per-notification settings (Module 10) — lets admins enable/disable each templated
+/// email and override its subject/body per the notification catalog. A missing row =
+/// system default (enabled, default template).
+model NotificationSetting {
+  emailType String   @id @map("_id") // matches EmailType / NotificationType
+  enabled   Boolean  @default(true)
+  subject   String? // optional subject override (may use {{variables}})
+  bodyHtml  String? // optional body HTML override (may use {{variables}})
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
 // ============================================================
 // Master Data Configuration (UR-102/103)
 // ============================================================
