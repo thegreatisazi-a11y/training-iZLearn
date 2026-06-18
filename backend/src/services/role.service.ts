@@ -86,9 +86,11 @@ export async function updateRole(id: string, input: UpdateRoleInput, req: Reques
   // No-op rule: if nothing actually changes, do NOT sign, write, or audit.
   const normalizedNew = input.permissions !== undefined ? normalizePermissions(input.permissions) : undefined;
   const permsChanged = normalizedNew !== undefined && stableStringify(normalizedNew) !== stableStringify(existing.permissions);
+  // E1: role name is now editable from the Edit dialog (controlled, e-signed).
+  const nameChanged = input.roleName !== undefined && input.roleName.trim() !== existing.roleName;
   const descChanged = input.description !== undefined && (input.description ?? null) !== (existing.description ?? null);
   const activeChanged = input.isActive !== undefined && input.isActive !== existing.isActive;
-  if (!permsChanged && !descChanged && !activeChanged) {
+  if (!permsChanged && !nameChanged && !descChanged && !activeChanged) {
     return existing;
   }
 
@@ -101,6 +103,7 @@ export async function updateRole(id: string, input: UpdateRoleInput, req: Reques
   return prisma.role.update({
     where: { id },
     data: {
+      ...(nameChanged ? { roleName: input.roleName!.trim() } : {}),
       ...(descChanged ? { description: input.description } : {}),
       ...(permsChanged ? { permissions: normalizedNew } : {}),
       ...(activeChanged ? { isActive: input.isActive } : {}),

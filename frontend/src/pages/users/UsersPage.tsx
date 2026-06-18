@@ -46,6 +46,7 @@ const EMPTY_EDIT_FORM = {
   supervisorId: '',
   designationId: '',
   designationIds: [] as string[],
+  roleIds: [] as string[],
   userType: 'INTERNAL',
 };
 
@@ -185,7 +186,6 @@ export default function UsersPage() {
   const canApprove = hasPermission('userManagement', 'approve');
   const canPrint = hasPermission('userManagement', 'print');
   const canExport = hasPermission('userManagement', 'export');
-  const canAssignJd = hasPermission('jobDescription', 'assign'); // D-JD1: assign Functional Role + JD
   const canAct = canWrite || canApprove;
 
   const [page, setPage] = useState(1);
@@ -211,14 +211,9 @@ export default function UsersPage() {
   // Phase 3: edit details (write, e-signed per CR-14) + change roles (approve, e-signed)
   const [editUser, setEditUser] = useState<UserRow | null>(null);
   const [editForm, setEditForm] = useState(EMPTY_EDIT_FORM);
+  // D4: original RBAC roles of the user being edited, to detect a role change (approve-gated).
+  const [editOrigRoleIds, setEditOrigRoleIds] = useState<string[]>([]);
   const [editEsignOpen, setEditEsignOpen] = useState(false);
-  const [rolesUser, setRolesUser] = useState<UserRow | null>(null);
-  const [rolesSelected, setRolesSelected] = useState<string[]>([]);
-  const [rolesEsignOpen, setRolesEsignOpen] = useState(false);
-  // D-JD1 / CR-50: assign a Functional Role → auto-assigns the approved JD.
-  const [frUser, setFrUser] = useState<UserRow | null>(null);
-  const [frSelected, setFrSelected] = useState('');
-  const [frEsignOpen, setFrEsignOpen] = useState(false);
 
   const includeInactive = statusFilter !== 'active';
   const params = { page, pageSize: 50, search: search || undefined, includeInactive };
@@ -300,25 +295,10 @@ export default function UsersPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // D4: RBAC role changes stay an approve-gated, PERMISSION_CHANGE-audited action even
+  // though they are now edited from inside the Edit User dialog.
   const changeRolesMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.users.changeRoles(id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('Roles updated.');
-      setRolesEsignOpen(false);
-      setRolesUser(null);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const assignFrMutation = useMutation({
-    mutationFn: (body: unknown) => svc.jds.assignFunctionalRole(body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('Functional role assigned and Job Description created.');
-      setFrEsignOpen(false);
-      setFrUser(null);
-    },
     onError: (e) => toast.error(apiError(e)),
   });
 
@@ -326,7 +306,7 @@ export default function UsersPage() {
     setEsign({ open: true, action, user, reason: '' });
   }
 
-  function openEditUser(row: UserRow) {
+  async function openEditUser(row: UserRow) {
     setEditUser(row);
     setEditForm({
       fullName: row.fullName ?? '',
@@ -336,16 +316,16 @@ export default function UsersPage() {
       supervisorId: row.supervisorId ?? '',
       designationId: row.designationId ?? '',
       designationIds: row.designationIds ?? (row.designationId ? [row.designationId] : []),
+      roleIds: [],
       userType: row.userType ?? 'INTERNAL',
     });
-  }
-
-  async function openChangeRoles(row: UserRow) {
-    setRolesUser(row);
-    setRolesSelected([]);
+    setEditOrigRoleIds([]);
+    // D4: load the user's current RBAC roles so they can be edited here (approvers only).
     try {
       const full = (await svc.users.get(row.id)) as { roleIds?: string[] };
-      setRolesSelected(full.roleIds ?? []);
+      const current = full.roleIds ?? [];
+      setEditForm((f) => ({ ...f, roleIds: current }));
+      setEditOrigRoleIds(current);
     } catch {
       /* leave empty if detail fetch fails */
     }
@@ -434,16 +414,6 @@ export default function UsersPage() {
           {canWrite && (
             <Button size="sm" variant="outline" onClick={() => openEditUser(r)}>
               Edit
-            </Button>
-          )}
-          {canApprove && (
-            <Button size="sm" variant="outline" onClick={() => openChangeRoles(r)}>
-              Change Roles
-            </Button>
-          )}
-          {canAssignJd && (
-            <Button size="sm" variant="outline" onClick={() => { setFrUser(r); setFrSelected(r.designationId ?? ''); }}>
-              Functional Role
             </Button>
           )}
           {canAct &&
@@ -660,6 +630,17 @@ export default function UsersPage() {
             placeholder="Search functional roles…"
           />
         </Field>
+        {/* D3/D4: RBAC roles edited here (approvers only) using the same searchable multi-select. */}
+        {canApprove && (
+          <Field label="Roles" hint="Changing roles is a controlled action and is recorded as a permission change.">
+            <MultiSelect
+              options={((roles.data?.data ?? []) as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }))}
+              value={editForm.roleIds}
+              onChange={(roleIds) => setEditForm((f) => ({ ...f, roleIds }))}
+              placeholder="Search roles…"
+            />
+          </Field>
+        )}
       </Dialog>
 
       {/* CR-14: editing a user requires a two-component e-signature (reason collected here too). */}
@@ -685,98 +666,23 @@ export default function UsersPage() {
               signature: sig,
             },
           });
+          // D4: if an approver changed the RBAC roles, apply that as a separate
+          // approve-gated, PERMISSION_CHANGE-audited action, reusing the same signature.
+          const rolesChanged =
+            canApprove &&
+            editForm.roleIds.length > 0 &&
+            (editForm.roleIds.length !== editOrigRoleIds.length ||
+              editForm.roleIds.some((id) => !editOrigRoleIds.includes(id)));
+          if (rolesChanged) {
+            await changeRolesMutation.mutateAsync({
+              id: editUser.id,
+              body: { roleIds: editForm.roleIds, reasonForChange: reason, signature: sig },
+            });
+          }
         }}
         title={`Edit User — ${editUser?.fullName ?? ''}`}
         defaultMeaning="Approved"
         requireReason
-      />
-
-      {/* Phase 3: Change roles (userManagement:approve, e-signed) */}
-      <Dialog
-        open={!!rolesUser}
-        onClose={() => setRolesUser(null)}
-        title={`Change Roles — ${rolesUser?.fullName ?? ''}`}
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setRolesUser(null)}>
-              Cancel
-            </Button>
-            <Button disabled={rolesSelected.length === 0} onClick={() => setRolesEsignOpen(true)}>
-              Sign &amp; Save…
-            </Button>
-          </>
-        }
-      >
-        <Field label="Roles (select one or more)">
-          <select
-            multiple
-            className="iz-input h-40"
-            value={rolesSelected}
-            onChange={(e) => setRolesSelected(Array.from(e.target.selectedOptions, (o) => o.value))}
-          >
-            {((roles.data?.data ?? []) as { id: string; roleName: string }[]).map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.roleName}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <p className="text-xs text-slate-500">A role change is a controlled action and requires your electronic signature.</p>
-      </Dialog>
-
-      <ESignatureModal
-        open={rolesEsignOpen}
-        onClose={() => setRolesEsignOpen(false)}
-        onConfirm={async (signature) => {
-          if (!rolesUser) return;
-          const reason = (signature.reason ?? '').trim();
-          if (reason.length < 5) throw new Error('A reason of at least 5 characters is required.');
-          const { reason: _r, ...sig } = signature;
-          await changeRolesMutation.mutateAsync({
-            id: rolesUser.id,
-            body: { roleIds: rolesSelected, reasonForChange: reason, signature: sig },
-          });
-        }}
-        title={`Change Roles — ${rolesUser?.fullName ?? ''}`}
-        defaultMeaning="Approved"
-        requireReason
-      />
-
-      {/* D-JD1 / CR-50: assign Functional Role → auto-assign approved JD (e-signed). */}
-      <Dialog
-        open={!!frUser}
-        onClose={() => setFrUser(null)}
-        title={`Functional Role & JD — ${frUser?.fullName ?? ''}`}
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setFrUser(null)}>Cancel</Button>
-            <Button disabled={!frSelected} onClick={() => setFrEsignOpen(true)}>Assign &amp; Sign…</Button>
-          </>
-        }
-      >
-        <Field label="Functional Role" required>
-          <Select
-            placeholder="Select functional role…"
-            options={((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }))}
-            value={frSelected}
-            onChange={(e) => setFrSelected(e.target.value)}
-          />
-        </Field>
-        <p className="text-xs text-slate-500">
-          Assigning a functional role auto-assigns the approved Job Description template for that role and notifies the user to acknowledge it. If no template exists yet, the role is set but no JD is created.
-        </p>
-      </Dialog>
-
-      <ESignatureModal
-        open={frEsignOpen}
-        onClose={() => setFrEsignOpen(false)}
-        onConfirm={async (signature) => {
-          if (!frUser) return;
-          const { reason: _r, ...sig } = signature;
-          await assignFrMutation.mutateAsync({ userId: frUser.id, functionalRoleId: frSelected, signature: sig });
-        }}
-        title={`Assign Functional Role — ${frUser?.fullName ?? ''}`}
-        defaultMeaning="Approved"
       />
 
       <Dialog
@@ -867,18 +773,12 @@ export default function UsersPage() {
           />
         </Field>
         <Field label="Roles" required error={form.roleIds.length === 0 ? 'At least one role is required.' : undefined}>
-          <select
-            multiple
-            className="iz-input h-32"
+          <MultiSelect
+            options={((roles.data?.data ?? []) as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }))}
             value={form.roleIds}
-            onChange={(e) => setForm((f) => ({ ...f, roleIds: Array.from(e.target.selectedOptions, (o) => o.value) }))}
-          >
-            {((roles.data?.data ?? []) as { id: string; roleName: string }[]).map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.roleName}
-              </option>
-            ))}
-          </select>
+            onChange={(roleIds) => setForm((f) => ({ ...f, roleIds }))}
+            placeholder="Search roles…"
+          />
         </Field>
         <Field label="Remarks">
           <Textarea value={form.remarks} onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))} />

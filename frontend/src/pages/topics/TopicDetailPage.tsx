@@ -541,7 +541,8 @@ export default function TopicDetailPage() {
               <RefreshCw className="h-4 w-4" /> Replace / Update
             </button>
           )}
-          {canMaterialWrite && (
+          {/* G5/H1: material delete is only allowed before the course is published. */}
+          {canMaterialWrite && String(t.status) !== 'PUBLISHED' && (
             <button className="text-red-600 hover:text-red-700" onClick={() => setDeletingMaterial(r)} aria-label="Delete">
               <Trash2 className="h-4 w-4" />
             </button>
@@ -654,6 +655,15 @@ export default function TopicDetailPage() {
           )
         }
       />
+
+      {/* G4: a published course shows a "draft changes pending" banner when material
+          changes are staged — the live version stays unchanged until they are republished. */}
+      {isPublished && stagedMaterials.length > 0 && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <strong>Draft changes pending.</strong> {stagedMaterials.length} material change(s) are staged and are <strong>not yet live</strong>.
+          The published course remains unchanged until you republish — see the “Pending Changes” section below.
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card>

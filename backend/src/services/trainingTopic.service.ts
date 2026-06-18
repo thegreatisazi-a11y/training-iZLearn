@@ -481,10 +481,17 @@ export async function reviseTopic(id: string, req: Request) {
   return created;
 }
 
-/** Soft-delete (the only kind of delete in izLearn). */
+/**
+ * Soft-delete (the only kind of delete in izLearn).
+ * G5: a course may be deleted only BEFORE it is published. Once published it is part
+ * of the controlled record and can only be archived (a separate, e-signed lifecycle
+ * action), never deleted.
+ */
 export async function deactivateTopic(id: string) {
-  await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false } }).then((t) => {
-    if (!t) throw AppError.notFound('Training topic not found');
-  });
+  const topic = await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false }, select: { status: true } });
+  if (!topic) throw AppError.notFound('Training topic not found');
+  if (topic.status === 'PUBLISHED') {
+    throw AppError.conflict('A published course cannot be deleted. Archive it instead.');
+  }
   return prisma.trainingTopic.update({ where: { id }, data: { isActive: false, isDeleted: true } });
 }

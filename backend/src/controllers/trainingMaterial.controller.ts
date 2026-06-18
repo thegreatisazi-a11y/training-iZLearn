@@ -119,6 +119,13 @@ export const completeView = asyncHandler(async (req: Request, res: Response) => 
   sendSuccess(res, await viewSvc.completeMaterialView(req.user!.id, req.params.id), 'Material marked as read');
 });
 
+// A4: auto-save reading progress (elapsed seconds) so the session can resume.
+export const saveViewProgress = asyncHandler(async (req: Request, res: Response) => {
+  const elapsedSeconds = Number((req.body as { elapsedSeconds?: unknown }).elapsedSeconds);
+  if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) throw AppError.badRequest('elapsedSeconds must be a non-negative number.');
+  sendSuccess(res, await viewSvc.saveMaterialProgress(req.user!.id, req.params.id, elapsedSeconds), 'Reading progress saved');
+});
+
 export const readingStatus = asyncHandler(async (req: Request, res: Response) => {
   const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : '';
   if (!topicId) throw AppError.badRequest('topicId is required.');

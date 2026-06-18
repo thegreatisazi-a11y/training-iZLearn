@@ -6,6 +6,7 @@ import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
+import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { MultiSelect } from '@/components/common/MultiSelect';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -87,6 +88,8 @@ export default function TopicsPage() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [archiveTarget, setArchiveTarget] = useState<Topic | null>(null);
+  // G5: a course may be deleted only before it is published.
+  const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['topics', { page, search, statusFilter }],
@@ -140,6 +143,17 @@ export default function TopicsPage() {
       toast.success('Topic archived — moved to Archived/Obsolete and hidden from active courses');
       qc.invalidateQueries({ queryKey: ['topics'] });
       setArchiveTarget(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // G5: delete a not-yet-published course (controlled — reason for change required).
+  const deleteMut = useMutation({
+    mutationFn: (reason: string) => svc.topics.remove(deleteTarget!.id, reason),
+    onSuccess: () => {
+      toast.success('Course deleted');
+      qc.invalidateQueries({ queryKey: ['topics'] });
+      setDeleteTarget(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -218,6 +232,10 @@ export default function TopicsPage() {
             {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/topics/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
             {/* G2/G3: full-course "Revise" removed — Archive only; material changes auto-version. */}
             {canArchive && !isArchived && <Button size="sm" variant="ghost" title="Archive" onClick={() => setArchiveTarget(r)}><Archive className="h-4 w-4" /></Button>}
+            {/* G5: delete is allowed only before the course is published. */}
+            {canArchive && (r.status === 'DRAFT' || r.status === 'UNDER_REVIEW') && (
+              <Button size="sm" variant="ghost" title="Delete" onClick={() => setDeleteTarget(r)}><Trash2 className="h-4 w-4 text-red-600" /></Button>
+            )}
             {canExport && <Button size="sm" variant="ghost" title="Export (CSV)" onClick={() => exportOne(r)}><Download className="h-4 w-4" /></Button>}
             {canPrint && <Button size="sm" variant="ghost" title="Print" onClick={() => printOne(r)}><Printer className="h-4 w-4" /></Button>}
           </div>
@@ -284,6 +302,14 @@ export default function TopicsPage() {
         title={`Archive "${archiveTarget?.title ?? ''}" (e-signature required)`}
         defaultMeaning="Performed"
         requireReason
+      />
+
+      {/* G5: delete a not-yet-published course (reason for change required) */}
+      <ReasonForChangeDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async (reason) => { await deleteMut.mutateAsync(reason); }}
+        title={`Delete "${deleteTarget?.title ?? ''}"`}
       />
 
       <Dialog

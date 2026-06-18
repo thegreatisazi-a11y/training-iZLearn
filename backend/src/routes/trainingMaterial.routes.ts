@@ -21,6 +21,8 @@ router.get('/:id', requirePermission('materialManagement', 'read'), c.get);
 router.get('/:id/download', requirePermission('materialManagement', 'read'), c.download);
 router.post('/:id/view/start', requirePermission('materialManagement', 'read'), c.startView);
 router.post('/:id/view/complete', requirePermission('materialManagement', 'read'), c.completeView);
+// A4: auto-save reading progress so a session can resume where the user left off.
+router.post('/:id/view/progress', requirePermission('materialManagement', 'read'), c.saveViewProgress);
 // Set per-material required reading time (course managers / material managers).
 router.patch('/:id', requirePermission('materialManagement', 'write'), c.setViewTime);
 // topicId is supplied in the multipart body alongside the file.

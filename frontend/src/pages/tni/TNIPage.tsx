@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Check, Search } from 'lucide-react';
+import { Plus, Check, Search, ChevronDown, ChevronRight } from 'lucide-react';
 import { tniStatus } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
+import { MultiSelect } from '@/components/common/MultiSelect';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Field } from '@/components/ui/input';
@@ -30,7 +31,7 @@ interface MatrixData {
 }
 
 const STATUS_OPTIONS = tniStatus.options.map((s) => ({ value: s, label: s }));
-const emptyForm = { userId: '', topicId: '', justification: '' };
+const emptyForm = { userId: '', topicIds: [] as string[], justification: '' };
 
 /**
  * CR-46/47/49: the role × topic requirement matrix. Toggling a cell saves the
@@ -45,6 +46,8 @@ function RequirementMatrix() {
   const [assignLater, setAssignLater] = useState(false);
   const [activateOn, setActivateOn] = useState('');
   const [q, setQ] = useState('');
+  // J1: permission-style layout — each topic is an expandable card of per-role toggles.
+  const [openTopics, setOpenTopics] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
 
   type Cell = { designationId: string; topicId: string; isRequired: boolean };
@@ -84,10 +87,8 @@ function RequirementMatrix() {
   const topics = term
     ? data.topics.filter((t) => t.title.toLowerCase().includes(term) || (t.topicNumber || t.topicCode || '').toLowerCase().includes(term))
     : data.topics;
-  const colCount = (d: string) => data.topics.filter((t) => isRequired(d, t.id)).length;
   const rowCount = (t: string) => data.designations.filter((d) => isRequired(d.id, t)).length;
   const busy = setMut.isPending || bulkMut.isPending;
-  const setColumn = (designationId: string, on: boolean) => bulkMut.mutate(topics.map((t) => ({ designationId, topicId: t.id, isRequired: on })));
   const setRow = (topicId: string, on: boolean) => bulkMut.mutate(data.designations.map((d) => ({ designationId: d.id, topicId, isRequired: on })));
 
   const noRoles = data.designations.length === 0;
@@ -142,71 +143,66 @@ function RequirementMatrix() {
       ) : noTopics ? (
         <p className="py-8 text-center text-sm text-slate-500">No published topics yet.</p>
       ) : (
-        <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200">
-          <table className="border-separate border-spacing-0 text-sm">
-            <thead>
-              <tr>
-                <th className="sticky left-0 top-0 z-30 min-w-[260px] border-b border-r border-slate-200 bg-slate-100 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  SOP / Topic
-                </th>
-                {data.designations.map((d) => (
-                  <th key={d.id} className="sticky top-0 z-20 min-w-[120px] border-b border-slate-200 bg-slate-100 px-3 py-2 text-center align-bottom">
-                    <div className="text-xs font-semibold text-slate-700">{d.displayName}</div>
-                    <div className="mt-0.5 text-[10px] font-normal text-slate-400">{colCount(d.id)}/{data.topics.length} required</div>
+        // J1: permission-matrix style — each topic is a card; expand to toggle Required per functional role.
+        <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
+          {topics.map((t) => {
+            const isOpen = openTopics.has(t.id);
+            const count = rowCount(t.id);
+            return (
+              <div key={t.id} className="rounded-lg border border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    onClick={() => setOpenTopics((s) => { const n = new Set(s); n.has(t.id) ? n.delete(t.id) : n.add(t.id); return n; })}
+                  >
+                    {isOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-800">{t.title}</span>
+                      <span className="block font-mono text-[10px] text-slate-400">{t.topicNumber || t.topicCode}</span>
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge tone={count > 0 ? 'APPROVED' : 'default'}>{count}/{data.designations.length} roles</Badge>
                     {canEdit && (
-                      <div className="mt-1 flex justify-center gap-1 text-[10px]">
-                        <button type="button" disabled={busy} className="rounded px-1 text-primary hover:underline disabled:opacity-50" onClick={() => setColumn(d.id, true)}>All</button>
+                      <div className="flex gap-1 text-[10px]">
+                        <button type="button" disabled={busy} className="rounded px-1 text-primary hover:underline disabled:opacity-50" onClick={() => setRow(t.id, true)}>All</button>
                         <span className="text-slate-300">|</span>
-                        <button type="button" disabled={busy} className="rounded px-1 text-slate-400 hover:underline disabled:opacity-50" onClick={() => setColumn(d.id, false)}>None</button>
+                        <button type="button" disabled={busy} className="rounded px-1 text-slate-400 hover:underline disabled:opacity-50" onClick={() => setRow(t.id, false)}>None</button>
                       </div>
                     )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {topics.map((t, i) => (
-                <tr key={t.id} className={i % 2 ? 'bg-slate-50/40' : 'bg-white'}>
-                  <td className={`sticky left-0 z-10 border-b border-r border-slate-200 px-3 py-2 ${i % 2 ? 'bg-slate-50' : 'bg-white'}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-slate-800">{t.title}</div>
-                        <div className="font-mono text-[10px] text-slate-400">{t.topicNumber || t.topicCode} · {rowCount(t.id)} role(s)</div>
-                      </div>
-                      {canEdit && (
-                        <div className="flex shrink-0 gap-1 text-[10px]">
-                          <button type="button" disabled={busy} className="text-primary hover:underline disabled:opacity-50" onClick={() => setRow(t.id, true)}>All</button>
-                          <span className="text-slate-300">|</span>
-                          <button type="button" disabled={busy} className="text-slate-400 hover:underline disabled:opacity-50" onClick={() => setRow(t.id, false)}>None</button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                  {data.designations.map((d) => {
-                    const req = isRequired(d.id, t.id);
-                    return (
-                      <td key={d.id} className="border-b border-slate-100 px-3 py-2 text-center">
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="grid gap-2 border-t border-slate-100 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {data.designations.map((d) => {
+                      const req = isRequired(d.id, t.id);
+                      return (
                         <button
+                          key={d.id}
                           type="button"
                           disabled={!canEdit || busy}
-                          title={req ? 'Required — click to clear' : 'Not required — click to set required'}
                           onClick={() => setMut.mutate({ designationId: d.id, topicId: t.id, isRequired: !req })}
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors disabled:opacity-60 ${
-                            req ? 'border-green-300 bg-green-100 text-green-700 hover:bg-green-200' : 'border-slate-200 bg-slate-50 text-slate-300 hover:bg-slate-100'
+                          className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-60 ${
+                            req ? 'border-green-300 bg-green-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'
                           }`}
+                          title={req ? 'Required — click to clear' : 'Not required — click to set required'}
                         >
-                          {req ? <Check className="h-4 w-4" /> : <span className="text-xs">–</span>}
+                          <span className="min-w-0 truncate text-sm text-slate-700">{d.displayName}</span>
+                          <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border ${req ? 'border-green-300 bg-green-100 text-green-700' : 'border-slate-200 bg-white text-slate-300'}`}>
+                            {req ? <Check className="h-4 w-4" /> : <span className="text-xs">–</span>}
+                          </span>
                         </button>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-              {topics.length === 0 && (
-                <tr><td colSpan={data.designations.length + 1} className="px-3 py-6 text-center text-sm text-slate-400">No topics match "{q}".</td></tr>
-              )}
-            </tbody>
-          </table>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {topics.length === 0 && (
+            <p className="px-3 py-6 text-center text-sm text-slate-400">No topics match "{q}".</p>
+          )}
         </div>
       )}
 
@@ -247,9 +243,10 @@ export default function TNIPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: () => svc.tni.create(form),
-    onSuccess: () => {
-      toast.success('TNI submitted');
+    mutationFn: () => svc.tni.create({ userId: form.userId, topicIds: form.topicIds, justification: form.justification }),
+    onSuccess: (r) => {
+      const count = (r as { created?: number })?.created ?? 0;
+      toast.success(count > 1 ? `${count} training needs submitted` : 'TNI submitted');
       qc.invalidateQueries({ queryKey: ['tni'] });
       setCreating(false);
       setForm(emptyForm);
@@ -373,7 +370,7 @@ export default function TNIPage() {
             <Button variant="outline" onClick={() => setCreating(false)} disabled={createMut.isPending}>
               Cancel
             </Button>
-            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.userId || !form.topicId || !form.justification}>
+            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.userId || form.topicIds.length === 0 || !form.justification}>
               {createMut.isPending ? 'Saving…' : 'Submit'}
             </Button>
           </>
@@ -382,8 +379,9 @@ export default function TNIPage() {
         <Field label="User">
           <Select options={userOptions} placeholder="Select user…" value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} />
         </Field>
-        <Field label="Topic">
-          <Select options={topicOptions} placeholder="Select topic…" value={form.topicId} onChange={(e) => setForm({ ...form, topicId: e.target.value })} />
+        {/* J2: multiple topics — one TNI row is created per selected topic. */}
+        <Field label="Topics">
+          <MultiSelect options={topicOptions} value={form.topicIds} onChange={(topicIds) => setForm({ ...form, topicIds })} placeholder="Search topics…" />
         </Field>
         <Field label="Justification">
           <Textarea value={form.justification} onChange={(e) => setForm({ ...form, justification: e.target.value })} placeholder="Why is this training required?" />

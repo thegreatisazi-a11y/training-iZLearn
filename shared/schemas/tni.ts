@@ -1,11 +1,22 @@
 import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
 
-export const createTNISchema = z.object({
-  userId: uuid,
-  topicId: uuid,
-  justification: nonEmptyString,
-});
+/**
+ * J2: a New TNI may name several topics for one user. It is stored as one TNI row
+ * per (user, topic). `topicIds` is the multi-select; `topicId` is accepted for
+ * backward compatibility (older single-topic callers).
+ */
+export const createTNISchema = z
+  .object({
+    userId: uuid,
+    topicIds: z.array(uuid).min(1).optional(),
+    topicId: uuid.optional(),
+    justification: nonEmptyString,
+  })
+  .refine((v) => (v.topicIds && v.topicIds.length > 0) || !!v.topicId, {
+    message: 'Select at least one topic.',
+    path: ['topicIds'],
+  });
 export type CreateTNIInput = z.infer<typeof createTNISchema>;
 
 /** Approve / reject a TNI — APPROVE activates the training assignment (e-signed). */

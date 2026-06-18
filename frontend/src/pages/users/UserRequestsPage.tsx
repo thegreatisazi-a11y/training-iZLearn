@@ -19,6 +19,8 @@ interface RequestRow {
   userType: string;
   status: string;
   createdAt?: string;
+  decidedByName?: string | null;
+  decidedAt?: string | null;
 }
 
 type Decision = 'APPROVE' | 'REJECT';
@@ -65,8 +67,8 @@ export default function UserRequestsPage() {
     { key: 'createdAt', header: 'Requested', render: (r) => formatDateTime(r.createdAt) },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     {
-      key: 'actions',
-      header: 'Actions',
+      key: 'authorizedBy',
+      header: 'Authorized by',
       render: (r) =>
         canApprove && r.status === 'PENDING_APPROVAL' ? (
           <div className="flex gap-1">
@@ -76,6 +78,11 @@ export default function UserRequestsPage() {
             <Button size="sm" variant="danger" onClick={() => setDecision({ open: true, kind: 'REJECT', req: r })}>
               Reject
             </Button>
+          </div>
+        ) : r.decidedByName ? (
+          <div className="text-sm">
+            <div className="font-medium text-slate-700">{r.decidedByName}</div>
+            {r.decidedAt && <div className="text-xs text-slate-400">{formatDateTime(r.decidedAt)}</div>}
           </div>
         ) : (
           '—'

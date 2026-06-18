@@ -251,6 +251,9 @@ export default function RolesPage() {
 
   const [editRole, setEditRole] = useState<RoleRow | null>(null);
   const [editMatrix, setEditMatrix] = useState<PermMatrix>(buildEmptyMatrix());
+  // E1: role identity (name/description) is editable from the same Edit dialog.
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
   const [reason, setReason] = useState('');
 
   const [viewRole, setViewRole] = useState<RoleRow | null>(null);
@@ -307,7 +310,10 @@ export default function RolesPage() {
         signature,
       });
     } else if (signState.kind === 'edit') {
-      await updateMutation.mutateAsync({ id: signState.id, body: { permissions: editMatrix, reasonForChange: signState.reason, signature } });
+      await updateMutation.mutateAsync({
+        id: signState.id,
+        body: { roleName: editName.trim(), description: editDesc.trim() || undefined, permissions: editMatrix, reasonForChange: signState.reason, signature },
+      });
     } else {
       await toggleMutation.mutateAsync({ id: signState.id, body: { isActive: signState.isActive, reasonForChange: signState.reason, signature } });
     }
@@ -317,12 +323,18 @@ export default function RolesPage() {
   function openEdit(role: RoleRow) {
     setEditRole(role);
     setEditMatrix(matrixFromRole(role.permissions));
+    setEditName(role.roleName);
+    setEditDesc(role.description ?? '');
     setReason('');
   }
 
   const allRows = (data?.data ?? []) as unknown as RoleRow[];
   const rows = statusFilter === 'inactive' ? allRows.filter((r) => !r.isActive) : allRows;
-  const editChanged = !!editRole && stableStringify(editMatrix) !== stableStringify(matrixFromRole(editRole.permissions));
+  const editChanged =
+    !!editRole &&
+    (stableStringify(editMatrix) !== stableStringify(matrixFromRole(editRole.permissions)) ||
+      editName.trim() !== editRole.roleName ||
+      (editDesc.trim() || '') !== (editRole.description ?? ''));
 
   function printMatrix(role: RoleRow) {
     const body =
@@ -356,7 +368,7 @@ export default function RolesPage() {
           </Button>
           {canWrite && (
             <>
-              <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit Permissions</Button>
+              <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit</Button>
               <Button size="sm" variant={r.isActive ? 'outline' : 'primary'} onClick={() => { setToggleTarget(r); setToggleReason(''); }}>
                 {r.isActive ? 'Set Inactive' : 'Set Active'}
               </Button>
@@ -437,7 +449,7 @@ export default function RolesPage() {
           <>
             <Button variant="outline" onClick={() => setEditRole(null)} disabled={updateMutation.isPending}>Cancel</Button>
             <Button
-              disabled={updateMutation.isPending || reason.trim().length < 5 || !editChanged}
+              disabled={updateMutation.isPending || reason.trim().length < 5 || !editChanged || !editName.trim()}
               onClick={() => editRole && setSignState({ kind: 'edit', id: editRole.id, reason: reason.trim() })}
             >
               {updateMutation.isPending ? 'Saving…' : !editChanged ? 'No changes' : 'Save & Sign'}
@@ -445,9 +457,18 @@ export default function RolesPage() {
           </>
         }
       >
+        <div className="mb-3 grid gap-3 md:grid-cols-2">
+          <Field label="Role Name" required>
+            <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+          </Field>
+          <Field label="Description">
+            <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Module &amp; Action Permissions</div>
         <PermissionEditor value={editMatrix} onChange={setEditMatrix} />
         <Field label="Reason for change" required>
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why these permissions are being changed…" />
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why this role is being changed…" />
         </Field>
       </Dialog>
 

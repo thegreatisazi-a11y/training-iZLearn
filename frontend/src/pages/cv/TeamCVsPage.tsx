@@ -9,14 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
+import { CvDocument } from '@/components/common/CvDocument';
 import { svc } from '@/services';
 import { printHtml, printTable } from '@/lib/print';
-
-// #4: "English — R/W/U" (only the abilities that are set).
-function langLabel(l: LanguageItem): string {
-  const caps = [l.read && 'R', l.write && 'W', l.understand && 'U'].filter(Boolean).join('/');
-  return l.language ? `${l.language}${caps ? ` — ${caps}` : ''}` : '';
-}
 
 interface TeamRow {
   id: string;
@@ -181,35 +176,8 @@ export default function TeamCVsPage() {
         ) : !cvData?.cv ? (
           <p className="text-sm text-slate-500">This user has not created a CV yet.</p>
         ) : (
-          <div className="space-y-3 text-sm text-slate-700">
-            <p>
-              <span className="text-slate-500">Languages:</span>{' '}
-              {(cvData.cv.languages ?? []).filter((l) => l.language).length
-                ? (cvData.cv.languages ?? []).filter((l) => l.language).map(langLabel).join('; ')
-                : cvData.cv.languagesKnown || '—'}
-            </p>
-            <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">Qualifications</div>
-              <ul className="list-disc pl-5">
-                {(cvData.cv.qualifications ?? []).map((q, i) => (
-                  <li key={i}>{[q.year, q.degree, q.specialization, q.institute].filter(Boolean).join(' · ') || '—'}</li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">Current Role</div>
-              <p>{cvData.cv.currentRole || '—'}</p>
-              <p className="text-slate-600">{cvData.cv.currentResponsibilities}</p>
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">Previous Positions</div>
-              <ul className="list-disc pl-5">
-                {(cvData.cv.experience ?? []).map((e, i) => (
-                  <li key={i}>{[e.organisation, e.role, `${e.tenureFrom ?? ''}–${e.tenureTo ?? ''}`].filter(Boolean).join(' · ')}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          // C2: render the same formatted, read-only CV layout used on "My CV".
+          <CvDocument header={cvData.header} cv={cvData.cv} />
         )}
       </Dialog>
     </div>

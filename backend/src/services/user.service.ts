@@ -187,7 +187,7 @@ export async function listRequests(q: PaginationQuery) {
     isDeleted: false,
     ...(q.search ? { fullName: { contains: q.search, mode: 'insensitive' } } : {}),
   };
-  const [data, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.userCreationRequest.findMany({
       where,
       skip: (q.page - 1) * q.pageSize,
@@ -196,6 +196,13 @@ export async function listRequests(q: PaginationQuery) {
     }),
     prisma.userCreationRequest.count({ where }),
   ]);
+  // D5: resolve the deciding user's id → name so the list can show who authorized each request.
+  const deciderIds = Array.from(new Set(rows.map((r) => r.decidedBy).filter((id): id is string => !!id)));
+  const deciders = deciderIds.length
+    ? await prisma.user.findMany({ where: { id: { in: deciderIds } }, select: { id: true, fullName: true } })
+    : [];
+  const deciderName = new Map(deciders.map((u) => [u.id, u.fullName]));
+  const data = rows.map((r) => ({ ...r, decidedByName: r.decidedBy ? deciderName.get(r.decidedBy) ?? null : null }));
   return { data, total, page: q.page, pageSize: q.pageSize };
 }
 

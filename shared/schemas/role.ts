@@ -37,6 +37,7 @@ export const createRoleSchema = z.object({
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;
 
 export const updateRoleSchema = z.object({
+  roleName: nonEmptyString.optional(),
   description: optionalString,
   permissions: permissionMatrix.optional(),
   isActive: z.boolean().optional(),

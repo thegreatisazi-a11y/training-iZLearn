@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileText, Printer } from 'lucide-react';
+import { CheckCircle2, FileText, Printer, ChevronLeft } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { printHtml, escapeHtml } from '@/lib/print';
 import { useAuthStore } from '@/store/authStore';
 import { JD_ACK_SENTENCE } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable, type Column } from '@/components/common/DataTable';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input, Field } from '@/components/ui/input';
@@ -25,6 +26,7 @@ interface MyJD {
   departmentId: string;
   functionalRoleId?: string | null;
   assignedBy?: string | null;
+  assignedByName?: string | null;
   assignedAt?: string | null;
   acknowledgedAt?: string | null;
   acknowledgementText?: string | null;
@@ -34,6 +36,8 @@ export default function MyJobDescriptionPage() {
   const qc = useQueryClient();
   const [typed, setTyped] = useState('');
   const [signOpen, setSignOpen] = useState(false);
+  // B1: when the user holds more than one JD, this is the one they opened from the list.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const userName = useAuthStore((s) => s.user?.fullName);
 
   const printMyJD = (j: MyJD) => {
@@ -44,22 +48,24 @@ export default function MyJobDescriptionPage() {
     );
   };
 
-  const { data, isLoading } = useQuery({ queryKey: ['my-jd'], queryFn: () => svc.jds.mine() as unknown as Promise<MyJD | null> });
+  const { data, isLoading } = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<MyJD[]> });
+  const jds = (data ?? []) as MyJD[];
+  // Auto-select when there is exactly one JD; otherwise the list is shown first.
+  const selected = jds.find((j) => j.id === selectedId) ?? (jds.length === 1 ? jds[0] : null);
 
   const ackMut = useMutation({
-    mutationFn: (sig: unknown) => svc.jds.acknowledge((data as MyJD).id, { acknowledgementText: typed.trim(), signature: sig }),
+    mutationFn: (sig: unknown) => svc.jds.acknowledge((selected as MyJD).id, { acknowledgementText: typed.trim(), signature: sig }),
     onSuccess: () => {
       toast.success('Job Description acknowledged.');
-      qc.invalidateQueries({ queryKey: ['my-jd'] });
+      qc.invalidateQueries({ queryKey: ['my-jd-list'] });
       setTyped('');
     },
     onError: (e) => toast.error(apiError(e)),
   });
 
   if (isLoading) return <PageLoader />;
-  const jd = data as MyJD | null;
 
-  if (!jd) {
+  if (!jds.length) {
     return (
       <div>
         <PageHeader title="My Job Description" />
@@ -74,6 +80,49 @@ export default function MyJobDescriptionPage() {
     );
   }
 
+  // B1: list view when there is more than one JD and none is currently open.
+  if (!selected) {
+    const columns: Column<MyJD>[] = [
+      {
+        key: 'title',
+        header: 'Job Description Name',
+        render: (j) => (
+          <button className="text-left font-medium text-primary hover:underline" onClick={() => setSelectedId(j.id)}>
+            {j.title}
+          </button>
+        ),
+      },
+      { key: 'assignedByName', header: 'Assigned by', render: (j) => j.assignedByName ?? '—' },
+      {
+        key: 'acknowledgedAt',
+        header: 'Acknowledged',
+        render: (j) => (j.acknowledgedAt ? <Badge tone="COMPLETED">Yes</Badge> : <Badge tone="PENDING">Pending</Badge>),
+      },
+      {
+        key: 'actions',
+        header: '',
+        className: 'text-right',
+        render: (j) => (
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setSelectedId(j.id)}>
+              View
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => printMyJD(j)}>
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+          </div>
+        ),
+      },
+    ];
+    return (
+      <div>
+        <PageHeader title="My Job Descriptions" description={`${jds.length} assigned`} />
+        <DataTable columns={columns} rows={jds} emptyText="No job descriptions." />
+      </div>
+    );
+  }
+
+  const jd = selected;
   const acknowledged = !!jd.acknowledgedAt;
   const exactMatch = typed.trim() === JD_ACK_SENTENCE;
 
@@ -83,9 +132,16 @@ export default function MyJobDescriptionPage() {
         title="My Job Description"
         description={jd.title}
         actions={
-          <Button variant="outline" onClick={() => printMyJD(jd)}>
-            <Printer className="h-4 w-4" /> Print
-          </Button>
+          <div className="flex gap-2">
+            {jds.length > 1 && (
+              <Button variant="outline" onClick={() => setSelectedId(null)}>
+                <ChevronLeft className="h-4 w-4" /> Back to list
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => printMyJD(jd)}>
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+          </div>
         }
       />
 
@@ -96,7 +152,8 @@ export default function MyJobDescriptionPage() {
             <div>
               <div className="font-semibold text-slate-800">{jd.title}</div>
               <div className="text-xs text-slate-500">
-                {jd.assignedAt ? `Assigned ${formatDateTime(jd.assignedAt)}` : 'Assigned'} · Status: {jd.status}
+                {jd.assignedAt ? `Assigned ${formatDateTime(jd.assignedAt)}` : 'Assigned'}
+                {jd.assignedByName ? ` by ${jd.assignedByName}` : ''} · Status: {jd.status}
               </div>
             </div>
           </div>
