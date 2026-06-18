@@ -13,6 +13,7 @@ export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.g
 export const create = asyncHandler(async (req, res) => sendCreated(res, await svc.createTNI(req.body, req.user!.id), 'TNI created'));
 export const update = asyncHandler(async (req, res) => sendSuccess(res, await svc.updateTNI(req.params.id, req.body), 'TNI updated'));
 export const archive = asyncHandler(async (req, res) => sendSuccess(res, await svc.archiveTNI(req.params.id), 'TNI removed'));
+export const restore = asyncHandler(async (req, res) => sendSuccess(res, await svc.restoreTNI(req.params.id), 'TNI restored'));
 export const decide = asyncHandler(async (req, res) => sendSuccess(res, await svc.decideTNI(req.params.id, req.body, req), 'TNI decision recorded'));
 
 // CR-46/47/49: requirement matrix.

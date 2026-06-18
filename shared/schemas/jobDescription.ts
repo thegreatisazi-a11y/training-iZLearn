@@ -20,9 +20,9 @@ export const updateJDSchema = z.object({
 });
 export type UpdateJDInput = z.infer<typeof updateJDSchema>;
 
-/** Move a JD through its lifecycle. APPROVED requires an e-signature. */
+/** Move a JD through its lifecycle. APPROVED / OBSOLETE / REACTIVATE require an e-signature. */
 export const jdTransitionSchema = z.object({
-  action: z.enum(['SUBMIT_FOR_REVIEW', 'APPROVE', 'REJECT', 'OBSOLETE']),
+  action: z.enum(['SUBMIT_FOR_REVIEW', 'APPROVE', 'REJECT', 'OBSOLETE', 'REACTIVATE']),
   remarks: z.string().optional(),
   reasonForChange: reasonForChange.optional(),
 });

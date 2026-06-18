@@ -63,10 +63,11 @@ export async function updateAnnouncement(id: string, input: UpdateAnnouncementIn
   });
 }
 
-/** Soft-delete (the only kind of delete in izLearn). */
+/** Deactivate (recoverable) — sets inactive but NOT deleted, so it can be reactivated
+ * via updateAnnouncement({ isActive: true }) and still appears under "include inactive". */
 export async function deactivateAnnouncement(id: string) {
   await getAnnouncement(id);
-  return prisma.announcement.update({ where: { id }, data: { isActive: false, isDeleted: true } });
+  return prisma.announcement.update({ where: { id }, data: { isActive: false } });
 }
 
 /**

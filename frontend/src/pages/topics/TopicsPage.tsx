@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Eye, Pencil, Archive, Download, Printer, Trash2 } from 'lucide-react';
+import { Plus, Eye, Pencil, Archive, Download, Printer, Trash2, RotateCcw } from 'lucide-react';
 import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -88,6 +88,8 @@ export default function TopicsPage() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [archiveTarget, setArchiveTarget] = useState<Topic | null>(null);
+  // Restore an archived course back to Draft (e-signed).
+  const [restoreTarget, setRestoreTarget] = useState<Topic | null>(null);
   // G5: a course may be deleted only before it is published.
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
 
@@ -143,6 +145,20 @@ export default function TopicsPage() {
       toast.success('Topic archived — moved to Archived/Obsolete and hidden from active courses');
       qc.invalidateQueries({ queryKey: ['topics'] });
       setArchiveTarget(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Restore an archived course → returns it to Draft (e-signed, reason captured).
+  const restoreMut = useMutation({
+    mutationFn: (signature: ESignaturePayload) => {
+      const { reason, ...sig } = signature;
+      return svc.topics.updateStatus(restoreTarget!.id, { status: 'DRAFT', reasonForChange: (reason ?? '').trim(), signature: sig });
+    },
+    onSuccess: () => {
+      toast.success('Course restored to Draft.');
+      qc.invalidateQueries({ queryKey: ['topics'] });
+      setRestoreTarget(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -232,6 +248,8 @@ export default function TopicsPage() {
             {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/topics/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
             {/* G2/G3: full-course "Revise" removed — Archive only; material changes auto-version. */}
             {canArchive && !isArchived && <Button size="sm" variant="ghost" title="Archive" onClick={() => setArchiveTarget(r)}><Archive className="h-4 w-4" /></Button>}
+            {/* Restore an archived course back to Draft. */}
+            {canArchive && isArchived && <Button size="sm" variant="ghost" title="Restore to Draft" onClick={() => setRestoreTarget(r)}><RotateCcw className="h-4 w-4" /></Button>}
             {/* G5: delete is allowed only before the course is published. */}
             {canArchive && (r.status === 'DRAFT' || r.status === 'UNDER_REVIEW') && (
               <Button size="sm" variant="ghost" title="Delete" onClick={() => setDeleteTarget(r)}><Trash2 className="h-4 w-4 text-red-600" /></Button>
@@ -300,6 +318,16 @@ export default function TopicsPage() {
         onClose={() => setArchiveTarget(null)}
         onConfirm={async (sig) => { await archiveMut.mutateAsync(sig); }}
         title={`Archive "${archiveTarget?.title ?? ''}" (e-signature required)`}
+        defaultMeaning="Performed"
+        requireReason
+      />
+
+      {/* Restore archived course → Draft (e-signature + reason) */}
+      <ESignatureModal
+        open={!!restoreTarget}
+        onClose={() => setRestoreTarget(null)}
+        onConfirm={async (sig) => { await restoreMut.mutateAsync(sig); }}
+        title={`Restore "${restoreTarget?.title ?? ''}" to Draft (e-signature required)`}
         defaultMeaning="Performed"
         requireReason
       />

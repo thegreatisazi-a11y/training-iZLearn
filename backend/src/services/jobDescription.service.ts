@@ -354,6 +354,18 @@ export async function transitionJD(id: string, input: JDTransitionInput, req: Re
       return updated;
     }
 
+    case 'REACTIVATE': {
+      // Restore a deactivated (obsolete) JD back to active/assigned — controlled, e-signed.
+      if (jd.status !== 'OBSOLETE') {
+        throw AppError.conflict('Only a deactivated job description can be reactivated.');
+      }
+      const signatureId = await signFromRequest(req, 'JobDescription', id, 'Approved');
+      auditContext.setActionOverride('UPDATE');
+      const updated = await prisma.jobDescription.update({ where: { id }, data: { status: 'APPROVED', signatureId } });
+      await notifyJdDecision(jd.userId, jd.title, 'reactivated');
+      return updated;
+    }
+
     default:
       throw AppError.badRequest('Unsupported job-description transition.');
   }

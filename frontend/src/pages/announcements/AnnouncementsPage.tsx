@@ -42,7 +42,8 @@ export default function AnnouncementsPage() {
 
   const feed = useQuery({ queryKey: ['announcements', 'feed'], queryFn: () => svc.announcements.feed() });
 
-  const params = { page, pageSize: 50 };
+  // Managers see active AND inactive announcements (so deactivated ones can be reactivated).
+  const params = { page, pageSize: 50, includeInactive: true };
   const manage = useQuery({
     queryKey: ['announcements', params],
     queryFn: () => svc.announcements.list(params),
@@ -77,6 +78,16 @@ export default function AnnouncementsPage() {
       qc.invalidateQueries({ queryKey: ['announcements'] });
       toast.success('Announcement deactivated.');
       setDeactivateRow(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Restore: reactivate a deactivated announcement.
+  const activateMutation = useMutation({
+    mutationFn: (id: string) => svc.announcements.update(id, { isActive: true, reasonForChange: 'Reactivated' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['announcements'] });
+      toast.success('Announcement reactivated.');
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -125,9 +136,13 @@ export default function AnnouncementsPage() {
           <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
             Edit
           </Button>
-          {r.isActive && (
+          {r.isActive ? (
             <Button size="sm" variant="danger" onClick={() => setDeactivateRow(r)}>
               Deactivate
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" disabled={activateMutation.isPending} onClick={() => activateMutation.mutate(r.id)}>
+              Activate
             </Button>
           )}
         </div>

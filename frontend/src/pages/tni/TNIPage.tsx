@@ -23,6 +23,7 @@ interface TNI {
   topicTitle?: string;
   justification: string;
   status: string;
+  isDeleted?: boolean;
 }
 
 interface MatrixData {
@@ -31,7 +32,7 @@ interface MatrixData {
   cells: { designationId: string; topicId: string; isRequired: boolean }[];
 }
 
-const STATUS_OPTIONS = tniStatus.options.map((s) => ({ value: s, label: s }));
+const STATUS_OPTIONS = [...tniStatus.options.map((s) => ({ value: s, label: s })), { value: 'ARCHIVED', label: 'Archived' }];
 const emptyForm = { userId: '', topicIds: [] as string[], justification: '' };
 
 /**
@@ -293,6 +294,15 @@ export default function TNIPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  const restoreMut = useMutation({
+    mutationFn: (tniId: string) => svc.tni.restore(tniId),
+    onSuccess: () => {
+      toast.success('TNI restored');
+      qc.invalidateQueries({ queryKey: ['tni'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
   const columns: Column<TNI>[] = [
     { key: 'user', header: 'User', render: (r) => <span className="font-medium text-slate-800">{r.userFullName ?? '—'}</span> },
     { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? '—' },
@@ -302,31 +312,41 @@ export default function TNIPage() {
       key: 'actions',
       header: '',
       className: 'text-right',
-      render: (r) => (
-        <div className="flex flex-wrap justify-end gap-2">
-          {canApprove && r.status === 'PENDING' && (
-            <>
-              <Button size="sm" onClick={() => { setDueDate(''); setDecision({ tni: r, type: 'APPROVE' }); }}>
-                Approve
+      render: (r) =>
+        r.isDeleted ? (
+          // Archived view: the only action is Restore (brings it back to the active list).
+          canWrite ? (
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={() => restoreMut.mutate(r.id)} disabled={restoreMut.isPending}>
+                Restore
               </Button>
-              <Button size="sm" variant="danger" onClick={() => { setDecision({ tni: r, type: 'REJECT' }); setSignOpen(true); }}>
-                Reject
+            </div>
+          ) : null
+        ) : (
+          <div className="flex flex-wrap justify-end gap-2">
+            {canApprove && r.status === 'PENDING' && (
+              <>
+                <Button size="sm" onClick={() => { setDueDate(''); setDecision({ tni: r, type: 'APPROVE' }); }}>
+                  Approve
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => { setDecision({ tni: r, type: 'REJECT' }); setSignOpen(true); }}>
+                  Reject
+                </Button>
+              </>
+            )}
+            {canWrite && r.status !== 'REJECTED' && (
+              <Button size="sm" variant="outline" onClick={() => { setEditTni(r); setEditJustification(r.justification ?? ''); }}>
+                Edit
               </Button>
-            </>
-          )}
-          {canWrite && r.status !== 'REJECTED' && (
-            <Button size="sm" variant="outline" onClick={() => { setEditTni(r); setEditJustification(r.justification ?? ''); }}>
-              Edit
-            </Button>
-          )}
-          {/* Withdraw a pending TNI; Archive a decided one — both soft-delete (record kept). */}
-          {canWrite && (
-            <Button size="sm" variant="outline" onClick={() => setArchiveTni(r)}>
-              {r.status === 'PENDING' ? 'Withdraw' : 'Archive'}
-            </Button>
-          )}
-        </div>
-      ),
+            )}
+            {/* Withdraw a pending TNI; Archive a decided one — both soft-delete (record kept). */}
+            {canWrite && (
+              <Button size="sm" variant="outline" onClick={() => setArchiveTni(r)}>
+                {r.status === 'PENDING' ? 'Withdraw' : 'Archive'}
+              </Button>
+            )}
+          </div>
+        ),
     },
   ];
 
@@ -445,7 +465,7 @@ export default function TNIPage() {
         onConfirm={async (sig) => { await decideMut.mutateAsync(sig); }}
       />
 
-      {/* Edit a pending TNI's justification */}
+      {/* Edit a TNI — full details: User + Topic shown (read-only context), Justification editable. */}
       <Dialog
         open={!!editTni}
         onClose={() => setEditTni(null)}
@@ -459,6 +479,11 @@ export default function TNIPage() {
           </>
         }
       >
+        <div className="mb-3 grid grid-cols-2 gap-3 text-sm">
+          <div><div className="text-xs text-slate-500">User</div><div className="font-medium text-slate-800">{editTni?.userFullName ?? '—'}</div></div>
+          <div><div className="text-xs text-slate-500">Topic</div><div className="font-medium text-slate-800">{editTni?.topicTitle ?? '—'}</div></div>
+          <div><div className="text-xs text-slate-500">Status</div><div><Badge tone={editTni?.status ?? 'default'}>{editTni?.status}</Badge></div></div>
+        </div>
         <Field label="Justification">
           <Textarea value={editJustification} onChange={(e) => setEditJustification(e.target.value)} />
         </Field>
