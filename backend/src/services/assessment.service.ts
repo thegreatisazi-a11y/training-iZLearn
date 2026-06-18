@@ -132,7 +132,8 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const rnd = topic.randomizeQuestions;
   const count = topic.questionLimit ?? (await getNumber('assessment.default_question_count', 10));
   const pool = await prisma.question.findMany({
-    where: { topicId, topicVersion: topic.currentVersion, isActive: true, isDeleted: false },
+    // G4: staged (draft) questions never enter a live assessment until published.
+    where: { topicId, topicVersion: topic.currentVersion, isActive: true, isDeleted: false, isStaged: false },
   });
   const mandatory = pool.filter((q) => q.isMandatory);
   const optionalPool = pool.filter((q) => !q.isMandatory);

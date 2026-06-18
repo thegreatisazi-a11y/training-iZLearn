@@ -299,6 +299,10 @@ model Question {
   explanation   String? // Shown to user after incorrect answer
   helpText      String? // CR-37: per-question hint, e.g. "multiple options can be selected"
   isMandatory   Boolean      @default(false)
+  // G4: a question added/edited on a PUBLISHED topic is staged (draft) and is NOT used
+  // in the live assessment until "Publish changes" promotes it.
+  isStaged            Boolean @default(false)
+  supersedesQuestionId String? // when a staged edit, the live question it replaces on publish
   isActive      Boolean      @default(true)
   isDeleted     Boolean      @default(false)
   createdAt     DateTime     @default(now())

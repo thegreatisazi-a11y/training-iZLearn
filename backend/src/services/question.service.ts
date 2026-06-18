@@ -45,6 +45,10 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       ? ((input.matchPairs ?? []) as Prisma.InputJsonValue)
       : (input.correctAnswer as Prisma.InputJsonValue);
 
+  // G4: on a PUBLISHED topic a new question is staged (draft) — it does not enter the
+  // live assessment until "Publish changes" promotes it.
+  const staged = topic.status === 'PUBLISHED';
+
   return prisma.question.create({
     data: {
       topicId: input.topicId,
@@ -56,6 +60,7 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       explanation: input.explanation ?? null,
       helpText: input.helpText ?? null,
       isMandatory: input.isMandatory,
+      isStaged: staged,
       createdBy,
     },
   });
@@ -95,9 +100,7 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput) {
   const typeChanged = input.questionType !== undefined && input.questionType !== existing.questionType;
   const optionsProvided = input.options !== undefined || input.matchPairs !== undefined;
   const rebuildOptions = typeChanged || optionsProvided;
-  return prisma.question.update({
-    where: { id },
-    data: {
+  const data = {
       ...(input.questionText !== undefined ? { questionText: input.questionText } : {}),
       ...(input.questionType !== undefined ? { questionType: input.questionType } : {}),
       ...(rebuildOptions
@@ -118,12 +121,49 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput) {
       ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
       ...(input.isMandatory !== undefined ? { isMandatory: input.isMandatory } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-    },
-  });
+  };
+
+  // G4: editing a LIVE question on a PUBLISHED topic does not mutate it in place — a
+  // staged copy is created that supersedes it when "Publish changes" is clicked. The
+  // live assessment is unchanged until then. (Editing an already-staged draft, or any
+  // question on a draft topic, updates in place.)
+  if (!existing.isStaged) {
+    const topic = await prisma.trainingTopic.findFirst({ where: { id: existing.topicId }, select: { status: true } });
+    if (topic?.status === 'PUBLISHED') {
+      return prisma.question.create({
+        data: {
+          topicId: existing.topicId,
+          topicVersion: existing.topicVersion,
+          questionText: (data.questionText as string) ?? existing.questionText,
+          questionType: (data.questionType as Prisma.QuestionCreateInput['questionType']) ?? existing.questionType,
+          options: 'options' in data ? (data.options as Prisma.InputJsonValue | null) : (existing.options as Prisma.InputJsonValue | null),
+          correctAnswer: ('correctAnswer' in data ? data.correctAnswer : existing.correctAnswer) as Prisma.InputJsonValue,
+          explanation: (data.explanation as string | undefined) ?? existing.explanation,
+          helpText: (data.helpText as string | undefined) ?? existing.helpText,
+          isMandatory: (data.isMandatory as boolean | undefined) ?? existing.isMandatory,
+          isStaged: true,
+          supersedesQuestionId: existing.id,
+          createdBy: existing.createdBy,
+        },
+      });
+    }
+  }
+
+  return prisma.question.update({ where: { id }, data });
 }
 
-/** Soft-delete (the only kind of delete in izLearn). */
+/**
+ * Soft-delete (the only kind of delete in izLearn). G4: a LIVE question on a PUBLISHED
+ * topic can't be removed in place (it would change the live assessment); deleting a
+ * staged draft question simply discards it.
+ */
 export async function deactivateQuestion(id: string) {
-  await getQuestion(id);
+  const q = await getQuestion(id);
+  if (!q.isStaged) {
+    const topic = await prisma.trainingTopic.findFirst({ where: { id: q.topicId }, select: { status: true } });
+    if (topic?.status === 'PUBLISHED') {
+      throw AppError.conflict('This question is part of the live published assessment and cannot be deleted. Unpublish the course to change its questions.');
+    }
+  }
   return prisma.question.update({ where: { id }, data: { isActive: false, isDeleted: true } });
 }

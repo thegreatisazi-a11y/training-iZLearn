@@ -225,16 +225,53 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
 export async function publishDraftChanges(id: string, req: Request) {
   const topic = await getTopic(id);
   if (topic.status !== 'PUBLISHED') throw AppError.conflict('Only a published course can publish draft changes.');
-  const stagedCount = await prisma.trainingMaterial.count({ where: { topicId: id, isDeleted: false, isStaged: true } });
-  if (!topic.draftMeta && stagedCount === 0) throw AppError.badRequest('There are no pending draft changes to publish.');
+  const [stagedCount, stagedQuestionCount] = await Promise.all([
+    prisma.trainingMaterial.count({ where: { topicId: id, isDeleted: false, isStaged: true } }),
+    prisma.question.count({ where: { topicId: id, isDeleted: false, isStaged: true } }),
+  ]);
+  if (!topic.draftMeta && stagedCount === 0 && stagedQuestionCount === 0) {
+    throw AppError.badRequest('There are no pending draft changes to publish.');
+  }
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
 
-  // G3/G4: promote staged material files to live (they become the current version).
+  // G3/G4: promote staged material files to live. A staged REPLACEMENT supersedes the
+  // file it replaces (old → obsolete/version-history); the staged file becomes current.
   if (stagedCount > 0) {
+    const staged = await prisma.trainingMaterial.findMany({
+      where: { topicId: id, isDeleted: false, isStaged: true },
+      select: { id: true, replacesMaterialId: true },
+    });
+    const replacedIds = staged.map((s) => s.replacesMaterialId).filter((v): v is string => !!v);
+    if (replacedIds.length) {
+      await prisma.trainingMaterial.updateMany({
+        where: { id: { in: replacedIds }, isDeleted: false },
+        data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: req.user!.id },
+      });
+    }
     await prisma.trainingMaterial.updateMany({
       where: { topicId: id, isDeleted: false, isStaged: true },
       data: { isStaged: false, isCurrentVersion: true },
+    });
+  }
+
+  // G4: promote staged questions to live. A staged EDIT supersedes the live question it
+  // replaces (old → soft-deleted); the staged question becomes a live assessment question.
+  if (stagedQuestionCount > 0) {
+    const stagedQs = await prisma.question.findMany({
+      where: { topicId: id, isDeleted: false, isStaged: true },
+      select: { id: true, supersedesQuestionId: true },
+    });
+    const supersededIds = stagedQs.map((q) => q.supersedesQuestionId).filter((v): v is string => !!v);
+    if (supersededIds.length) {
+      await prisma.question.updateMany({
+        where: { id: { in: supersededIds }, isDeleted: false },
+        data: { isActive: false, isDeleted: true },
+      });
+    }
+    await prisma.question.updateMany({
+      where: { topicId: id, isDeleted: false, isStaged: true },
+      data: { isStaged: false },
     });
   }
 
