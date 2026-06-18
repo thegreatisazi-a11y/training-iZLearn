@@ -51,6 +51,13 @@ router.patch(
   validate(updatePassingScoreSchema),
   c.updatePassingScore,
 );
+// G4: publish a published topic's staged draft edits to the live record (e-signed).
+router.post(
+  '/:id/publish-draft',
+  requirePermission('courseManagement', 'edit'),
+  requireReasonForChange,
+  c.publishDraftChanges,
+);
 router.post(
   '/:id/revise',
   requirePermission('courseManagement', 'revise'),

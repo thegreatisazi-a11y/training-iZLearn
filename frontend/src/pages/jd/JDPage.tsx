@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Eye, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
@@ -47,10 +48,10 @@ interface JDTemplate {
 
 // I4: assignment is now template-driven — pick a template (by title), then edit the copy.
 const emptyAssign = { userId: '', templateId: '', departmentId: '', title: '', content: '' };
-const emptyTemplate = { functionalRoleId: '', departmentId: '', title: '', content: '' };
 
 export default function JDPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const canWrite = useAuthStore((s) => s.hasPermission)('jobDescription', 'write');
   const canApprove = useAuthStore((s) => s.hasPermission)('jobDescription', 'approve');
   const canPrint = useAuthStore((s) => s.hasPermission)('jobDescription', 'print');
@@ -70,11 +71,6 @@ export default function JDPage() {
   const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
   const [viewing, setViewing] = useState<JD | null>(null);
-  const [creatingTemplate, setCreatingTemplate] = useState(false);
-  const [templateForm, setTemplateForm] = useState(emptyTemplate);
-  const [editingTemplate, setEditingTemplate] = useState<JDTemplate | null>(null);
-  const [templateEditForm, setTemplateEditForm] = useState({ ...emptyTemplate, reasonForChange: '' });
-  const [templateSignOpen, setTemplateSignOpen] = useState(false);
 
   // Select option sources.
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
@@ -168,41 +164,6 @@ export default function JDPage() {
     onSuccess: () => {
       toast.success('Decision recorded');
       qc.invalidateQueries({ queryKey: ['jds'] });
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const createTemplateMut = useMutation({
-    mutationFn: () =>
-      svc.jds.createTemplate({
-        functionalRoleId: templateForm.functionalRoleId,
-        departmentId: templateForm.departmentId || undefined,
-        title: templateForm.title,
-        content: templateForm.content,
-      }),
-    onSuccess: () => {
-      toast.success('Template created');
-      qc.invalidateQueries({ queryKey: ['jd-templates'] });
-      setCreatingTemplate(false);
-      setTemplateForm(emptyTemplate);
-    },
-    onError: (e) => toast.error(apiError(e)),
-  });
-
-  const updateTemplateMut = useMutation({
-    mutationFn: (sig: ESignaturePayload) =>
-      svc.jds.updateTemplate(editingTemplate!.id, {
-        functionalRoleId: templateEditForm.functionalRoleId,
-        departmentId: templateEditForm.departmentId || undefined,
-        title: templateEditForm.title,
-        content: templateEditForm.content,
-        reasonForChange: templateEditForm.reasonForChange,
-        signature: sig,
-      }),
-    onSuccess: () => {
-      toast.success('Template updated');
-      qc.invalidateQueries({ queryKey: ['jd-templates'] });
-      setEditingTemplate(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -328,20 +289,7 @@ export default function JDPage() {
       className: 'text-right',
       render: (r) =>
         canWrite ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setEditingTemplate(r);
-              setTemplateEditForm({
-                functionalRoleId: r.functionalRoleId ?? '',
-                departmentId: r.departmentId ?? '',
-                title: r.title,
-                content: r.content ?? '',
-                reasonForChange: '',
-              });
-            }}
-          >
+          <Button size="sm" variant="outline" onClick={() => navigate(`/job-descriptions/templates/${r.id}`)}>
             Edit
           </Button>
         ) : null,
@@ -361,7 +309,7 @@ export default function JDPage() {
                 </Button>
               )
             : canWrite && (
-                <Button onClick={() => setCreatingTemplate(true)}>
+                <Button onClick={() => navigate('/job-descriptions/templates/new')}>
                   <Plus className="h-4 w-4" /> New JD Template
                 </Button>
               )
@@ -513,96 +461,7 @@ export default function JDPage() {
         title="Edit JD — Reason for Change"
       />
 
-      {/* Create Template */}
-      <Dialog
-        open={creatingTemplate}
-        onClose={() => setCreatingTemplate(false)}
-        className="max-w-2xl"
-        title="New JD Template"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setCreatingTemplate(false)} disabled={createTemplateMut.isPending}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => createTemplateMut.mutate()}
-              disabled={createTemplateMut.isPending || !templateForm.functionalRoleId || !templateForm.title || !templateForm.content}
-            >
-              {createTemplateMut.isPending ? 'Saving…' : 'Create'}
-            </Button>
-          </>
-        }
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Functional Role" required>
-            <Select options={functionalRoleOptions} placeholder="Select…" value={templateForm.functionalRoleId} onChange={(e) => setTemplateForm({ ...templateForm, functionalRoleId: e.target.value })} />
-          </Field>
-          <Field label="Department (optional)">
-            <Select options={[{ value: '', label: 'Any department' }, ...departmentOptions]} placeholder="Any department" value={templateForm.departmentId} onChange={(e) => setTemplateForm({ ...templateForm, departmentId: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Title">
-          <Input value={templateForm.title} onChange={(e) => setTemplateForm({ ...templateForm, title: e.target.value })} />
-        </Field>
-        <Field label="Content">
-          <Textarea className="min-h-[160px]" value={templateForm.content} onChange={(e) => setTemplateForm({ ...templateForm, content: e.target.value })} />
-        </Field>
-      </Dialog>
-
-      {/* Edit Template (controlled — reason + e-signature) */}
-      <Dialog
-        open={!!editingTemplate}
-        onClose={() => setEditingTemplate(null)}
-        className="max-w-2xl"
-        title="Edit JD Template"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditingTemplate(null)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                !templateEditForm.functionalRoleId ||
-                !templateEditForm.title ||
-                !templateEditForm.content ||
-                templateEditForm.reasonForChange.trim().length < 5
-              }
-              onClick={() => setTemplateSignOpen(true)}
-            >
-              Continue
-            </Button>
-          </>
-        }
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Functional Role" required>
-            <Select options={functionalRoleOptions} placeholder="Select…" value={templateEditForm.functionalRoleId} onChange={(e) => setTemplateEditForm({ ...templateEditForm, functionalRoleId: e.target.value })} />
-          </Field>
-          <Field label="Department (optional)">
-            <Select options={[{ value: '', label: 'Any department' }, ...departmentOptions]} placeholder="Any department" value={templateEditForm.departmentId} onChange={(e) => setTemplateEditForm({ ...templateEditForm, departmentId: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Title">
-          <Input value={templateEditForm.title} onChange={(e) => setTemplateEditForm({ ...templateEditForm, title: e.target.value })} />
-        </Field>
-        <Field label="Content">
-          <Textarea className="min-h-[160px]" value={templateEditForm.content} onChange={(e) => setTemplateEditForm({ ...templateEditForm, content: e.target.value })} />
-        </Field>
-        <Field label="Reason for change" required>
-          <Input value={templateEditForm.reasonForChange} onChange={(e) => setTemplateEditForm({ ...templateEditForm, reasonForChange: e.target.value })} placeholder="At least 5 characters" />
-        </Field>
-      </Dialog>
-
-      <ESignatureModal
-        open={templateSignOpen}
-        onClose={() => setTemplateSignOpen(false)}
-        title="Sign — Edit JD Template"
-        defaultMeaning="Approved"
-        onConfirm={async (sig) => {
-          await updateTemplateMut.mutateAsync(sig);
-          setTemplateSignOpen(false);
-        }}
-      />
+      {/* I6: JD templates are created/edited on a full-page designer route (RichTextEditor + Word/Excel import). */}
 
       {/* View JD (read-only) */}
       <Dialog

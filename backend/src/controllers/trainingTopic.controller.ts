@@ -58,6 +58,11 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.updateTopic(req.params.id, req.body), 'Training topic updated');
 });
 
+// G4: promote a published topic's staged draft edits to the live record (e-signed).
+export const publishDraftChanges = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.publishDraftChanges(req.params.id, req), 'Draft changes published');
+});
+
 export const updatePassingScore = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.updatePassingScore(req.params.id, req.body, req), 'Passing score updated');
 });
