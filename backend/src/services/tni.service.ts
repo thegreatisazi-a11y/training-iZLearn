@@ -82,10 +82,10 @@ export async function createTNI(input: CreateTNIInput, identifiedBy: string) {
   return { created: created.length, skipped: skip.size, items: created };
 }
 
-/** Edit a still-PENDING TNI's justification. Decided TNIs are part of the record. */
+/** Edit a TNI's justification (pending or approved). Rejected TNIs are closed records. */
 export async function updateTNI(id: string, input: UpdateTNIInput) {
   const tni = await getTNI(id);
-  if (tni.status !== 'PENDING') throw AppError.conflict('Only a pending TNI can be edited.');
+  if (tni.status === 'REJECTED') throw AppError.conflict('A rejected TNI cannot be edited.');
   return prisma.tNI.update({ where: { id }, data: { justification: input.justification } });
 }
 

@@ -314,7 +314,7 @@ export default function TNIPage() {
               </Button>
             </>
           )}
-          {canWrite && r.status === 'PENDING' && (
+          {canWrite && r.status !== 'REJECTED' && (
             <Button size="sm" variant="outline" onClick={() => { setEditTni(r); setEditJustification(r.justification ?? ''); }}>
               Edit
             </Button>

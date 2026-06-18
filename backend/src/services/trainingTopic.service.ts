@@ -230,8 +230,20 @@ export async function publishDraftChanges(id: string, req: Request) {
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
 
-  // G3/G4: promote staged material files to live (they become the current version).
+  // G3/G4: promote staged material files to live. A staged REPLACEMENT supersedes the
+  // file it replaces (old → obsolete/version-history); the staged file becomes current.
   if (stagedCount > 0) {
+    const staged = await prisma.trainingMaterial.findMany({
+      where: { topicId: id, isDeleted: false, isStaged: true },
+      select: { id: true, replacesMaterialId: true },
+    });
+    const replacedIds = staged.map((s) => s.replacesMaterialId).filter((v): v is string => !!v);
+    if (replacedIds.length) {
+      await prisma.trainingMaterial.updateMany({
+        where: { id: { in: replacedIds }, isDeleted: false },
+        data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: req.user!.id },
+      });
+    }
     await prisma.trainingMaterial.updateMany({
       where: { topicId: id, isDeleted: false, isStaged: true },
       data: { isStaged: false, isCurrentVersion: true },

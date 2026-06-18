@@ -256,8 +256,8 @@ export default function JDPage() {
               Submit for review
             </Button>
           )}
-          {/* I2: Edit is available on draft/rejected and on assigned (APPROVED) JDs — controlled. */}
-          {canWrite && (r.status === 'DRAFT' || r.status === 'REJECTED' || r.status === 'APPROVED') && (
+          {/* I2: Edit is available on any non-obsolete JD (draft/under-review/approved/rejected) — controlled, e-signed. */}
+          {canWrite && r.status !== 'OBSOLETE' && (
             <Button
               size="sm"
               variant="outline"

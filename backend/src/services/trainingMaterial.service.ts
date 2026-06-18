@@ -181,14 +181,17 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   const key = materialKey(file.filename);
   await storage.putFile(key, file.path, file.mimetype);
 
-  // G2/G3: material-level auto-versioning. Replacing a file ALWAYS supersedes the
-  // current file immediately — the new file becomes current, the old one moves to
-  // the material version history (obsolete + archived stamp). No full-course revise.
   const reason = auditContext.getStore()?.reasonForChange ?? null;
-  await prisma.trainingMaterial.updateMany({
-    where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
-    data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
-  });
+  // G3/G4: on a PUBLISHED topic the replacement is STAGED (a draft change) — the live
+  // current file is left untouched until "Publish changes" promotes it. On a DRAFT
+  // topic the old file is superseded immediately and the new one becomes current.
+  const staged = isPublished(topic.status);
+  if (!staged) {
+    await prisma.trainingMaterial.updateMany({
+      where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
+      data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
+    });
+  }
 
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
   const material = await prisma.trainingMaterial.create({
@@ -200,9 +203,10 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       fileType: getExtension(file.originalname),
       fileSize: file.size,
       version: lastVersion + 1,
-      isStaged: false,
-      isCurrentVersion: true,
+      isStaged: staged,
+      isCurrentVersion: !staged,
       replacesMaterialId: old.id,
+      changeReason: reason,
       createdBy,
     },
   });
