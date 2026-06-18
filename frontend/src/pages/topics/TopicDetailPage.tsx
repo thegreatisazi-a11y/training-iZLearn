@@ -68,6 +68,7 @@ interface Question {
   explanation?: string;
   helpText?: string;
   isMandatory: boolean;
+  isStaged?: boolean;
 }
 
 const MAX_OPTIONS = 4; // CR-34
@@ -421,6 +422,16 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // G4: discard a staged (pending) question draft on a published topic.
+  const discardQuestionMut = useMutation({
+    mutationFn: (qid: string) => svc.questions.remove(qid, 'Discarded pending question draft'),
+    onSuccess: () => {
+      toast.success('Pending question discarded');
+      qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
   // Deep-link from the Topics list "Edit" action: ?edit=1 opens the edit dialog.
   useEffect(() => {
     if (topic && canEdit && searchParams.get('edit') === '1' && !editTopicOpen) {
@@ -573,10 +584,14 @@ export default function TopicDetailPage() {
   const activeMaterials = allMaterials.filter((m) => m.isCurrentVersion && !m.isObsolete && !m.isStaged);
   const stagedMaterials = allMaterials.filter((m) => m.isStaged);
   const archivedMaterials = allMaterials.filter((m) => m.isObsolete);
+  // G4: split questions into live and staged (pending) for a published topic.
+  const allQuestions = (questions?.data ?? []) as unknown as Question[];
+  const liveQuestions = allQuestions.filter((q) => !q.isStaged);
+  const stagedQuestions = allQuestions.filter((q) => q.isStaged);
   const isPublished = String(t.status) === 'PUBLISHED';
-  // G4: a published topic with staged metadata edits and/or staged material changes.
+  // G4: a published topic with staged metadata edits and/or staged material/question changes.
   const hasDraftMeta = !!(t as { draftMeta?: unknown }).draftMeta;
-  const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0);
+  const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0 || stagedQuestions.length > 0);
   const materialNameById = (mid?: string | null) => (mid ? allMaterials.find((m) => m.id === mid)?.originalFileName ?? null : null);
   const userName = (uid?: string | null) => {
     if (!uid) return '—';
@@ -661,6 +676,7 @@ export default function TopicDetailPage() {
             <strong>Draft changes pending.</strong>{' '}
             {hasDraftMeta && 'Course details have been edited. '}
             {stagedMaterials.length > 0 && `${stagedMaterials.length} material change(s) staged. `}
+            {stagedQuestions.length > 0 && `${stagedQuestions.length} question change(s) staged. `}
             These are <strong>not yet live</strong> — the published course is unchanged until you publish the changes.
           </span>
           {canEdit && (
@@ -872,7 +888,38 @@ export default function TopicDetailPage() {
               </Button>
             </div>
           )}
-          <DataTable<Question> columns={questionColumns} rows={(questions?.data ?? []) as unknown as Question[]} loading={qLoading} emptyText="No questions yet." />
+          {isPublished && (
+            <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              This course is published. New or edited questions are held as <span className="font-medium">pending changes</span> and do not affect the live assessment until you click <span className="font-medium">Publish changes</span> (top of the page).
+            </p>
+          )}
+          <DataTable<Question> columns={questionColumns} rows={liveQuestions} loading={qLoading} emptyText="No questions yet." />
+
+          {/* G4: staged (pending) question drafts — not in the live assessment until published. */}
+          {stagedQuestions.length > 0 && (
+            <div className="mt-6">
+              <div className="mb-2 text-sm font-semibold uppercase text-amber-600">Pending Question Changes ({stagedQuestions.length})</div>
+              <DataTable<Question>
+                columns={[
+                  { key: 'questionText', header: 'Question', render: (r) => <span className="text-slate-800">{r.questionText}</span> },
+                  { key: 'questionType', header: 'Type', render: (r) => r.questionType.replace(/_/g, ' ') },
+                  {
+                    key: 'actions',
+                    header: '',
+                    className: 'text-right',
+                    render: (r) =>
+                      canQuestionWrite ? (
+                        <button type="button" disabled={discardQuestionMut.isPending} onClick={() => discardQuestionMut.mutate(r.id)} className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline">
+                          <X className="h-4 w-4" /> Discard
+                        </button>
+                      ) : null,
+                  },
+                ]}
+                rows={stagedQuestions}
+                emptyText="No pending question changes."
+              />
+            </div>
+          )}
         </div>
       )}
 
