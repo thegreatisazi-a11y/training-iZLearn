@@ -238,6 +238,9 @@ export const svc = {
   systemConfig: {
     list: () => data(api.get('/system-config')),
     update: (body: unknown) => data(api.patch('/system-config', body)),
+    // Module 10: notification & email-template settings.
+    listNotifications: () => data(api.get('/system-config/notifications')),
+    updateNotification: (type: string, body: unknown) => data(api.patch(`/system-config/notifications/${type}`, body)),
   },
 
   reports: {

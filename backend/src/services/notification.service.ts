@@ -4,7 +4,14 @@ import type { PermissionMatrix, PermissionAction } from '@izlearn/shared';
 import { getConfig } from './systemConfig.service';
 import { queueEmail } from './email.service';
 import { renderEmail, EmailType } from '../utils/emailTemplates';
+import { baseLayout } from '../utils/emailTemplates/base';
+import { getSetting } from './notificationSetting.service';
 import { formatDate } from '../utils/dateUtils';
+
+/** Replace {{var}} placeholders in a template string from the data map. */
+function interpolate(tpl: string, data: Record<string, string | undefined>): string {
+  return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) => data[k] ?? '');
+}
 
 /**
  * High-level notification helpers (Module 10). Each resolves recipients and
@@ -62,7 +69,18 @@ async function supervisorRecipient(userId: string): Promise<Recipient | null> {
 async function send(type: EmailType, recipient: Recipient | null, data: Record<string, string | undefined>) {
   if (!recipient) return;
   try {
-    const { subject, html } = renderEmail(type, await org(), { ...data, userName: data.userName ?? recipient.fullName });
+    const orgName = await org();
+    const full = { ...data, orgName, userName: data.userName ?? recipient.fullName };
+    // Module 10: respect the admin-configured notification settings.
+    const setting = await getSetting(type).catch(() => null);
+    if (setting && setting.enabled === false) return; // disabled by admin — do not send.
+
+    const def = renderEmail(type, orgName, full);
+    // Subject/body overrides (with {{variable}} interpolation); fall back to defaults.
+    const subject = setting?.subject ? interpolate(setting.subject, full) : def.subject;
+    const html = setting?.bodyHtml
+      ? baseLayout({ orgName, title: subject, bodyHtml: interpolate(setting.bodyHtml, full) })
+      : def.html;
     await queueEmail({ userId: recipient.id, toEmail: recipient.email, type, subject, html });
   } catch (e) {
     logger.error(`Notification ${type} failed`, { e: (e as Error).message });

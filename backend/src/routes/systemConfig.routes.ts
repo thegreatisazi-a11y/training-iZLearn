@@ -4,7 +4,7 @@ import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { requireReasonForChange } from '../middlewares/reasonForChange.middleware';
-import { bulkUpdateConfigSchema } from '@izlearn/shared';
+import { bulkUpdateConfigSchema, updateNotificationSettingSchema } from '@izlearn/shared';
 
 /**
  * @openapi
@@ -22,6 +22,15 @@ router.patch(
   requireReasonForChange,
   validate(bulkUpdateConfigSchema),
   c.update,
+);
+
+// Module 10: notification & email-template settings (per-module, catalog-driven).
+router.get('/notifications', requirePermission('systemConfig', 'read'), c.listNotifications);
+router.patch(
+  '/notifications/:type',
+  requirePermission('systemConfig', 'write'),
+  validate(updateNotificationSettingSchema),
+  c.updateNotification,
 );
 
 export default router;

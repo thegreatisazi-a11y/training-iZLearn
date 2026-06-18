@@ -1,9 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { Bold, Italic, Underline, Heading1, Heading2, Heading3, List, ListOrdered, Table as TableIcon, Pilcrow } from 'lucide-react';
+import {
+  Bold, Italic, Underline, Strikethrough, Heading1, Heading2, Heading3, Pilcrow,
+  List, ListOrdered, Table as TableIcon, Link2, Quote, Eraser, Undo2, Redo2,
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, Baseline, Highlighter,
+} from 'lucide-react';
 
 /**
- * I6: a lightweight "Word-like" rich-text editor (headings, bold/italic/underline,
- * lists, tables) built on a contentEditable surface — no heavy editor dependency.
+ * I6: a "Word-like" rich-text editor (headings, bold/italic/underline/strikethrough,
+ * text colour + highlight, alignment, lists, tables, links, blockquote, undo/redo,
+ * clear-formatting) built on a contentEditable surface — no heavy editor dependency.
  * Emits raw HTML; the server sanitises it with DOMPurify before persistence.
  */
 export function RichTextEditor({
@@ -28,6 +33,8 @@ export function RichTextEditor({
   const emit = () => onChange(ref.current?.innerHTML ?? '');
   const exec = (command: string, arg?: string) => {
     ref.current?.focus();
+    // Use inline CSS for colour/highlight so styles survive sanitisation + render.
+    try { document.execCommand('styleWithCSS', false, 'true'); } catch { /* not supported — ignore */ }
     document.execCommand(command, false, arg);
     emit();
   };
@@ -44,6 +51,11 @@ export function RichTextEditor({
     const row = `<tr>${cell.repeat(cols)}</tr>`;
     insertHtml(`<table style="border-collapse:collapse;width:100%">${row.repeat(rows)}</table><p></p>`);
   };
+  const insertLink = () => {
+    const url = window.prompt('Link URL (https://…)');
+    if (!url) return;
+    exec('createLink', url);
+  };
 
   const Btn = ({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) => (
     <button
@@ -56,22 +68,50 @@ export function RichTextEditor({
       {children}
     </button>
   );
+  const Sep = () => <span className="mx-1 h-5 w-px bg-slate-200" />;
+  // Colour pickers: a small swatch overlaying a hidden native input.
+  const Color = ({ title, command, icon }: { title: string; command: string; icon: React.ReactNode }) => (
+    <label title={title} className="relative inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded text-slate-600 hover:bg-slate-100">
+      {icon}
+      <input
+        type="color"
+        className="absolute inset-0 cursor-pointer opacity-0"
+        onMouseDown={(e) => e.stopPropagation()}
+        onChange={(e) => exec(command, e.target.value)}
+      />
+    </label>
+  );
 
   return (
     <div className="rounded-md border border-slate-300">
       <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-200 bg-slate-50 px-1 py-1">
+        <Btn title="Undo" onClick={() => exec('undo')}><Undo2 className="h-4 w-4" /></Btn>
+        <Btn title="Redo" onClick={() => exec('redo')}><Redo2 className="h-4 w-4" /></Btn>
+        <Sep />
         <Btn title="Heading 1" onClick={() => exec('formatBlock', 'H1')}><Heading1 className="h-4 w-4" /></Btn>
         <Btn title="Heading 2" onClick={() => exec('formatBlock', 'H2')}><Heading2 className="h-4 w-4" /></Btn>
         <Btn title="Heading 3" onClick={() => exec('formatBlock', 'H3')}><Heading3 className="h-4 w-4" /></Btn>
         <Btn title="Paragraph" onClick={() => exec('formatBlock', 'P')}><Pilcrow className="h-4 w-4" /></Btn>
-        <span className="mx-1 h-5 w-px bg-slate-200" />
+        <Sep />
         <Btn title="Bold" onClick={() => exec('bold')}><Bold className="h-4 w-4" /></Btn>
         <Btn title="Italic" onClick={() => exec('italic')}><Italic className="h-4 w-4" /></Btn>
         <Btn title="Underline" onClick={() => exec('underline')}><Underline className="h-4 w-4" /></Btn>
-        <span className="mx-1 h-5 w-px bg-slate-200" />
+        <Btn title="Strikethrough" onClick={() => exec('strikeThrough')}><Strikethrough className="h-4 w-4" /></Btn>
+        <Color title="Text colour" command="foreColor" icon={<Baseline className="h-4 w-4" />} />
+        <Color title="Highlight" command="hiliteColor" icon={<Highlighter className="h-4 w-4" />} />
+        <Sep />
+        <Btn title="Align left" onClick={() => exec('justifyLeft')}><AlignLeft className="h-4 w-4" /></Btn>
+        <Btn title="Align center" onClick={() => exec('justifyCenter')}><AlignCenter className="h-4 w-4" /></Btn>
+        <Btn title="Align right" onClick={() => exec('justifyRight')}><AlignRight className="h-4 w-4" /></Btn>
+        <Btn title="Justify" onClick={() => exec('justifyFull')}><AlignJustify className="h-4 w-4" /></Btn>
+        <Sep />
         <Btn title="Bullet list" onClick={() => exec('insertUnorderedList')}><List className="h-4 w-4" /></Btn>
         <Btn title="Numbered list" onClick={() => exec('insertOrderedList')}><ListOrdered className="h-4 w-4" /></Btn>
+        <Btn title="Quote" onClick={() => exec('formatBlock', 'BLOCKQUOTE')}><Quote className="h-4 w-4" /></Btn>
+        <Btn title="Insert link" onClick={insertLink}><Link2 className="h-4 w-4" /></Btn>
         <Btn title="Insert table" onClick={insertTable}><TableIcon className="h-4 w-4" /></Btn>
+        <Sep />
+        <Btn title="Clear formatting" onClick={() => { exec('removeFormat'); exec('unlink'); }}><Eraser className="h-4 w-4" /></Btn>
       </div>
       <div
         ref={ref}
@@ -79,7 +119,7 @@ export function RichTextEditor({
         suppressContentEditableWarning
         onInput={emit}
         onBlur={emit}
-        className={`prose-sm max-w-none overflow-auto px-3 py-2 text-sm text-slate-800 focus:outline-none ${minHeightClass}`}
+        className={`prose-sm max-w-none overflow-auto px-3 py-2 text-sm text-slate-800 focus:outline-none [&_blockquote]:border-l-4 [&_blockquote]:border-slate-300 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 [&_a]:text-primary [&_a]:underline [&_h1]:text-xl [&_h1]:font-bold [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 ${minHeightClass}`}
       />
     </div>
   );
