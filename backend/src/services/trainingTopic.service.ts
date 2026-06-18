@@ -160,12 +160,14 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
 /**
  * Plain metadata update. topicCode and passingScorePercent are intentionally
  * NOT updatable here (passing score has its own e-signed endpoint).
+ *
+ * G4: if the topic is PUBLISHED, the edits are NOT applied to the live record — they
+ * are staged in `draftMeta` (a draft working copy). The published version stays live
+ * and unchanged until `publishDraftChanges` promotes the draft (e-signed, confirmed).
  */
 export async function updateTopic(id: string, input: UpdateTopicInput) {
-  await getTopic(id);
-  return prisma.trainingTopic.update({
-    where: { id },
-    data: {
+  const topic = await getTopic(id);
+  const data: Prisma.TrainingTopicUpdateInput = {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.topicNumber !== undefined ? { topicNumber: input.topicNumber ?? null } : {}),
       ...(input.sopNumber !== undefined ? { sopNumber: input.sopNumber ?? null } : {}),
@@ -204,8 +206,28 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.effectiveDate !== undefined ? { effectiveDate: input.effectiveDate ?? null } : {}),
       ...(input.reviewDate !== undefined ? { reviewDate: input.reviewDate ?? null } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
-    },
-  });
+  };
+
+  if (topic.status === 'PUBLISHED') {
+    // G4: stage the edit as a draft working copy; do not touch the live published record.
+    return prisma.trainingTopic.update({ where: { id }, data: { draftMeta: data as Prisma.InputJsonValue } });
+  }
+  return prisma.trainingTopic.update({ where: { id }, data });
+}
+
+/**
+ * G4: promote a published topic's staged draft edits to the live record (and clear the
+ * draft). Controlled — two-component e-signature; the caller confirms first. The live
+ * version is unchanged until this runs, satisfying "published stays live until republish".
+ */
+export async function publishDraftChanges(id: string, req: Request) {
+  const topic = await getTopic(id);
+  if (topic.status !== 'PUBLISHED') throw AppError.conflict('Only a published course can publish draft changes.');
+  if (!topic.draftMeta) throw AppError.badRequest('There are no pending draft changes to publish.');
+  await signFromRequest(req, 'TrainingTopic', id, 'Approved');
+  auditContext.setActionOverride('UPDATE');
+  const draft = topic.draftMeta as Prisma.TrainingTopicUpdateInput;
+  return prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
 }
 
 /**

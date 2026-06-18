@@ -185,6 +185,9 @@ model TrainingTopic {
   effectiveDate           DateTime? // date the (published) version becomes effective
   reviewDate              DateTime? // next scheduled review date for the SOP/topic
   currentVersion          Int          @default(1)
+  // G4: edits to a PUBLISHED topic are staged here as a draft working copy. The live
+  // published version is unchanged until "Publish changes" promotes this to the columns.
+  draftMeta               Json?
   parentTopicId           String? // links a revision back to the original
   supersededByTopicId     String? // set on the OLD row when a revision supersedes it (auto-archive)
   isActive                Boolean      @default(true)

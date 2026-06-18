@@ -203,6 +203,7 @@ export default function TopicDetailPage() {
   const [replacePending, setReplacePending] = useState<{ material: Material; file: File } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [statusChange, setStatusChange] = useState<'PUBLISHED' | 'ARCHIVED' | 'DRAFT' | null>(null);
+  const [publishDraftOpen, setPublishDraftOpen] = useState(false);
   const [bundleDialogOpen, setBundleDialogOpen] = useState(false);
   const [selectedBundleIds, setSelectedBundleIds] = useState<string[]>([]);
   const [viewingMaterial, setViewingMaterial] = useState<Material | null>(null);
@@ -345,6 +346,21 @@ export default function TopicDetailPage() {
       toast.success('Topic status updated');
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // G4: promote a published topic's staged draft edits to the live record (e-signed + confirm).
+  const publishDraftMut = useMutation({
+    mutationFn: (signature: ESignaturePayload) => {
+      const { reason, ...sig } = signature;
+      return svc.topics.publishDraft(id, { reasonForChange: (reason ?? '').trim(), signature: sig });
+    },
+    onSuccess: () => {
+      toast.success('Draft changes published — the live course is updated.');
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+      qc.invalidateQueries({ queryKey: ['topics'] });
+      setPublishDraftOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -577,6 +593,9 @@ export default function TopicDetailPage() {
   const stagedMaterials = allMaterials.filter((m) => m.isStaged);
   const archivedMaterials = allMaterials.filter((m) => m.isObsolete);
   const isPublished = String(t.status) === 'PUBLISHED';
+  // G4: a published topic with staged metadata edits and/or staged material changes.
+  const hasDraftMeta = !!(t as { draftMeta?: unknown }).draftMeta;
+  const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0);
   const materialNameById = (mid?: string | null) => (mid ? allMaterials.find((m) => m.id === mid)?.originalFileName ?? null : null);
   const userName = (uid?: string | null) => {
     if (!uid) return '—';
@@ -656,12 +675,19 @@ export default function TopicDetailPage() {
         }
       />
 
-      {/* G4: a published course shows a "draft changes pending" banner when material
-          changes are staged — the live version stays unchanged until they are republished. */}
-      {isPublished && stagedMaterials.length > 0 && (
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <strong>Draft changes pending.</strong> {stagedMaterials.length} material change(s) are staged and are <strong>not yet live</strong>.
-          The published course remains unchanged until you republish — see the “Pending Changes” section below.
+      {/* G4: a published course shows a "draft changes pending" banner when edits are
+          staged — the live version stays unchanged until "Publish changes" promotes them. */}
+      {hasPendingChanges && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>
+            <strong>Draft changes pending.</strong>{' '}
+            {hasDraftMeta && 'Course details have been edited. '}
+            {stagedMaterials.length > 0 && `${stagedMaterials.length} material change(s) staged. `}
+            These are <strong>not yet live</strong> — the published course is unchanged until you publish the changes.
+          </span>
+          {canEdit && hasDraftMeta && (
+            <Button size="sm" onClick={() => setPublishDraftOpen(true)}>Publish changes</Button>
+          )}
         </div>
       )}
 
@@ -1064,6 +1090,16 @@ export default function TopicDetailPage() {
         onConfirm={async (sig) => { await statusMut.mutateAsync(sig); setStatusChange(null); }}
         title={statusChange === 'PUBLISHED' ? 'Publish Topic (e-signature required)' : statusChange === 'ARCHIVED' ? 'Archive Topic (e-signature required)' : 'Unpublish Topic (e-signature required)'}
         defaultMeaning={statusChange === 'PUBLISHED' ? 'Approved' : statusChange === 'ARCHIVED' ? 'Performed' : 'Reviewed'}
+        requireReason
+      />
+
+      {/* G4: confirm + e-sign to promote staged draft edits to the live published course. */}
+      <ESignatureModal
+        open={publishDraftOpen}
+        onClose={() => setPublishDraftOpen(false)}
+        onConfirm={async (sig) => { await publishDraftMut.mutateAsync(sig); }}
+        title="Publish draft changes to the live course (e-signature required)"
+        defaultMeaning="Approved"
         requireReason
       />
 

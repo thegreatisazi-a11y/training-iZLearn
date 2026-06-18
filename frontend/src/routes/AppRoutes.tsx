@@ -21,6 +21,7 @@ const MaterialLibraryPage = lazy(() => import('@/pages/materials/MaterialLibrary
 const MaterialViewerPage = lazy(() => import('@/pages/materials/MaterialViewerPage'));
 const MyTrainingsPage = lazy(() => import('@/pages/training/MyTrainingsPage'));
 const JDPage = lazy(() => import('@/pages/jd/JDPage'));
+const JDTemplateEditorPage = lazy(() => import('@/pages/jd/JDTemplateEditorPage'));
 const MyJobDescriptionPage = lazy(() => import('@/pages/jd/MyJobDescriptionPage'));
 const MyCVPage = lazy(() => import('@/pages/cv/MyCVPage'));
 const TeamCVsPage = lazy(() => import('@/pages/cv/TeamCVsPage'));
@@ -71,6 +72,8 @@ export function AppRoutes() {
             <Route path="/team" element={gate('team', 'read', <MyTeamPage />)} />
             <Route path="/team/:userId" element={gate('team', 'read', <TeamMemberPage />)} />
             <Route path="/job-descriptions" element={gate('jobDescription', 'read', <JDPage />)} />
+            <Route path="/job-descriptions/templates/new" element={gate('jobDescription', 'write', <JDTemplateEditorPage />)} />
+            <Route path="/job-descriptions/templates/:id" element={gate('jobDescription', 'write', <JDTemplateEditorPage />)} />
             <Route path="/my-jd" element={<MyJobDescriptionPage />} />
             <Route path="/my-cv" element={<MyCVPage />} />
             <Route path="/team-cvs" element={gate('team', 'read', <TeamCVsPage />)} />
