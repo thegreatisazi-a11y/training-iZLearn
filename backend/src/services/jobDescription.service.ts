@@ -14,6 +14,7 @@ import type {
   JDTransitionInput,
   JDTemplateInput,
   AcknowledgeJDInput,
+  AssignJDFromTemplateInput,
   PaginationQuery,
 } from '@izlearn/shared';
 
@@ -89,6 +90,63 @@ export async function getMyJD(userId: string) {
     where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
     orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
   });
+}
+
+/**
+ * B1: every non-obsolete JD assigned to the logged-in user (supports holding more
+ * than one active JD), newest first, with the assigning supervisor's name resolved.
+ */
+export async function listMyJDs(userId: string) {
+  const jds = await prisma.jobDescription.findMany({
+    where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
+    orderBy: [{ assignedAt: 'desc' }, { version: 'desc' }, { createdAt: 'desc' }],
+  });
+  const assignerIds = Array.from(new Set(jds.map((j) => j.assignedBy).filter(Boolean) as string[]));
+  const people = assignerIds.length
+    ? await prisma.user.findMany({ where: { id: { in: assignerIds } }, select: { id: true, fullName: true } })
+    : [];
+  const nameById = new Map(people.map((u) => [u.id, u.fullName]));
+  return jds.map((j) => ({ ...j, assignedByName: j.assignedBy ? nameById.get(j.assignedBy) ?? null : null }));
+}
+
+/**
+ * I4/I5: assign a JD to a user from a chosen template. The title/content/department
+ * come from the (editable) request — the edited copy is stored on the JD instance and
+ * never changes the template. Assigned directly as APPROVED (no separate review step),
+ * e-signed (assign), and the user is notified to acknowledge. Does not obsolete other
+ * JDs — a user may hold more than one active JD (B1).
+ */
+export async function assignJDFromTemplate(input: AssignJDFromTemplateInput, req: Request) {
+  const user = await prisma.user.findFirst({ where: { id: input.userId, isDeleted: false } });
+  if (!user) throw AppError.notFound('User not found');
+  const template = await prisma.jDTemplate.findFirst({ where: { id: input.templateId, isDeleted: false } });
+  if (!template) throw AppError.notFound('Job-description template not found');
+
+  // Controlled, direct assignment — two-component e-signature.
+  await signFromRequest(req, 'User', input.userId, 'Approved');
+
+  const last = await prisma.jobDescription.findFirst({ where: { userId: input.userId }, orderBy: { version: 'desc' } });
+  const version = (last?.version ?? 0) + 1;
+
+  auditContext.setActionOverride('CREATE');
+  const jd = await prisma.jobDescription.create({
+    data: {
+      userId: input.userId,
+      departmentId: input.departmentId ?? template.departmentId ?? user.departmentId,
+      functionalRoleId: template.functionalRoleId,
+      title: input.title,
+      content: DOMPurify.sanitize(input.content),
+      version,
+      status: 'APPROVED',
+      approvedBy: req.user!.id,
+      approvedAt: new Date(),
+      assignedBy: req.user!.id,
+      assignedAt: new Date(),
+      createdBy: req.user!.id,
+    },
+  });
+  await notifyJdDecision(input.userId, jd.title, 'assigned — please acknowledge');
+  return jd;
 }
 
 /**
@@ -170,17 +228,25 @@ export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req
   });
 }
 
-/** Edits are only allowed while a JD is still DRAFT or REJECTED. */
+/**
+ * Edits are allowed while a JD is DRAFT or REJECTED, and — I2 — on an APPROVED
+ * assigned JD (a controlled edit: the route requires a reason for change, which the
+ * audit middleware records). Obsolete JDs are part of the permanent record and stay
+ * locked. Editing an already-acknowledged JD clears the acknowledgement so the user
+ * must re-acknowledge the revised responsibilities.
+ */
 export async function updateJD(id: string, input: UpdateJDInput) {
   const jd = await getJD(id);
-  if (jd.status !== 'DRAFT' && jd.status !== 'REJECTED') {
-    throw AppError.conflict('Only draft or rejected job descriptions can be edited.');
+  if (jd.status === 'OBSOLETE') {
+    throw AppError.conflict('An obsolete job description cannot be edited.');
   }
+  const reAcknowledge = jd.status === 'APPROVED' && !!jd.acknowledgedAt;
   return prisma.jobDescription.update({
     where: { id },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.content !== undefined ? { content: DOMPurify.sanitize(input.content) } : {}),
+      ...(reAcknowledge ? { acknowledgedAt: null, acknowledgementText: null, acknowledgementSignatureId: null } : {}),
     },
   });
 }
@@ -247,7 +313,13 @@ export async function transitionJD(id: string, input: JDTransitionInput, req: Re
     }
 
     case 'OBSOLETE': {
-      return prisma.jobDescription.update({ where: { id }, data: { status: 'OBSOLETE' } });
+      // I1: deactivating (obsoleting) a JD is a controlled action requiring a
+      // two-component electronic signature.
+      const signatureId = await signFromRequest(req, 'JobDescription', id, 'Approved');
+      auditContext.setActionOverride('UPDATE');
+      const updated = await prisma.jobDescription.update({ where: { id }, data: { status: 'OBSOLETE', signatureId } });
+      await notifyJdDecision(jd.userId, jd.title, 'deactivated');
+      return updated;
     }
 
     default:

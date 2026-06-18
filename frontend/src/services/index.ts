@@ -92,6 +92,8 @@ export const svc = {
     setViewTime: (id: string, requiredViewSeconds: number) => data(api.patch(`/materials/${id}`, { requiredViewSeconds })),
     startView: (id: string) => data(api.post(`/materials/${id}/view/start`, {})),
     completeView: (id: string) => data(api.post(`/materials/${id}/view/complete`, {})),
+    // A4: auto-save accumulated reading seconds so the session can resume.
+    saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
     readingStatus: (topicId: string) => data(api.get('/materials/reading-status', { params: { topicId } })),
     downloadUrl: (id: string) => `/api/materials/${id}/download`,
     download: (id: string, name = 'material') => downloadAuthed(`/materials/${id}/download`, name),
@@ -171,8 +173,10 @@ export const svc = {
     updateTemplate: (id: string, body: unknown) => data(api.patch(`/job-descriptions/templates/${id}`, body)),
     fromTemplate: (body: unknown) => data(api.post('/job-descriptions/from-template', body)),
     mine: () => data(api.get('/job-descriptions/mine')),
+    mineList: () => data(api.get('/job-descriptions/mine/list')),
     acknowledge: (id: string, body: unknown) => data(api.post(`/job-descriptions/${id}/acknowledge`, body)),
     assignFunctionalRole: (body: unknown) => data(api.post('/job-descriptions/assign-functional-role', body)),
+    assignFromTemplate: (body: unknown) => data(api.post('/job-descriptions/assign-from-template', body)),
   },
 
   cv: {

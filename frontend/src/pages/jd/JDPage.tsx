@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
+import { SearchableSelect, type SearchOption } from '@/components/common/SearchableSelect';
 import { SignatureBlock, SignatureRecord } from '@/components/common/SignatureBlock';
 import { Tabs } from '@/components/ui/tabs';
 import { Dialog } from '@/components/ui/dialog';
@@ -44,7 +45,8 @@ interface JDTemplate {
   departmentId?: string | null;
 }
 
-const emptyForm = { userId: '', departmentId: '', roleId: '', title: '', content: '' };
+// I4: assignment is now template-driven — pick a template (by title), then edit the copy.
+const emptyAssign = { userId: '', templateId: '', departmentId: '', title: '', content: '' };
 const emptyTemplate = { functionalRoleId: '', departmentId: '', title: '', content: '' };
 
 export default function JDPage() {
@@ -57,13 +59,15 @@ export default function JDPage() {
   const [tab, setTab] = useState('jds');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  // I3: the JD list defaults to Active; inactive (obsolete) JDs are shown only via the filter.
+  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('active');
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState(emptyForm);
+  const [assignForm, setAssignForm] = useState(emptyAssign);
+  const [assignSignOpen, setAssignSignOpen] = useState(false);
   const [editing, setEditing] = useState<JD | null>(null);
   const [editForm, setEditForm] = useState({ title: '', content: '' });
   const [editReasonOpen, setEditReasonOpen] = useState(false);
-  const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' } | null>(null);
+  const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
   const [viewing, setViewing] = useState<JD | null>(null);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
@@ -75,12 +79,10 @@ export default function JDPage() {
   // Select option sources.
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
   const { data: departments } = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
-  const { data: roles } = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }) });
   const userOptions = ((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => ({ value: u.id, label: u.fullName }));
   // Resolve approver id → name for the "Approved By" column (show name, not the UUID).
   const userName = new Map(((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => [u.id, u.fullName]));
   const departmentOptions = ((departments?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
-  const roleOptions = ((roles?.data ?? []) as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
   // D-JD1: JD templates are keyed by Functional Role (DesignationMaster).
   const { data: functionalRoles } = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
   const frList = (functionalRoles?.data ?? []) as { id: string; displayName: string }[];
@@ -96,8 +98,25 @@ export default function JDPage() {
   const { data: templates, isLoading: tplLoading } = useQuery({
     queryKey: ['jd-templates'],
     queryFn: () => svc.jds.listTemplates({ pageSize: 200 }),
-    enabled: tab === 'templates',
+    enabled: tab === 'templates' || creating,
   });
+  const templateList = (templates?.data ?? []) as unknown as JDTemplate[];
+  // I4: searchable template picker — selecting a Title pre-fills (editable) Dept/Title/Content.
+  const templateOptions: SearchOption[] = templateList.map((t) => ({
+    value: t.id,
+    label: t.title,
+    sublabel: [t.functionalRoleId ? frName.get(t.functionalRoleId) : null, t.departmentId ? deptName.get(t.departmentId) : 'Any department'].filter(Boolean).join(' · ') || undefined,
+  }));
+  function selectAssignTemplate(templateId: string) {
+    const tpl = templateList.find((t) => t.id === templateId);
+    setAssignForm((f) => ({
+      ...f,
+      templateId,
+      title: tpl?.title ?? '',
+      content: tpl?.content ?? '',
+      departmentId: tpl?.departmentId ?? '',
+    }));
+  }
 
   const { data: signatures } = useQuery({
     queryKey: ['signatures', 'JobDescription', drawer?.id],
@@ -105,13 +124,21 @@ export default function JDPage() {
     enabled: !!drawer,
   });
 
-  const createMut = useMutation({
-    mutationFn: () => svc.jds.create(form),
+  const assignMut = useMutation({
+    mutationFn: (sig: ESignaturePayload) =>
+      svc.jds.assignFromTemplate({
+        userId: assignForm.userId,
+        templateId: assignForm.templateId,
+        title: assignForm.title,
+        content: assignForm.content,
+        departmentId: assignForm.departmentId || undefined,
+        signature: sig,
+      }),
     onSuccess: () => {
       toast.success('JD assigned');
       qc.invalidateQueries({ queryKey: ['jds'] });
       setCreating(false);
-      setForm(emptyForm);
+      setAssignForm(emptyAssign);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -257,7 +284,8 @@ export default function JDPage() {
               Submit for review
             </Button>
           )}
-          {canWrite && (r.status === 'DRAFT' || r.status === 'REJECTED') && (
+          {/* I2: Edit is available on draft/rejected and on assigned (APPROVED) JDs — controlled. */}
+          {canWrite && (r.status === 'DRAFT' || r.status === 'REJECTED' || r.status === 'APPROVED') && (
             <Button
               size="sm"
               variant="outline"
@@ -279,8 +307,9 @@ export default function JDPage() {
               </Button>
             </>
           )}
+          {/* I1: deactivating a JD requires an electronic signature. */}
           {canWrite && isJdActive(r) && (
-            <Button size="sm" variant="danger" onClick={() => transitionMut.mutate({ id: r.id, body: { action: 'OBSOLETE' } })}>
+            <Button size="sm" variant="danger" onClick={() => setSignTarget({ jd: r, action: 'OBSOLETE' })}>
               Deactivate
             </Button>
           )}
@@ -363,9 +392,9 @@ export default function JDPage() {
             <Select
               className="max-w-[180px]"
               options={[
-                { value: 'all', label: 'All' },
                 { value: 'active', label: 'Active' },
                 { value: 'inactive', label: 'Inactive' },
+                { value: 'all', label: 'All' },
               ]}
               value={activeFilter}
               onChange={(e) => setActiveFilter(e.target.value as 'all' | 'active' | 'inactive')}
@@ -392,7 +421,7 @@ export default function JDPage() {
         </div>
       )}
 
-      {/* Create JD */}
+      {/* Assign JD (I4/I5): pick a template by title → edit the copy → assign directly (e-signed). */}
       <Dialog
         open={creating}
         onClose={() => setCreating(false)}
@@ -400,36 +429,54 @@ export default function JDPage() {
         title="Assign JD"
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreating(false)} disabled={createMut.isPending}>
+            <Button variant="outline" onClick={() => setCreating(false)} disabled={assignMut.isPending}>
               Cancel
             </Button>
             <Button
-              onClick={() => createMut.mutate()}
-              disabled={createMut.isPending || !form.userId || !form.departmentId || !form.roleId || !form.title || !form.content}
+              onClick={() => setAssignSignOpen(true)}
+              disabled={assignMut.isPending || !assignForm.userId || !assignForm.templateId || !assignForm.title || !assignForm.content}
             >
-              {createMut.isPending ? 'Saving…' : 'Assign JD'}
+              {assignMut.isPending ? 'Saving…' : 'Assign & Sign…'}
             </Button>
           </>
         }
       >
-        <Field label="User">
-          <Select options={userOptions} placeholder="Select user…" value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} />
+        <Field label="User" required>
+          <Select options={userOptions} placeholder="Select user…" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Department">
-            <Select options={departmentOptions} placeholder="Select…" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })} />
-          </Field>
-          <Field label="Role">
-            <Select options={roleOptions} placeholder="Select…" value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Title">
-          <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        <Field label="JD Template (by title)" required>
+          <SearchableSelect
+            placeholder="Search a JD template title…"
+            options={templateOptions}
+            value={assignForm.templateId}
+            onChange={selectAssignTemplate}
+            emptyText="No templates found"
+          />
         </Field>
-        <Field label="Content">
-          <Textarea className="min-h-[160px]" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder="Responsibilities, qualifications…" />
+        <p className="mb-2 text-xs text-slate-500">
+          Selecting a template fills in the Department, Title and Content below. You can edit them for this assignment — your edits do not change the template. The JD is assigned directly (approved) and the user is notified to acknowledge.
+        </p>
+        <Field label="Department">
+          <Select options={[{ value: '', label: 'Use template / user department' }, ...departmentOptions]} value={assignForm.departmentId} onChange={(e) => setAssignForm({ ...assignForm, departmentId: e.target.value })} />
+        </Field>
+        <Field label="Title" required>
+          <Input value={assignForm.title} onChange={(e) => setAssignForm({ ...assignForm, title: e.target.value })} />
+        </Field>
+        <Field label="Content" required>
+          <Textarea className="min-h-[160px]" value={assignForm.content} onChange={(e) => setAssignForm({ ...assignForm, content: e.target.value })} placeholder="Responsibilities, qualifications…" />
         </Field>
       </Dialog>
+
+      <ESignatureModal
+        open={assignSignOpen}
+        onClose={() => setAssignSignOpen(false)}
+        title="Sign — Assign Job Description"
+        defaultMeaning="Approved"
+        onConfirm={async (sig) => {
+          await assignMut.mutateAsync(sig);
+          setAssignSignOpen(false);
+        }}
+      />
 
       {/* Edit JD (reason for change) */}
       <Dialog
@@ -590,13 +637,27 @@ export default function JDPage() {
         )}
       </Dialog>
 
-      {/* Approve / Reject e-signature */}
+      {/* Approve / Reject / Deactivate e-signature */}
       <ESignatureModal
         open={!!signTarget}
         onClose={() => setSignTarget(null)}
         defaultMeaning={signTarget?.action === 'REJECT' ? 'Rejected' : 'Approved'}
-        title={signTarget?.action === 'REJECT' ? 'Sign — Reject JD' : 'Sign — Approve JD'}
-        onConfirm={async (sig) => { await signMut.mutateAsync({ sig, reason: signTarget!.action === 'APPROVE' ? 'Job description approved' : 'Job description rejected' }); }}
+        title={
+          signTarget?.action === 'REJECT'
+            ? 'Sign — Reject JD'
+            : signTarget?.action === 'OBSOLETE'
+            ? 'Sign — Deactivate JD'
+            : 'Sign — Approve JD'
+        }
+        onConfirm={async (sig) => {
+          const reason =
+            signTarget!.action === 'APPROVE'
+              ? 'Job description approved'
+              : signTarget!.action === 'REJECT'
+              ? 'Job description rejected'
+              : 'Job description deactivated';
+          await signMut.mutateAsync({ sig, reason });
+        }}
       />
 
       {/* Detail drawer with signatures */}

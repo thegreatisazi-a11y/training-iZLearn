@@ -30,6 +30,27 @@ export async function startMaterialView(userId: string, materialId: string) {
   return { ...created, requiredSeconds };
 }
 
+/**
+ * A4: persist accumulated reading time for a material so a session closed before the
+ * assessment can resume where it left off. Monotonic — never decreases the stored value.
+ */
+export async function saveMaterialProgress(userId: string, materialId: string, elapsedSeconds: number) {
+  const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
+  if (!material) throw AppError.notFound('Training material not found');
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
+  const topicVersion = topic?.currentVersion ?? 1;
+  const requiredSeconds = requiredFor(material, topic);
+
+  const log = await prisma.materialViewLog.upsert({
+    where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
+    update: {},
+    create: { userId, materialId, topicId: material.topicId, topicVersion, requiredSeconds },
+  });
+  const next = Math.max(log.elapsedSeconds ?? 0, Math.max(0, Math.floor(elapsedSeconds)));
+  if (next === (log.elapsedSeconds ?? 0)) return log;
+  return prisma.materialViewLog.update({ where: { id: log.id }, data: { elapsedSeconds: next } });
+}
+
 /** Mark a material as read — only succeeds once the required wall-clock time has elapsed. */
 export async function completeMaterialView(userId: string, materialId: string) {
   const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
@@ -86,6 +107,8 @@ export async function getReadingStatus(userId: string, topicId: string) {
       fileType: m.fileType,
       requiredSeconds: requiredFor(m, topic),
       isCompleted: log?.isCompleted ?? false,
+      // A4: resume support — how far the user had read previously.
+      elapsedSeconds: log?.elapsedSeconds ?? 0,
     };
   });
 }

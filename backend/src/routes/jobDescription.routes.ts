@@ -4,7 +4,7 @@ import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
-import { createJDSchema, updateJDSchema, jdTransitionSchema, jdTemplateSchema, assignFunctionalRoleSchema, acknowledgeJDSchema } from '@izlearn/shared';
+import { createJDSchema, updateJDSchema, jdTransitionSchema, jdTemplateSchema, assignFunctionalRoleSchema, assignJDFromTemplateSchema, acknowledgeJDSchema } from '@izlearn/shared';
 
 const router = Router();
 router.use(authenticate);
@@ -12,7 +12,11 @@ router.use(authenticate);
 router.get('/', requirePermission('jobDescription', 'read'), c.list);
 // CR-50: a user's own JD + self-acknowledge are self-scoped (no module read needed).
 router.get('/mine', c.mine);
+// B1: the full list of the user's own (non-obsolete) assigned JDs.
+router.get('/mine/list', c.mineList);
 router.post('/assign-functional-role', requirePermission('jobDescription', 'assign'), validate(assignFunctionalRoleSchema), c.assignFunctionalRole);
+// I4/I5: assign a JD to a user from a template (editable copy), approved on create.
+router.post('/assign-from-template', requirePermission('jobDescription', 'assign'), validate(assignJDFromTemplateSchema), c.assignFromTemplate);
 router.get('/templates', requirePermission('jobDescription', 'read'), c.listTemplates);
 router.post('/templates', requirePermission('jobDescription', 'write'), validate(jdTemplateSchema), c.createTemplate);
 router.patch('/templates/:id', requirePermission('jobDescription', 'write'), requireReasonForChange, validate(jdTemplateSchema), c.updateTemplate);

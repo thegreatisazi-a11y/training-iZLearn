@@ -106,7 +106,7 @@ function MasterToolbar({
   );
 }
 
-function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
+function LocationsTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -118,7 +118,7 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
+  const params = { page, pageSize: 50, includeInactive: statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['locations', params], queryFn: () => svc.locations.list(params) });
   const allRows = (data?.data ?? []) as unknown as MasterRow[];
   const rows = filterMasterRows(allRows, search, status);
@@ -262,7 +262,7 @@ function LocationsTab({ canWrite, includeInactive }: { canWrite: boolean; includ
   );
 }
 
-function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
+function DepartmentsTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -274,7 +274,7 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
+  const params = { page, pageSize: 50, includeInactive: statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['departments', params], queryFn: () => svc.departments.list(params) });
   const allRows = (data?.data ?? []) as unknown as MasterRow[];
   const rows = filterMasterRows(allRows, search, status);
@@ -422,7 +422,7 @@ function DepartmentsTab({ canWrite, includeInactive }: { canWrite: boolean; incl
   );
 }
 
-function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
+function TrainingTypesTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -434,7 +434,7 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
+  const params = { page, pageSize: 50, includeInactive: statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['training-types', params], queryFn: () => svc.master.listTrainingTypes(params) });
   const allRows = (data?.data ?? []) as unknown as TypeRow[];
   const rows = filterMasterRows(allRows, search, status);
@@ -467,7 +467,6 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   }
 
   const columns: Column<TypeRow>[] = [
-    { key: 'code', header: 'Code' },
     { key: 'displayName', header: 'Display Name' },
     { key: 'description', header: 'Description', render: (r) => r.description || '—' },
     { key: 'isBuiltIn', header: 'Built-in', render: (r) => r.isBuiltIn ? <Badge tone="APPROVED">Yes</Badge> : '—' },
@@ -579,7 +578,7 @@ function TrainingTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   );
 }
 
-function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
+function DocumentTypesTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -591,7 +590,7 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
+  const params = { page, pageSize: 50, includeInactive: statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['document-types', params], queryFn: () => svc.master.listDocumentTypes(params) });
   const allRows = (data?.data ?? []) as unknown as TypeRow[];
   const rows = filterMasterRows(allRows, search, status);
@@ -624,7 +623,6 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   }
 
   const columns: Column<TypeRow>[] = [
-    { key: 'code', header: 'Code' },
     { key: 'displayName', header: 'Display Name' },
     { key: 'description', header: 'Description', render: (r) => r.description || '—' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.isActive ? 'APPROVED' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
@@ -735,7 +733,7 @@ function DocumentTypesTab({ canWrite, includeInactive }: { canWrite: boolean; in
   );
 }
 
-function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; includeInactive: boolean }) {
+function DesignationsTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
@@ -747,7 +745,7 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
 
-  const params = { page, pageSize: 50, includeInactive: includeInactive || statusWantsInactive(status) };
+  const params = { page, pageSize: 50, includeInactive: statusWantsInactive(status) };
   const { data, isLoading } = useQuery({ queryKey: ['designations', params], queryFn: () => svc.master.listDesignations(params) });
   const allRows = (data?.data ?? []) as unknown as TypeRow[];
   const rows = filterMasterRows(allRows, search, status);
@@ -780,7 +778,6 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
   }
 
   const columns: Column<TypeRow>[] = [
-    { key: 'code', header: 'Code' },
     { key: 'displayName', header: 'Display Name' },
     { key: 'description', header: 'Description', render: (r) => r.description || '—' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.isActive ? 'APPROVED' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
@@ -891,26 +888,21 @@ function DesignationsTab({ canWrite, includeInactive }: { canWrite: boolean; inc
 export default function MastersPage() {
   const canWrite = useAuthStore((s) => s.hasPermission)('masterSetup', 'write');
   const [tab, setTab] = useState('locations');
-  const [includeInactive, setIncludeInactive] = useState(false);
 
   return (
     <div>
       <PageHeader title="Master Setup" description="Manage locations, departments, functional roles, training types, and document types." />
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4">
         <Tabs tabs={TABS} value={tab} onChange={setTab} />
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
-          Include Inactive
-        </label>
       </div>
 
       <div className="mt-4">
-        {tab === 'locations' && <LocationsTab canWrite={canWrite} includeInactive={includeInactive} />}
-        {tab === 'departments' && <DepartmentsTab canWrite={canWrite} includeInactive={includeInactive} />}
-        {tab === 'designations' && <DesignationsTab canWrite={canWrite} includeInactive={includeInactive} />}
-        {tab === 'training-types' && <TrainingTypesTab canWrite={canWrite} includeInactive={includeInactive} />}
-        {tab === 'document-types' && <DocumentTypesTab canWrite={canWrite} includeInactive={includeInactive} />}
+        {tab === 'locations' && <LocationsTab canWrite={canWrite} />}
+        {tab === 'departments' && <DepartmentsTab canWrite={canWrite} />}
+        {tab === 'designations' && <DesignationsTab canWrite={canWrite} />}
+        {tab === 'training-types' && <TrainingTypesTab canWrite={canWrite} />}
+        {tab === 'document-types' && <DocumentTypesTab canWrite={canWrite} />}
       </div>
     </div>
   );

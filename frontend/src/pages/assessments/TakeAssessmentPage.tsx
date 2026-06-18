@@ -21,6 +21,7 @@ interface ReadingItem {
   fileType: string;
   requiredSeconds: number;
   isCompleted: boolean;
+  elapsedSeconds?: number;
 }
 
 interface QuestionOption {
@@ -221,6 +222,12 @@ export default function TakeAssessmentPage() {
   const [done, setDone] = useState<Set<string>>(new Set());
   const startedRef = useRef<Set<string>>(new Set());
   const completedRef = useRef<Set<string>>(new Set());
+  // A4: materials that were partially read in a previous session (resumed mid-way).
+  const [resumed, setResumed] = useState<Set<string>>(new Set());
+  // A4: throttle progress auto-saves (materialId → last-saved elapsed seconds).
+  const savedElapsedRef = useRef<Record<string, number>>({});
+  // A4: latest secsLeft reachable from the tick cleanup (to persist on material switch).
+  const secsLeftRef = useRef<Record<string, number>>({});
 
   const tabBlocked = useSingleTabGuard(phase === 'assessment' && !result);
 
@@ -282,16 +289,23 @@ export default function TakeAssessmentPage() {
   const allDone = mats.length === 0 || mats.every((m) => done.has(m.materialId));
 
   // Seed completed/required state once the reading status loads.
+  // A4: resume — subtract any previously-saved elapsed time from the remaining countdown.
   useEffect(() => {
     if (!readingQ.isSuccess) return;
     const d = new Set<string>();
     const s: Record<string, number> = {};
+    const r = new Set<string>();
     for (const m of mats) {
       if (m.isCompleted || m.requiredSeconds <= 0) d.add(m.materialId);
-      s[m.materialId] = m.isCompleted ? 0 : m.requiredSeconds;
+      const prior = Math.max(0, Math.floor(m.elapsedSeconds ?? 0));
+      savedElapsedRef.current[m.materialId] = prior;
+      const remaining = Math.max(0, m.requiredSeconds - prior);
+      s[m.materialId] = m.isCompleted ? 0 : remaining;
+      if (!m.isCompleted && prior > 0 && m.requiredSeconds > 0) r.add(m.materialId);
     }
     setDone(d);
     setSecsLeft(s);
+    setResumed(r);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingQ.isSuccess, mats.length]);
 
@@ -303,9 +317,11 @@ export default function TakeAssessmentPage() {
   }, [phase, active, done]);
 
   // Tick the active material's countdown; on reaching zero, confirm completion server-side.
+  // A4: every few seconds, persist accumulated reading time so a closed session resumes.
   useEffect(() => {
     if (phase !== 'material' || !active || done.has(active.materialId)) return;
     const id = active.materialId;
+    const required = active.requiredSeconds;
     const t = setInterval(() => {
       if (document.hidden) return;
       setSecsLeft((prev) => {
@@ -317,11 +333,35 @@ export default function TakeAssessmentPage() {
             .then(() => setDone((p) => new Set(p).add(id)))
             .catch(() => { completedRef.current.delete(id); });
         }
-        return { ...prev, [id]: Math.max(0, cur - 1) };
+        const nextLeft = Math.max(0, cur - 1);
+        // A4: throttle progress saves to roughly every 10s of reading.
+        const elapsed = Math.max(0, required - nextLeft);
+        const lastSaved = savedElapsedRef.current[id] ?? 0;
+        if (required > 0 && elapsed - lastSaved >= 10) {
+          savedElapsedRef.current[id] = elapsed;
+          svc.materials.saveProgress(id, elapsed).catch(() => undefined);
+        }
+        return { ...prev, [id]: nextLeft };
       });
     }, 1000);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      // A4: persist the latest progress when leaving/switching the material.
+      const left = secsLeftRef.current[id];
+      if (required > 0 && left !== undefined && !completedRef.current.has(id)) {
+        const elapsed = Math.max(0, required - left);
+        if (elapsed > (savedElapsedRef.current[id] ?? 0)) {
+          savedElapsedRef.current[id] = elapsed;
+          svc.materials.saveProgress(id, elapsed).catch(() => undefined);
+        }
+      }
+    };
   }, [phase, active, done]);
+
+  // A4: mirror secsLeft into a ref so the countdown cleanup can read the latest value.
+  useEffect(() => {
+    secsLeftRef.current = secsLeft;
+  }, [secsLeft]);
 
   const questions = useMemo(() => start.data?.questions ?? [], [start.data]);
 
@@ -473,22 +513,52 @@ export default function TakeAssessmentPage() {
     );
   }
 
-  // Reading-gate step — each material must be read for its required time (server
-  // confirms each completion). The assessment is only STARTED once all are done.
+  // A1 reading-gate screen — a top course bar, a left chapter/material list with
+  // overall progress, and the viewer. Each material must be read for its required time
+  // (server-confirmed); the assessment only STARTS once all chapters are done. A4: the
+  // remaining time resumes from previously-saved progress.
   if (phase === 'material') {
     const activeSecs = active ? secsLeft[active.materialId] ?? active.requiredSeconds : 0;
-    const activeDone = active ? done.has(active.materialId) : true;
+    const requiresAssessment = (topicQ.data as { requiresAssessment?: boolean } | undefined)?.requiresAssessment !== false;
+    const totalChapters = mats.length;
+    const doneCount = mats.filter((m) => done.has(m.materialId)).length;
+    const progressPct = totalChapters ? Math.round((doneCount / totalChapters) * 100) : 100;
+    const totalSeconds = mats.reduce((sum, m) => sum + (m.requiredSeconds || 0), 0);
+    const fmt = (s: number) => `${Math.floor(s / 60)}m ${s % 60}s`;
+
     return (
       <div>
-        <PageHeader
-          title={topicTitle ? `Training: ${topicTitle}` : 'Training Material'}
-          description="Step 1 of 2 — Review each training material for its required time before the assessment"
-          actions={
-            <Button variant="ghost" onClick={() => navigate('/assessments')}>
-              Cancel
-            </Button>
-          }
-        />
+        {/* A1: top course header bar */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-slate-400">Start Training · Step 1 of 2 — Reading</div>
+            <div className="truncate text-lg font-semibold text-slate-800">{topicTitle ?? 'Training Material'}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            {totalSeconds > 0 && (
+              <div className="flex items-center gap-1.5 text-sm text-slate-600">
+                <Clock className="h-4 w-4" /> Reading time: <strong>{fmt(totalSeconds)}</strong>
+              </div>
+            )}
+            <div className="text-sm text-slate-600">
+              Progress: <strong>{doneCount}/{totalChapters}</strong> · {progressPct}%
+            </div>
+            <Button variant="ghost" onClick={() => navigate('/assessments')}>Cancel</Button>
+            {requiresAssessment && (
+              <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
+                {start.isPending ? 'Starting…' : 'Continue to Assessment'}
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* A1: overall progress bar */}
+        {totalChapters > 0 && (
+          <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progressPct}%` }} />
+          </div>
+        )}
+
         {readingQ.isLoading ? (
           <PageLoader />
         ) : mats.length === 0 ? (
@@ -498,55 +568,81 @@ export default function TakeAssessmentPage() {
             </CardContent>
           </Card>
         ) : (
-          <>
-            <div className="mb-3 flex flex-wrap gap-2">
-              {mats.map((m, i) => (
-                <Button key={m.materialId} size="sm" variant={i === activeMaterialIdx ? 'primary' : 'outline'} onClick={() => setActiveMaterialIdx(i)}>
-                  {done.has(m.materialId) ? <CheckCircle2 className="h-3.5 w-3.5 text-green-600" /> : <Clock className="h-3.5 w-3.5" />} {m.originalFileName}
-                </Button>
-              ))}
+          <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+            {/* A1: left chapter list */}
+            <div className="space-y-1.5">
+              <div className="px-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Chapters</div>
+              {mats.map((m, i) => {
+                const isActive = i === activeMaterialIdx;
+                const matDone = done.has(m.materialId);
+                const remaining = secsLeft[m.materialId] ?? m.requiredSeconds;
+                return (
+                  <button
+                    key={m.materialId}
+                    type="button"
+                    onClick={() => setActiveMaterialIdx(i)}
+                    className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                      isActive ? 'border-primary bg-primary/5' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="mt-0.5 shrink-0">
+                      {matDone ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Clock className="h-4 w-4 text-slate-400" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-700">{i + 1}. {m.originalFileName}</span>
+                      <span className="block text-xs text-slate-400">
+                        {matDone
+                          ? 'Read'
+                          : m.requiredSeconds > 0
+                          ? `${remaining}s left${resumed.has(m.materialId) ? ' · resumed' : ''}`
+                          : 'Optional'}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-            {active && (
-              <Card className="mb-4">
-                <CardContent>
-                  <InlineFileViewer materialId={active.materialId} fileName={active.originalFileName} fileType={active.fileType} heightClass="h-[72vh]" />
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
-        {(() => {
-          const requiresAssessment = (topicQ.data as { requiresAssessment?: boolean } | undefined)?.requiresAssessment !== false;
-          return (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <Clock className="h-4 w-4" />
-                {mats.length === 0 || allDone ? (
-                  <span>Reading complete. {requiresAssessment ? 'You may start the assessment.' : 'Please confirm the acknowledgement to complete.'}</span>
-                ) : activeDone ? (
-                  <span>This material is read. Open the remaining material(s) to finish.</span>
-                ) : (
-                  <span>Keep this material open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".</span>
-                )}
-              </div>
-              {requiresAssessment ? (
-                <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
-                  {start.isPending ? 'Starting…' : 'Continue to assessment'}
-                </Button>
-              ) : (
-                <div className="flex flex-col items-end gap-2">
-                  <label className="flex items-center gap-2 text-sm text-slate-700">
-                    <input type="checkbox" disabled={!allDone} checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
-                    I have read &amp; understood (I accept the Terms &amp; Conditions).
-                  </label>
-                  <Button disabled={!allDone || !tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
-                    {ackComplete.isPending ? 'Completing…' : 'Mark as read &amp; complete'}
-                  </Button>
-                </div>
+
+            {/* viewer */}
+            <div>
+              {active && (
+                <Card>
+                  <CardContent>
+                    <InlineFileViewer materialId={active.materialId} fileName={active.originalFileName} fileType={active.fileType} heightClass="h-[72vh]" />
+                  </CardContent>
+                </Card>
               )}
             </div>
-          );
-        })()}
+          </div>
+        )}
+
+        {/* footer status + completion controls */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <Clock className="h-4 w-4" />
+            {mats.length === 0 || allDone ? (
+              <span>Reading complete. {requiresAssessment ? 'You may start the assessment.' : 'Please confirm the acknowledgement to complete.'}</span>
+            ) : active && done.has(active.materialId) ? (
+              <span>This chapter is read. Open the remaining chapter(s) to finish.</span>
+            ) : (
+              <span>
+                Keep this chapter open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".
+                {active && resumed.has(active.materialId) && <span className="ml-1 text-primary">(resumed)</span>}
+              </span>
+            )}
+          </div>
+          {!requiresAssessment && (
+            <div className="flex flex-col items-end gap-2">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" disabled={!allDone} checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
+                I have read &amp; understood (I accept the Terms &amp; Conditions).
+              </label>
+              <Button disabled={!allDone || !tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
+                {ackComplete.isPending ? 'Completing…' : 'Mark as read & complete'}
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
     );
   }

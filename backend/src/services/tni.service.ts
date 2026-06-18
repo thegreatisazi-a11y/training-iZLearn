@@ -20,10 +20,24 @@ export async function listTNI(q: PaginationQuery & { userId?: string; status?: s
     ...(q.userId ? { userId: q.userId } : {}),
     ...(q.status ? { status: q.status as Prisma.EnumTNIStatusFilter['equals'] } : {}),
   };
-  const [data, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.tNI.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.tNI.count({ where }),
   ]);
+  // J2: resolve user + topic ids → names so the Requests list shows the user and topic.
+  const userIds = Array.from(new Set(rows.map((r) => r.userId).filter(Boolean)));
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId).filter(Boolean)));
+  const [users, topics] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true } }) : [],
+    topicIds.length ? prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true } }) : [],
+  ]);
+  const userName = new Map(users.map((u) => [u.id, u.fullName]));
+  const topicTitle = new Map(topics.map((t) => [t.id, t.title]));
+  const data = rows.map((r) => ({
+    ...r,
+    userFullName: userName.get(r.userId) ?? null,
+    topicTitle: topicTitle.get(r.topicId) ?? null,
+  }));
   return { data, total, page: q.page, pageSize: q.pageSize };
 }
 
@@ -33,17 +47,38 @@ export async function getTNI(id: string) {
   return tni;
 }
 
+/**
+ * J2: create a TNI for one user across one or more topics — stored as one TNI row
+ * per (user, topic). Topics that already have an open (PENDING/APPROVED) TNI for the
+ * user are skipped so the same need is not raised twice.
+ */
 export async function createTNI(input: CreateTNIInput, identifiedBy: string) {
-  return prisma.tNI.create({
-    data: {
-      userId: input.userId,
-      topicId: input.topicId,
-      identifiedBy,
-      justification: input.justification,
-      status: 'PENDING',
-      createdBy: identifiedBy,
-    },
+  const topicIds = Array.from(new Set([...(input.topicIds ?? []), ...(input.topicId ? [input.topicId] : [])]));
+  if (!topicIds.length) throw AppError.badRequest('Select at least one topic.');
+
+  const existing = await prisma.tNI.findMany({
+    where: { userId: input.userId, topicId: { in: topicIds }, isDeleted: false, status: { in: ['PENDING', 'APPROVED'] } },
+    select: { topicId: true },
   });
+  const skip = new Set(existing.map((e) => e.topicId));
+  const toCreate = topicIds.filter((t) => !skip.has(t));
+  if (!toCreate.length) throw AppError.conflict('An open TNI already exists for the selected topic(s).');
+
+  const created = await Promise.all(
+    toCreate.map((topicId) =>
+      prisma.tNI.create({
+        data: {
+          userId: input.userId,
+          topicId,
+          identifiedBy,
+          justification: input.justification,
+          status: 'PENDING',
+          createdBy: identifiedBy,
+        },
+      }),
+    ),
+  );
+  return { created: created.length, skipped: skip.size, items: created };
 }
 
 /**

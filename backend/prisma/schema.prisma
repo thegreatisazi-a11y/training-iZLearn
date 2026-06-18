@@ -273,6 +273,8 @@ model MaterialViewLog {
   topicId         String
   topicVersion    Int
   requiredSeconds Int       @default(0)
+  // A4: accumulated reading time so a closed-mid-reading session can resume where it left.
+  elapsedSeconds  Int       @default(0)
   startedAt       DateTime  @default(now())
   completedAt     DateTime?
   isCompleted     Boolean   @default(false)

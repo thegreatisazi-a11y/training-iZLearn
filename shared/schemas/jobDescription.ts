@@ -42,6 +42,20 @@ export const assignFunctionalRoleSchema = z.object({
 });
 export type AssignFunctionalRoleInput = z.infer<typeof assignFunctionalRoleSchema>;
 
+/**
+ * I4/I5: assign a JD to a user by picking a template (by title). The title/content/
+ * department are pre-filled from the template but editable — the edited copy applies
+ * only to this assignment and never mutates the template. Assigned directly as APPROVED.
+ */
+export const assignJDFromTemplateSchema = z.object({
+  userId: uuid,
+  templateId: uuid,
+  title: nonEmptyString,
+  content: nonEmptyString,
+  departmentId: uuid.optional(),
+});
+export type AssignJDFromTemplateInput = z.infer<typeof assignJDFromTemplateSchema>;
+
 /** The exact sentence a user must type to acknowledge their JD (D-JD3). */
 export const JD_ACK_SENTENCE = 'I acknowledge/accept the assigned responsibilities.';
 

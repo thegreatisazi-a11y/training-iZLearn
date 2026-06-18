@@ -25,8 +25,14 @@ export const transition = asyncHandler(async (req, res) =>
 
 export const mine = asyncHandler(async (req, res) => sendSuccess(res, await svc.getMyJD(req.user!.id)));
 
+export const mineList = asyncHandler(async (req, res) => sendSuccess(res, await svc.listMyJDs(req.user!.id)));
+
 export const assignFunctionalRole = asyncHandler(async (req, res) =>
   sendCreated(res, await svc.assignFunctionalRole(req.body.userId, req.body.functionalRoleId, req), 'Functional role assigned'),
+);
+
+export const assignFromTemplate = asyncHandler(async (req, res) =>
+  sendCreated(res, await svc.assignJDFromTemplate(req.body, req), 'Job description assigned'),
 );
 
 export const acknowledge = asyncHandler(async (req, res) =>
