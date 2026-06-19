@@ -277,7 +277,10 @@ export async function publishDraftChanges(id: string, req: Request) {
 
   const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
   const promoted = await prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
-  // Re-publish of an updated course also assigns any newly-matching functional-role users.
+  // After promoting the draft, refresh the signatory completion records (so signatories
+  // added/changed during the edit get their COMPLETED record), and assign any newly-
+  // matching functional-role users.
+  await markSignatoriesComplete(id, req.user!.id);
   await assignToFunctionalRoleHolders(promoted, req.user!.id);
   return promoted;
 }
