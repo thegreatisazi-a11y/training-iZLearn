@@ -22,7 +22,7 @@ export const createTopicSchema = z.object({
   designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
   roleId: uuid.optional(),
   roleIds: z.array(uuid).optional(), // CR-30: multiple roles a topic is mapped to
-  durationMinutes: z.coerce.number().int().positive().optional(), // Page 8: optional, demoted to Advanced
+  durationMinutes: z.coerce.number().int().min(0).optional(), // Page 8/G1: optional, demoted (0 = unspecified)
   requiresAssessment: z.coerce.boolean().optional(), // CR-41: false = SOP, completes via T&C
   assessmentTimeMinutes: z.coerce.number().int().positive().optional(), // CR-38: countdown limit
   passingScorePercent: z.coerce.number().int().min(0).max(100),
@@ -61,8 +61,9 @@ export const updateTopicSchema = z.object({
   roleIds: z.array(uuid).optional(), // CR-30
   requiresAssessment: z.coerce.boolean().optional(), // CR-41
   assessmentTimeMinutes: z.coerce.number().int().positive().nullable().optional(), // CR-38 (null clears)
-  durationMinutes: z.coerce.number().int().positive().optional(),
-  refresherIntervalMonths: z.coerce.number().int().positive().optional(),
+  // G1: duration is optional/demoted — 0 means "unspecified" and must be accepted on edit.
+  durationMinutes: z.coerce.number().int().min(0).optional(),
+  refresherIntervalMonths: z.coerce.number().int().min(0).optional(),
   maxAttempts: z.coerce.number().int().min(1).optional(),
   questionLimit: z.coerce.number().int().min(1).optional(),
   randomizeQuestions: z.coerce.boolean().optional(),

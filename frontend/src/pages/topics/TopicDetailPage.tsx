@@ -370,11 +370,11 @@ export default function TopicDetailPage() {
         designationIds: editTopicForm.designationIds,
         requiresAssessment: editTopicForm.requiresAssessment,
         signatories: editTopicForm.signatories.filter((s) => s.userId),
-        assessmentTimeMinutes: editTopicForm.assessmentTimeMinutes ? Number(editTopicForm.assessmentTimeMinutes) : null,
-        durationMinutes: Number(editTopicForm.durationMinutes),
+        assessmentTimeMinutes: Number(editTopicForm.assessmentTimeMinutes) > 0 ? Number(editTopicForm.assessmentTimeMinutes) : null,
+        durationMinutes: editTopicForm.durationMinutes !== '' ? Number(editTopicForm.durationMinutes) : undefined,
         maxAttempts: Number(editTopicForm.maxAttempts),
-        questionLimit: editTopicForm.questionLimit ? Number(editTopicForm.questionLimit) : undefined,
-        refresherIntervalMonths: editTopicForm.refresherIntervalMonths ? Number(editTopicForm.refresherIntervalMonths) : undefined,
+        questionLimit: Number(editTopicForm.questionLimit) > 0 ? Number(editTopicForm.questionLimit) : undefined,
+        refresherIntervalMonths: Number(editTopicForm.refresherIntervalMonths) > 0 ? Number(editTopicForm.refresherIntervalMonths) : undefined,
         materialViewSeconds: editTopicForm.materialViewSeconds ? Number(editTopicForm.materialViewSeconds) : undefined,
         effectiveDate: editTopicForm.effectiveDate || undefined,
         reviewDate: editTopicForm.reviewDate || undefined,
@@ -1251,7 +1251,7 @@ export default function TopicDetailPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setEditTopicOpen(false)}>Cancel</Button>
-            <Button disabled={!editTopicForm.title || !editTopicForm.durationMinutes || !editTopicForm.maxAttempts} onClick={() => setEditTopicReasonOpen(true)}>
+            <Button disabled={!editTopicForm.title || !editTopicForm.maxAttempts} onClick={() => setEditTopicReasonOpen(true)}>
               Save…
             </Button>
           </>

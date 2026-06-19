@@ -9,7 +9,7 @@ import { toCsv } from '../utils/csv';
 import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
 import { snapshotVersion } from './topicVersionHistory.service';
-import { notifyCourseRevised } from './notification.service';
+import { notifyCourseRevised, notifyTrainingAssigned } from './notification.service';
 import type {
   CreateTopicInput,
   UpdateTopicInput,
@@ -276,7 +276,10 @@ export async function publishDraftChanges(id: string, req: Request) {
   }
 
   const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
-  return prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
+  const promoted = await prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
+  // Re-publish of an updated course also assigns any newly-matching functional-role users.
+  await assignToFunctionalRoleHolders(promoted, req.user!.id);
+  return promoted;
 }
 
 /**
@@ -302,8 +305,52 @@ export async function updateTopicStatus(id: string, status: TopicStatus, req: Re
   });
   // CR-51: on publish, the prepared/reviewed/approved signatories are deemed trained
   // on this course — record a COMPLETED assignment so it shows in their records.
-  if (status === 'PUBLISHED') await markSignatoriesComplete(updated.id, req.user!.id);
+  if (status === 'PUBLISHED') {
+    await markSignatoriesComplete(updated.id, req.user!.id);
+    // Auto-assign the published course to everyone holding its functional role(s).
+    await assignToFunctionalRoleHolders(updated, req.user!.id);
+  }
   return updated;
+}
+
+/** Merge a user's functional roles (primary designationId + designationIds array). */
+function functionalRoleIdsOf(u: { designationId?: string | null; designationIds?: unknown }): string[] {
+  const arr = Array.isArray(u.designationIds) ? (u.designationIds as string[]) : [];
+  return u.designationId && !arr.includes(u.designationId) ? [...arr, u.designationId] : arr;
+}
+
+/**
+ * On publish (and re-publish), auto-assign the course to every active user whose
+ * functional role(s) match the topic's target functional role(s) (designationIds).
+ * Creates a PENDING ROLE_SPECIFIC assignment per user, skipping anyone who already has
+ * an active/completed assignment for the topic. TNI remains the separate planned flow.
+ * Best-effort — never blocks the publish transition.
+ */
+async function assignToFunctionalRoleHolders(
+  topic: { id: string; designationId?: string | null; designationIds?: unknown },
+  actorId: string,
+) {
+  try {
+    const targets = new Set(functionalRoleIdsOf(topic));
+    if (!targets.size) return; // no target functional role → nothing to auto-assign.
+    const users = await prisma.user.findMany({
+      where: { isActive: true, isDeleted: false },
+      select: { id: true, designationId: true, designationIds: true },
+    });
+    for (const u of users) {
+      if (!functionalRoleIdsOf(u).some((r) => targets.has(r))) continue;
+      const exists = await prisma.trainingAssignment.findFirst({
+        where: { userId: u.id, topicId: topic.id, isDeleted: false, status: { notIn: ['WAIVED'] } },
+      });
+      if (exists) continue;
+      const a = await prisma.trainingAssignment.create({
+        data: { userId: u.id, topicId: topic.id, assignmentType: 'ROLE_SPECIFIC', status: 'PENDING', assignedBy: actorId, createdBy: actorId },
+      });
+      await notifyTrainingAssigned(a.userId, a.topicId, null);
+    }
+  } catch {
+    /* best-effort: a notification/assignment hiccup must not block publish */
+  }
 }
 
 /**
