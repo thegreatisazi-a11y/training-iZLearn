@@ -51,14 +51,16 @@ export function ESignatureModal({
 
   useEffect(() => {
     if (open) {
-      setUsername('');
+      // Pre-fill the username with the signed-in user (component 1 of the e-signature)
+      // for convenience; it stays editable so a different signer can be entered.
+      setUsername(expectedUser);
       setPassword('');
       setMeaning(defaultMeaning);
       setReason('');
       setConfirmed(false);
       setError('');
     }
-  }, [open, defaultMeaning]);
+  }, [open, defaultMeaning, expectedUser]);
 
   const reasonOk = !requireReason || reason.trim().length >= 5;
   const canSign = !!username && !!password && confirmed && reasonOk;

@@ -13,6 +13,20 @@ import type { PaginationQuery } from '@izlearn/shared';
 const materialKey = (storedFileName: string) => `materials/${storedFileName}`;
 
 /**
+ * Increment a topic's currentVersion. Called when a material change goes LIVE
+ * (a draft/unpublished topic) — adding, replacing, or attaching a file is a
+ * change to the course content, so the course version moves with it. On a
+ * PUBLISHED topic the change is staged and the bump happens on publish instead
+ * (publishDraftChanges in trainingTopic.service.ts).
+ */
+async function bumpTopicVersion(topicId: string) {
+  await prisma.trainingTopic.update({
+    where: { id: topicId },
+    data: { currentVersion: { increment: 1 } },
+  });
+}
+
+/**
  * Training materials (Module 4) — the uploaded files (PDF/PPT/video/...) that
  * back a training topic, plus a reusable material library.
  *
@@ -53,6 +67,9 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
       where: { topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false },
     });
+    // The course content changed and goes live now — bump the course version.
+    // (On a PUBLISHED topic the change is staged and the version bumps on publish.)
+    await bumpTopicVersion(topicId);
   }
 
   // Use the highest existing version (not the count): materials are copied across
@@ -191,6 +208,8 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
     });
+    // Live replacement → the course content changed; bump the course version.
+    await bumpTopicVersion(old.topicId);
   }
 
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
@@ -255,6 +274,8 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
       where: { topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true },
     });
+    // Live attach → the course content changed; bump the course version.
+    await bumpTopicVersion(topicId);
   }
 
   // Use the highest existing version (not the count): materials are copied across
@@ -292,6 +313,76 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
       note: `Attached "${source.originalFileName}" from the Material Library`,
     });
   }
+
+  return material;
+}
+
+/**
+ * 4.1 (library variant): Replace/Update a SPECIFIC material using a file from the
+ * Material Library (instead of an uploaded file). Mirrors replaceMaterial exactly —
+ * the selected file is superseded (replacesMaterialId), the library file's bytes are
+ * copied into independent storage, and a version-history snapshot is written — but the
+ * new file's content comes from an existing library material.
+ *  - PUBLISHED topic: STAGED against the target (inert until the topic is published).
+ *  - DRAFT topic: superseded immediately, the copied file becomes current, course
+ *    version bumped. Reason-for-change is captured by the route middleware.
+ */
+export async function replaceMaterialFromLibrary(materialId: string, sourceMaterialId: string, createdBy: string) {
+  const old = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
+  if (!old) throw AppError.notFound('Training material not found');
+  const source = await prisma.trainingMaterial.findFirst({ where: { id: sourceMaterialId, isDeleted: false } });
+  if (!source) throw AppError.notFound('Source library material not found');
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
+  if (!topic) throw AppError.notFound('Training topic not found');
+
+  // Copy the source file to an independent stored object (own lineage), as attach does.
+  const storedFileName = generateStoredName(source.originalFileName);
+  const destKey = materialKey(storedFileName);
+  if (!(await storage.objectExists(source.filePath))) throw AppError.badRequest('The source file is no longer available in storage.');
+  await storage.copyObject(source.filePath, destKey);
+
+  const reason = auditContext.getStore()?.reasonForChange ?? null;
+  const staged = isPublished(topic.status);
+  if (!staged) {
+    await prisma.trainingMaterial.updateMany({
+      where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
+      data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
+    });
+    await bumpTopicVersion(old.topicId);
+  }
+
+  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
+  const material = await prisma.trainingMaterial.create({
+    data: {
+      topicId: old.topicId,
+      originalFileName: source.originalFileName,
+      storedFileName,
+      filePath: destKey,
+      fileType: source.fileType,
+      fileSize: source.fileSize,
+      version: lastVersion + 1,
+      isStaged: staged,
+      isCurrentVersion: !staged,
+      replacesMaterialId: old.id,
+      changeReason: reason,
+      createdBy,
+    },
+  });
+
+  await recordEvent({
+    action: 'FILE_UPLOAD',
+    entityType: 'TrainingMaterial',
+    entityId: material.id,
+    newValue: { topicId: old.topicId, replacedMaterialId: old.id, copiedFromMaterialId: source.id, originalFileName: source.originalFileName, staged },
+  });
+
+  await snapshotVersion({
+    topicId: old.topicId,
+    version: topic.currentVersion,
+    changedBy: createdBy,
+    reason,
+    note: `Replaced file "${old.originalFileName}" with "${source.originalFileName}" from the Material Library`,
+  });
 
   return material;
 }

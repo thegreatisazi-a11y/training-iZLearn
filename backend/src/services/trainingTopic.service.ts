@@ -276,7 +276,17 @@ export async function publishDraftChanges(id: string, req: Request) {
   }
 
   const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
-  const promoted = await prisma.trainingTopic.update({ where: { id }, data: { ...draft, draftMeta: null } });
+  const promoted = await prisma.trainingTopic.update({
+    where: { id },
+    data: {
+      ...draft,
+      draftMeta: null,
+      // Material changes that were staged on this published course now go live —
+      // bump the course version to mark the new content (mirrors the draft-topic
+      // path where a live material change bumps the version immediately).
+      ...(stagedCount > 0 ? { currentVersion: { increment: 1 } } : {}),
+    },
+  });
   // After promoting the draft, refresh the signatory completion records (so signatories
   // added/changed during the edit get their COMPLETED record), and assign any newly-
   // matching functional-role users.

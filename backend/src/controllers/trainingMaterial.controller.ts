@@ -97,6 +97,14 @@ export const replace = asyncHandler(async (req: Request, res: Response) => {
   sendCreated(res, material, 'Material replaced with a new version');
 });
 
+/** 4.1 (library variant): replace a specific material with a Material Library file. */
+export const replaceFromLibrary = asyncHandler(async (req: Request, res: Response) => {
+  const sourceMaterialId = (req.body?.sourceMaterialId ?? '').toString();
+  if (!sourceMaterialId) throw AppError.badRequest('sourceMaterialId is required.');
+  const material = await svc.replaceMaterialFromLibrary(req.params.id, sourceMaterialId, req.user!.id);
+  sendCreated(res, material, 'Material replaced with a library file');
+});
+
 export const attachFromLibrary = asyncHandler(async (req: Request, res: Response) => {
   const materialId = (req.body?.materialId ?? '').toString();
   const topicId = (req.body?.topicId ?? '').toString();

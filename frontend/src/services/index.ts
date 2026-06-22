@@ -90,6 +90,9 @@ export const svc = {
     },
     attachFromLibrary: (materialId: string, topicId: string, reasonForChange?: string) =>
       data(api.post('/materials/attach', { materialId, topicId, reasonForChange })),
+    /** Replace a specific material with an existing Material Library file (reason required). */
+    replaceFromLibrary: (id: string, sourceMaterialId: string, reasonForChange: string) =>
+      data(api.post(`/materials/${id}/replace-from-library`, { sourceMaterialId, reasonForChange })),
     setViewTime: (id: string, requiredViewSeconds: number) => data(api.patch(`/materials/${id}`, { requiredViewSeconds })),
     startView: (id: string) => data(api.post(`/materials/${id}/view/start`, {})),
     completeView: (id: string) => data(api.post(`/materials/${id}/view/complete`, {})),

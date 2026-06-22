@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Download, Trash2, Plus, Pencil, RefreshCw, Library, Layers, Eye, X } from 'lucide-react';
+import { ArrowLeft, Download, Trash2, Plus, Pencil, RefreshCw, Library, Eye, X } from 'lucide-react';
 import { MultiSelect } from '@/components/common/MultiSelect';
 import DOMPurify from 'dompurify';
 import { questionType, trainingType, type QuestionType } from '@izlearn/shared';
@@ -200,6 +200,11 @@ export default function TopicDetailPage() {
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replaceTarget, setReplaceTarget] = useState<Material | null>(null);
   const [replacePending, setReplacePending] = useState<{ material: Material; file: File } | null>(null);
+  // Replace/Update source chooser: which file is being replaced, and (when via library)
+  // the target + selected source pending a reason-for-change.
+  const [replaceChoice, setReplaceChoice] = useState<Material | null>(null);
+  const [replaceLibraryFor, setReplaceLibraryFor] = useState<Material | null>(null);
+  const [replaceLibraryPending, setReplaceLibraryPending] = useState<{ material: Material; source: Material } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [statusChange, setStatusChange] = useState<'PUBLISHED' | 'ARCHIVED' | 'DRAFT' | null>(null);
   const [publishDraftOpen, setPublishDraftOpen] = useState(false);
@@ -238,7 +243,7 @@ export default function TopicDetailPage() {
   const { data: library } = useQuery({
     queryKey: ['materials', 'library'],
     queryFn: () => svc.materials.list({ pageSize: 200 }),
-    enabled: libraryOpen,
+    enabled: libraryOpen || !!replaceLibraryFor,
   });
   const { data: bundles } = useQuery({
     queryKey: ['bundles', 'all'],
@@ -276,6 +281,8 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Material uploaded');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
+      // A material change can bump the course version — refresh the topic header.
+      qc.invalidateQueries({ queryKey: ['topic', id] });
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -304,6 +311,20 @@ export default function TopicDetailPage() {
       toast.success('File replaced with a new version');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Replace a specific file using an existing Material Library file (true replace).
+  const replaceFromLibraryMut = useMutation({
+    mutationFn: (reason: string) =>
+      svc.materials.replaceFromLibrary(replaceLibraryPending!.material.id, replaceLibraryPending!.source.id, reason),
+    onSuccess: () => {
+      toast.success('File replaced with a library file');
+      qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
+      qc.invalidateQueries({ queryKey: ['topic-history', id] });
+      qc.invalidateQueries({ queryKey: ['topic', id] });
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -314,6 +335,7 @@ export default function TopicDetailPage() {
       toast.success('Library material attached');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
+      qc.invalidateQueries({ queryKey: ['topic', id] });
       setLibraryOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -544,7 +566,7 @@ export default function TopicDetailPage() {
             <button
               type="button"
               className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-              onClick={() => { setReplaceTarget(r); replaceInputRef.current?.click(); }}
+              onClick={() => setReplaceChoice(r)}
             >
               <RefreshCw className="h-4 w-4" /> Replace / Update
             </button>
@@ -644,11 +666,13 @@ export default function TopicDetailPage() {
                   )}
                 </>
               )}
+              {/* Bundles were removed from the left menu — "Add to bundle(s)" is hidden.
+                  Dialog/handler kept below (unreachable) in case bundles return.
               {canBundleEdit && (
                 <Button variant="outline" onClick={() => { setSelectedBundleIds([]); setBundleDialogOpen(true); }}>
                   <Layers className="h-4 w-4" /> Add to bundle(s)
                 </Button>
-              )}
+              )} */}
               {/* G2: full-course "Revise (new version)" removed — Archive only; material/draft
                   changes are published in place via "Publish changes" (no full-course clone). */}
               {canEdit && (
@@ -1121,12 +1145,69 @@ export default function TopicDetailPage() {
         </label>
       </Dialog>
 
-      {/* 4.1: replace/update a specific file — confirm with a reason for change */}
+      {/* 4.1: replace/update a specific file — choose the source (device or library) */}
+      <Dialog
+        open={!!replaceChoice}
+        onClose={() => setReplaceChoice(null)}
+        title={`Replace "${replaceChoice?.originalFileName ?? ''}"`}
+        footer={<Button variant="outline" onClick={() => setReplaceChoice(null)}>Cancel</Button>}
+      >
+        <p className="mb-3 text-sm text-slate-600">Choose where the replacement file comes from.</p>
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { setReplaceTarget(replaceChoice); setReplaceChoice(null); replaceInputRef.current?.click(); }}
+          >
+            <RefreshCw className="h-4 w-4" /> Upload from device
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => { setReplaceLibraryFor(replaceChoice); setReplaceChoice(null); }}
+          >
+            <Library className="h-4 w-4" /> Choose from Material Library
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* 4.1 (library variant): pick a library file to replace the selected material with */}
+      <Dialog
+        open={!!replaceLibraryFor}
+        onClose={() => setReplaceLibraryFor(null)}
+        title={`Replace "${replaceLibraryFor?.originalFileName ?? ''}" from Material Library`}
+        footer={<Button variant="outline" onClick={() => setReplaceLibraryFor(null)}>Close</Button>}
+      >
+        <p className="mb-3 text-xs text-slate-500">{isPublished ? 'Select a file to stage as the replacement — it goes live when you publish changes.' : 'Select a file to replace this material with as the current version.'}</p>
+        <div className="max-h-80 space-y-2 overflow-y-auto">
+          {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id && m.id !== replaceLibraryFor?.id).map((m) => (
+            <div key={m.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2">
+              <div className="text-sm text-slate-700">
+                {m.originalFileName} <span className="uppercase text-slate-400">· {m.fileType}</span>
+              </div>
+              <Button size="sm" variant="outline" onClick={() => { if (replaceLibraryFor) setReplaceLibraryPending({ material: replaceLibraryFor, source: m }); setReplaceLibraryFor(null); }}>
+                Select
+              </Button>
+            </div>
+          ))}
+          {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id && m.id !== replaceLibraryFor?.id).length === 0 && (
+            <p className="text-sm text-slate-400">No library materials available.</p>
+          )}
+        </div>
+      </Dialog>
+
+      {/* 4.1: replace/update a specific file (device) — confirm with a reason for change */}
       <ReasonForChangeDialog
         open={!!replacePending}
         onClose={() => setReplacePending(null)}
         onConfirm={async (r) => { await replaceMut.mutateAsync(r); setReplacePending(null); }}
         title={`Replace "${replacePending?.material.originalFileName ?? ''}" — Reason for Change`}
+      />
+
+      {/* 4.1 (library variant): confirm the library replacement with a reason for change */}
+      <ReasonForChangeDialog
+        open={!!replaceLibraryPending}
+        onClose={() => setReplaceLibraryPending(null)}
+        onConfirm={async (r) => { await replaceFromLibraryMut.mutateAsync(r); setReplaceLibraryPending(null); }}
+        title={`Replace "${replaceLibraryPending?.material.originalFileName ?? ''}" with "${replaceLibraryPending?.source.originalFileName ?? ''}" — Reason for Change`}
       />
 
       {/* 4.3 / Step 3: publish / unpublish (archive) — controlled, e-signed */}

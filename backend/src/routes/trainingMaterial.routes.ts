@@ -39,6 +39,13 @@ router.post(
   requireReasonForChange,
   c.replace,
 );
+// 4.1 (library variant): replace a specific material with an existing Material Library file (JSON; reason required).
+router.post(
+  '/:id/replace-from-library',
+  requirePermission('materialManagement', 'write'),
+  requireReasonForChange,
+  c.replaceFromLibrary,
+);
 router.delete(
   '/:id',
   requirePermission('materialManagement', 'write'),
