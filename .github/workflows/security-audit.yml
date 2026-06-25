@@ -2,9 +2,12 @@
 # This is an npm WORKSPACES monorepo: there is a single root package-lock.json and
 # the workspaces (backend/, frontend/) do NOT have their own lockfiles, so install
 # happens at the root. The audit gates on PRODUCTION dependencies only
-# (--omit=dev): dev/build-only tooling advisories (vite, esbuild, vitest, etc.) do
-# not ship in the deployed artifact and must not block a deploy. Any HIGH or
-# CRITICAL severity finding in production deps fails the build.
+# (--omit=dev --omit=optional): dev/build-only tooling advisories (vite, esbuild,
+# vitest, etc.) and OPTIONAL native deps that are never required at runtime (e.g.
+# `canvas`, pulled only as an optional fallback by jsdom/pdfjs-dist and excluded
+# from both the browser bundle and the server runtime) do not ship in the deployed
+# artifact and must not block a deploy. Any HIGH or CRITICAL severity finding in
+# the remaining production deps fails the build.
 
 name: Security Audit
 
@@ -35,11 +38,11 @@ jobs:
         run: npm ci
 
       - name: Audit backend production dependencies (fail on high/critical)
-        run: npm audit --omit=dev --audit-level=high --workspace=backend
+        run: npm audit --omit=dev --omit=optional --audit-level=high --workspace=backend
 
       - name: Audit report (informational, never fails)
         if: always()
-        run: npm audit --omit=dev --json --workspace=backend > audit-report-backend.json || true
+        run: npm audit --omit=dev --omit=optional --json --workspace=backend > audit-report-backend.json || true
 
       - name: Upload audit report
         if: always()
@@ -66,11 +69,11 @@ jobs:
         run: npm ci
 
       - name: Audit frontend production dependencies (fail on high/critical)
-        run: npm audit --omit=dev --audit-level=high --workspace=frontend
+        run: npm audit --omit=dev --omit=optional --audit-level=high --workspace=frontend
 
       - name: Audit report (informational, never fails)
         if: always()
-        run: npm audit --omit=dev --json --workspace=frontend > audit-report-frontend.json || true
+        run: npm audit --omit=dev --omit=optional --json --workspace=frontend > audit-report-frontend.json || true
 
       - name: Upload audit report
         if: always()
