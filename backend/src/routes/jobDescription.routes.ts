@@ -21,6 +21,9 @@ router.get('/templates', requirePermission('jobDescription', 'read'), c.listTemp
 router.post('/templates', requirePermission('jobDescription', 'write'), validate(jdTemplateSchema), c.createTemplate);
 router.patch('/templates/:id', requirePermission('jobDescription', 'write'), requireReasonForChange, validate(jdTemplateSchema), c.updateTemplate);
 router.get('/user/:userId/history', requirePermission('jobDescription', 'read'), c.history);
+// Team JD view — gated on the team module ("View team"); owner/supervisor/admin
+// scope is enforced in the service (mirrors the CV team-view rule).
+router.get('/user/:userId', requirePermission('team', 'view'), c.userJDs);
 router.post('/from-template', requirePermission('jobDescription', 'write'), c.fromTemplate);
 router.get('/:id', requirePermission('jobDescription', 'read'), c.get);
 router.post('/', requirePermission('jobDescription', 'write'), validate(createJDSchema), c.create);

@@ -46,6 +46,11 @@ export const fromTemplate = asyncHandler(async (req, res) => {
 
 export const history = asyncHandler(async (req, res) => sendSuccess(res, await svc.getEmployeeJDHistory(req.params.userId)));
 
+// Supervisor/owner/admin view of a user's JDs (gated in the service), mirroring CV.
+export const userJDs = asyncHandler(async (req, res) =>
+  sendSuccess(res, await svc.getUserJDsForViewer(req.params.userId, req.user!)),
+);
+
 export const listTemplates = asyncHandler(async (req, res) => {
   const r = await svc.listTemplates(paginationQuery.parse(req.query));
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });

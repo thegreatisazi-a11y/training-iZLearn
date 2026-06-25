@@ -35,19 +35,25 @@ async function withNames<T extends { userId: string; topicId: string }>(rows: T[
   }));
 }
 
-/** Trainee creates a retake request for one of their BLOCKED assignments. */
+/**
+ * Trainee creates a request for one of their assignments:
+ *  - BLOCKED (max attempts exhausted) → a RETAKE request (grants fresh attempts on approval).
+ *  - OVERDUE (past due) → an OVERDUE_ACCESS request (re-opens the course on approval).
+ * Both are routed to the trainee's direct supervisor.
+ */
 export async function createRetakeRequest(input: CreateRetakeRequestInput, userId: string) {
   const assignment = await prisma.trainingAssignment.findFirst({ where: { id: input.assignmentId, isDeleted: false } });
   if (!assignment) throw AppError.notFound('Assignment not found');
   if (assignment.userId !== userId) throw AppError.forbidden('This assignment does not belong to you.');
-  if (assignment.status !== 'BLOCKED') {
-    throw AppError.badRequest('A retake can only be requested for a blocked assessment (maximum attempts reached).');
+  if (assignment.status !== 'BLOCKED' && assignment.status !== 'OVERDUE') {
+    throw AppError.badRequest('A request can only be raised for a blocked (maximum attempts reached) or overdue assignment.');
   }
+  const requestType = assignment.status === 'OVERDUE' ? 'OVERDUE_ACCESS' : 'RETAKE';
 
   const existing = await prisma.retakeRequest.findFirst({
     where: { assignmentId: input.assignmentId, status: 'PENDING_APPROVAL', isDeleted: false },
   });
-  if (existing) throw AppError.conflict('A retake request for this assessment is already pending.');
+  if (existing) throw AppError.conflict('A request for this assignment is already pending.');
 
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false }, select: { supervisorId: true } });
 
@@ -57,6 +63,7 @@ export async function createRetakeRequest(input: CreateRetakeRequestInput, userI
       topicId: assignment.topicId,
       assignmentId: assignment.id,
       supervisorId: user?.supervisorId ?? null,
+      requestType,
       justification: input.justification,
       status: 'PENDING_APPROVAL',
       createdBy: userId,
@@ -113,24 +120,28 @@ export async function decideRetakeRequest(id: string, input: RetakeDecisionInput
   auditContext.setActionOverride(approve ? 'APPROVE' : 'REJECT');
 
   if (approve) {
-    // Grant a fresh maxAttempts: set extraAttempts to the count of attempts already
-    // used for this topic, so effectiveMax = maxAttempts + used (the user gets the
-    // full limit again from now). Then unblock the assignment.
-    const usedAttempts = await prisma.assessmentAttempt.count({ where: { userId: request.userId, topicId: request.topicId, isDeleted: false } });
+    const isOverdue = request.requestType === 'OVERDUE_ACCESS';
+    // RETAKE: grant a fresh maxAttempts by setting extraAttempts to the count of
+    // attempts already used (effectiveMax = maxAttempts + used). OVERDUE_ACCESS just
+    // re-opens the course (no extra attempts). Both unblock the assignment to PENDING
+    // and clear the supervisor-approval gate.
+    const usedAttempts = isOverdue
+      ? 0
+      : await prisma.assessmentAttempt.count({ where: { userId: request.userId, topicId: request.topicId, isDeleted: false } });
+    const assignmentData = isOverdue
+      ? { status: 'PENDING' as const, requiresSupervisorApproval: false }
+      : { status: 'PENDING' as const, extraAttempts: usedAttempts };
     const { updated } = await auditedTransaction(prisma, async (tx) => {
       const updatedRequest = await tx.retakeRequest.update({
         where: { id },
         data: { status: 'APPROVED', decidedBy: req.user!.id, decidedAt: new Date(), decisionRemarks: input.decisionRemarks ?? null, signatureId },
       });
-      await tx.trainingAssignment.update({
-        where: { id: request.assignmentId },
-        data: { status: 'PENDING', extraAttempts: usedAttempts },
-      });
+      await tx.trainingAssignment.update({ where: { id: request.assignmentId }, data: assignmentData });
       return {
         result: { updated: updatedRequest },
         audits: [
           { action: 'APPROVE', entityType: 'RetakeRequest', entityId: id },
-          { action: 'UPDATE', entityType: 'TrainingAssignment', entityId: request.assignmentId, newValue: { status: 'PENDING', extraAttempts: usedAttempts, retakeRequestId: id } },
+          { action: 'UPDATE', entityType: 'TrainingAssignment', entityId: request.assignmentId, newValue: { ...assignmentData, retakeRequestId: id } },
         ],
       };
     });

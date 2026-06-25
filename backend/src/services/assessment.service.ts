@@ -69,6 +69,10 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   if (assignments.some((a) => a.status === 'BLOCKED')) {
     throw AppError.conflict('This assessment is blocked pending coordinator review.');
   }
+  // An overdue course can't be started until the supervisor re-opens it (UR: request access).
+  if (assignments.length > 0 && assignments.every((a) => a.status === 'OVERDUE')) {
+    throw AppError.conflict('This training is overdue. Request access from your supervisor to continue.');
+  }
   const requireAssignment = await getBool('assessment.require_assignment', false);
   if (requireAssignment && assignments.length === 0) {
     throw AppError.forbidden('This assessment is only accessible once a training has been assigned to you.');
@@ -232,6 +236,8 @@ export async function submitAttempt(
 
   const questions = (attempt.questionsUsed as unknown as SnapshotQuestion[]) ?? [];
   const incorrectDetails: QuestionResult[] = [];
+  // A2: every question (correct + incorrect) so the result screen can show the full review.
+  const allDetails: QuestionResult[] = [];
   let correctCount = 0;
   let attempted = 0;
 
@@ -240,7 +246,9 @@ export async function submitAttempt(
     if (ua !== undefined && ua !== null && ua !== '') attempted++;
     const isCorrect = gradeQuestion(q, ua);
     if (isCorrect) correctCount++;
-    else incorrectDetails.push({ questionId: q.id, questionText: q.questionText, isCorrect, userAnswer: ua ?? null, correctAnswer: q.correctAnswer, explanation: q.explanation });
+    const detail: QuestionResult = { questionId: q.id, questionText: q.questionText, isCorrect, userAnswer: ua ?? null, correctAnswer: q.correctAnswer, explanation: q.explanation };
+    allDetails.push(detail);
+    if (!isCorrect) incorrectDetails.push(detail);
   }
 
   const total = questions.length || 1;
@@ -327,6 +335,8 @@ export async function submitAttempt(
     // A2: after submission, show every wrong answer (selected + correct + explanation)
     // for BOTH pass and fail. Explanation text is included where the question has one.
     incorrectDetails,
+    // A2: the full per-question breakdown (correct + incorrect) for the result review.
+    allDetails,
     certificateId,
   };
 }

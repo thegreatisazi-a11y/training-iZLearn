@@ -128,15 +128,37 @@ function blankQuestionForm(): QuestionForm {
 }
 
 function formFromQuestion(q: Question): QuestionForm {
-  const isArr = Array.isArray(q.correctAnswer);
+  const blank = blankQuestionForm();
+  const rawOptions = q.options as unknown;
+  const answer = q.correctAnswer as unknown;
+  const answerIsArr = Array.isArray(answer);
+  const answerIsPairs = answerIsArr && (answer as unknown[]).length > 0 && typeof (answer as unknown[])[0] === 'object';
+
+  // MULTIPLE_CHOICE options are stored as an array [{id,text}]; MATCH pairs live in
+  // options.matchPairs (an object) and/or correctAnswer (an array of {left,right}).
+  const mcOptions = Array.isArray(rawOptions) ? (rawOptions as { id: string; text: string }[]) : [];
+  const pairsFromOptions =
+    rawOptions && !Array.isArray(rawOptions) && Array.isArray((rawOptions as { matchPairs?: unknown }).matchPairs)
+      ? ((rawOptions as { matchPairs: { left: string; right: string }[] }).matchPairs)
+      : [];
+  const pairsFromAnswer = answerIsPairs ? (answer as { left: string; right: string }[]) : [];
+  const matchPairs = q.matchPairs?.length ? q.matchPairs : pairsFromOptions.length ? pairsFromOptions : pairsFromAnswer;
+
   return {
     questionText: q.questionText,
     questionType: q.questionType,
-    options: q.options?.length ? q.options : blankQuestionForm().options,
-    correctIds: isArr ? (q.correctAnswer as string[]) : [],
-    trueFalseAnswer: !isArr ? String(q.correctAnswer) : 'true',
-    fillVariants: isArr ? (q.correctAnswer as string[]).join(', ') : String(q.correctAnswer ?? ''),
-    matchPairs: q.matchPairs?.length ? q.matchPairs : blankQuestionForm().matchPairs,
+    options: mcOptions.length ? mcOptions : blank.options,
+    // MC correct answers are the selected option ids (an array of strings).
+    correctIds: answerIsArr && !answerIsPairs ? (answer as string[]) : [],
+    trueFalseAnswer: !answerIsArr ? String(answer ?? 'true') : 'true',
+    // FILL stores an array of accepted strings; join them back for editing.
+    fillVariants:
+      q.questionType === 'FILL_IN_THE_BLANKS'
+        ? answerIsArr
+          ? (answer as string[]).join(', ')
+          : String(answer ?? '')
+        : '',
+    matchPairs: matchPairs.length ? matchPairs : blank.matchPairs,
     explanation: q.explanation ?? '',
     helpText: q.helpText ?? '',
     isMandatory: q.isMandatory,
@@ -196,6 +218,8 @@ export default function TopicDetailPage() {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [qForm, setQForm] = useState<QuestionForm>(blankQuestionForm());
   const [editReasonFor, setEditReasonFor] = useState<{ id: string; body: Record<string, unknown> } | null>(null);
+  const [viewingQuestion, setViewingQuestion] = useState<Question | null>(null);
+  const [removeQuestionFor, setRemoveQuestionFor] = useState<Question | null>(null);
   // 4.1 replace, 4.2 library attach, 4.3 status, 4.7 bundles
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replaceTarget, setReplaceTarget] = useState<Material | null>(null);
@@ -213,6 +237,7 @@ export default function TopicDetailPage() {
   const [viewingMaterial, setViewingMaterial] = useState<Material | null>(null);
   const [readTimeTarget, setReadTimeTarget] = useState<Material | null>(null);
   const [readTimeMin, setReadTimeMin] = useState('');
+  const [applyReadTimeToAll, setApplyReadTimeToAll] = useState(false);
   const [editTopicOpen, setEditTopicOpen] = useState(false);
   const [editTopicReasonOpen, setEditTopicReasonOpen] = useState(false);
   const [editTopicForm, setEditTopicForm] = useState({
@@ -370,11 +395,15 @@ export default function TopicDetailPage() {
   });
 
   const readTimeMut = useMutation({
-    mutationFn: (seconds: number) => svc.materials.setViewTime(readTimeTarget!.id, seconds),
+    mutationFn: (seconds: number) => svc.materials.setViewTime(readTimeTarget!.id, seconds, applyReadTimeToAll),
     onSuccess: () => {
-      toast.success('Reading time updated');
+      toast.success(applyReadTimeToAll ? 'Reading time applied to all files; course duration updated.' : 'Reading time updated; course duration updated.');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
+      // Refresh the topic so the recomputed course duration shows immediately.
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+      qc.invalidateQueries({ queryKey: ['topics'] });
       setReadTimeTarget(null);
+      setApplyReadTimeToAll(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -450,6 +479,17 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Pending question discarded');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Remove a question (controlled — reason for change required).
+  const removeQuestionMut = useMutation({
+    mutationFn: (reason: string) => svc.questions.remove(removeQuestionFor!.id, reason),
+    onSuccess: () => {
+      toast.success('Question removed');
+      qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+      setRemoveQuestionFor(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -590,12 +630,24 @@ export default function TopicDetailPage() {
       key: 'actions',
       header: '',
       className: 'text-right',
-      render: (r) =>
-        canQuestionWrite && (
-          <button className="inline-flex items-center gap-1 text-sm text-primary hover:underline" onClick={() => openEditQuestion(r)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit
+      render: (r) => (
+        <div className="flex justify-end gap-3">
+          <button className="inline-flex items-center gap-1 text-sm text-primary hover:underline" onClick={() => setViewingQuestion(r)}>
+            <Eye className="h-3.5 w-3.5" /> View
           </button>
-        ),
+          {canQuestionWrite && (
+            <button className="inline-flex items-center gap-1 text-sm text-primary hover:underline" onClick={() => openEditQuestion(r)}>
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </button>
+          )}
+          {/* Remove a live question only before publish (G4: published questions can't be removed in place). */}
+          {canQuestionWrite && String(t.status) !== 'PUBLISHED' && (
+            <button className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline" onClick={() => setRemoveQuestionFor(r)}>
+              <Trash2 className="h-3.5 w-3.5" /> Remove
+            </button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -961,6 +1013,56 @@ export default function TopicDetailPage() {
         title="Edit Question — Reason for Change"
       />
 
+      {/* Remove a question (reason for change required) */}
+      <ReasonForChangeDialog
+        open={!!removeQuestionFor}
+        onClose={() => setRemoveQuestionFor(null)}
+        onConfirm={async (r) => { await removeQuestionMut.mutateAsync(r); }}
+        title="Remove Question — Reason for Change"
+      />
+
+      {/* View a question (read-only) */}
+      <Dialog
+        open={!!viewingQuestion}
+        onClose={() => setViewingQuestion(null)}
+        className="max-w-2xl"
+        title="Question"
+        footer={<Button variant="outline" onClick={() => setViewingQuestion(null)}>Close</Button>}
+      >
+        {viewingQuestion && (() => {
+          const v = formFromQuestion(viewingQuestion);
+          return (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="default">{v.questionType.replace(/_/g, ' ')}</Badge>
+                {viewingQuestion.isMandatory && <Badge tone="APPROVED">Mandatory</Badge>}
+              </div>
+              <div className="font-medium text-slate-800">{v.questionText}</div>
+              {(v.questionType === 'MULTIPLE_CHOICE_SINGLE' || v.questionType === 'MULTIPLE_CHOICE_MULTI') && (
+                <ul className="space-y-1">
+                  {v.options.map((o) => (
+                    <li key={o.id} className={`flex items-center gap-2 ${v.correctIds.includes(o.id) ? 'font-medium text-green-700' : 'text-slate-700'}`}>
+                      <span className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${v.correctIds.includes(o.id) ? 'border-green-500 bg-green-100' : 'border-slate-300'}`}>{v.correctIds.includes(o.id) ? '✓' : ''}</span>
+                      {o.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {v.questionType === 'TRUE_FALSE' && <div>Correct answer: <span className="font-medium text-green-700">{v.trueFalseAnswer}</span></div>}
+              {v.questionType === 'FILL_IN_THE_BLANKS' && <div>Accepted answer(s): <span className="font-medium text-green-700">{v.fillVariants || '—'}</span></div>}
+              {v.questionType === 'MATCH_THE_WORDS' && (
+                <ul className="space-y-1">
+                  {v.matchPairs.map((p, i) => (
+                    <li key={i} className="text-slate-700">{p.left} <span className="text-slate-400">→</span> <span className="font-medium">{p.right}</span></li>
+                  ))}
+                </ul>
+              )}
+              {v.explanation && <div className="border-t border-slate-100 pt-2 text-slate-600"><span className="text-xs font-semibold uppercase text-slate-400">Explanation</span><div>{v.explanation}</div></div>}
+            </div>
+          );
+        })()}
+      </Dialog>
+
       <Dialog
         open={changingScore}
         onClose={() => setChangingScore(false)}
@@ -1321,6 +1423,11 @@ export default function TopicDetailPage() {
         <Field label="Minimum reading time (minutes)">
           <Input type="number" min={0} step={0.5} value={readTimeMin} onChange={(e) => setReadTimeMin(e.target.value)} placeholder="e.g. 2" />
         </Field>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={applyReadTimeToAll} onChange={(e) => setApplyReadTimeToAll(e.target.checked)} />
+          Apply this reading time to <strong>all files</strong> in this course
+        </label>
+        <p className="mt-2 text-xs text-slate-500">The course <strong>duration</strong> is recalculated from the total reading time and updated everywhere it's shown.</p>
       </Dialog>
 
       {/* Edit topic details (reason-for-change) */}
@@ -1393,7 +1500,17 @@ export default function TopicDetailPage() {
             ))}
           </div>
         </div>
-        {/* G1: Department / Duration / Refresher / Review-date / reading-time / sequence removed from the form. */}
+        {/* The edit form mirrors the create form's fields so a course shows the same
+            inputs (pre-filled) on edit as on creation. Passing Score is shown read-only
+            here because it is a controlled change made via its own e-signed action. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Passing Score %" hint="Changed via the “Change Passing Score” action (e-signed).">
+            <Input type="number" value={String(t.passingScorePercent ?? '')} disabled readOnly />
+          </Field>
+          <Field label="Duration (minutes)" hint="Optional. Auto-recalculated from material reading time once set.">
+            <Input type="number" min={0} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} placeholder="e.g. 30" />
+          </Field>
+        </div>
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Max Attempts"><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>

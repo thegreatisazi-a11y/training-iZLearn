@@ -17,6 +17,7 @@ interface Numbered { srNo?: string | number; detail?: string }
 interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
 interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null; functionalRoles?: string[] }
 interface CvData {
+  version?: number;
   languagesKnown?: string | null;
   languages?: LanguageItem[];
   qualifications?: Qualification[];
@@ -121,7 +122,7 @@ export default function MyCVPage() {
       : `<p>${form.languagesKnown || '—'}</p>`;
     const body =
       `<h1>Curriculum Vitae</h1>` +
-      `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''}</div>` +
+      `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''} · v${data?.cv?.version ?? 1}</div>` +
       `<div class="section">Languages Known</div>${languagesBlock}` +
       `<div class="section">Educational Qualifications</div>` +
       printTable(['Year', 'Degree', 'Specialization', 'Institute'], form.qualifications.map((q) => [q.year, q.degree, q.specialization, q.institute])) +
@@ -165,11 +166,12 @@ export default function MyCVPage() {
 
       <Card className="mb-4">
         <CardContent>
-          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
             <div><div className="text-xs text-slate-500">Employee Name</div><div className="font-medium">{header?.employeeName}</div></div>
             <div><div className="text-xs text-slate-500">Employee Code</div><div className="font-medium">{header?.employeeCode}</div></div>
             <div><div className="text-xs text-slate-500">Functional Role</div><div className="font-medium">{header?.functionalRole ?? '—'}</div></div>
             <div><div className="text-xs text-slate-500">Department</div><div className="font-medium">{header?.departmentName ?? '—'}</div></div>
+            <div><div className="text-xs text-slate-500">CV Version</div><div className="font-medium">v{data?.cv?.version ?? 1}</div></div>
           </div>
         </CardContent>
       </Card>

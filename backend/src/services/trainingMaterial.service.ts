@@ -450,10 +450,41 @@ export async function downloadMaterial(id: string): Promise<{ key: string; origi
   return { key: material.filePath, originalFileName: material.originalFileName, fileType: material.fileType };
 }
 
-/** Set a material's required reading/viewing time (seconds). */
-export async function setRequiredViewSeconds(id: string, seconds: number) {
-  await getMaterial(id);
-  return prisma.trainingMaterial.update({ where: { id }, data: { requiredViewSeconds: seconds } });
+/**
+ * Set a material's required reading/viewing time (seconds). If `applyToAll`, the same
+ * time is applied to every current material of the topic. Afterwards the course
+ * duration is recomputed from the total reading time (sum of current materials'
+ * required seconds → minutes) and stored on the topic, so the duration shown across
+ * the app reflects the configured reading time.
+ */
+export async function setRequiredViewSeconds(id: string, seconds: number, applyToAll = false) {
+  const material = await getMaterial(id);
+  if (applyToAll) {
+    await prisma.trainingMaterial.updateMany({
+      where: { topicId: material.topicId, isDeleted: false, isCurrentVersion: true },
+      data: { requiredViewSeconds: seconds },
+    });
+  } else {
+    await prisma.trainingMaterial.update({ where: { id }, data: { requiredViewSeconds: seconds } });
+  }
+  await recomputeTopicDurationFromReadingTime(material.topicId);
+  return getMaterial(id);
+}
+
+/**
+ * Course duration = total required reading time of the current materials (rounded up to
+ * whole minutes). Only updates when there is reading time configured, so a manually
+ * entered duration isn't wiped on topics that don't gate reading time.
+ */
+export async function recomputeTopicDurationFromReadingTime(topicId: string) {
+  const materials = await prisma.trainingMaterial.findMany({
+    where: { topicId, isDeleted: false, isCurrentVersion: true, isObsolete: false },
+    select: { requiredViewSeconds: true },
+  });
+  const totalSeconds = materials.reduce((sum, m) => sum + (m.requiredViewSeconds ?? 0), 0);
+  if (totalSeconds <= 0) return; // no reading-time gate → keep any manual duration.
+  const minutes = Math.ceil(totalSeconds / 60);
+  await prisma.trainingTopic.update({ where: { id: topicId }, data: { durationMinutes: minutes } });
 }
 
 /** Soft-delete (the only kind of delete in izLearn). */

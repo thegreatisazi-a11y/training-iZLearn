@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, FileText } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { PageLoader } from '@/components/ui/spinner';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
@@ -40,16 +42,30 @@ interface RetakeRow {
   assignmentId: string;
   topic: string;
   status: string;
+  requestType?: 'RETAKE' | 'OVERDUE_ACCESS' | string;
   justification: string;
   decisionRemarks?: string | null;
   createdAt: string;
   decidedAt?: string | null;
 }
 
+const REQUEST_LABEL = (t?: string) => (t === 'OVERDUE_ACCESS' ? 'Overdue access' : 'Retake');
+
 interface MemberHistory {
   user: { id: string; fullName: string; employeeId: string };
   assignments: AssignmentRow[];
   retakeRequests: RetakeRow[];
+}
+
+interface MemberJD {
+  id: string;
+  title: string;
+  version: number;
+  status: string;
+  content: string;
+  departmentId?: string | null;
+  functionalRoleId?: string | null;
+  acknowledgedAt?: string | null;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -75,12 +91,24 @@ export default function TeamMemberPage() {
   const canApprove = useAuthStore((s) => s.hasPermission)('team', 'approve');
 
   const [decision, setDecision] = useState<{ open: boolean; kind: 'APPROVE' | 'REJECT'; row?: RetakeRow }>({ open: false, kind: 'APPROVE' });
+  const [jdOpen, setJdOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['team-member', userId],
     queryFn: () => svc.users.teamHistory(userId) as unknown as Promise<MemberHistory>,
     enabled: !!userId,
   });
+
+  // Supervisor view of the team member's JD(s) — fetched on demand (mirrors Team CVs).
+  const { data: memberJDs, isLoading: jdLoading } = useQuery({
+    queryKey: ['team-member-jds', userId],
+    queryFn: () => svc.jds.user(userId) as unknown as Promise<MemberJD[]>,
+    enabled: !!userId && jdOpen,
+  });
+  const { data: depts } = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: jdOpen });
+  const { data: desigs } = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: jdOpen });
+  const deptName = useMemo(() => new Map(((depts?.data ?? []) as { id: string; name: string }[]).map((d) => [d.id, d.name])), [depts]);
+  const roleName = useMemo(() => new Map(((desigs?.data ?? []) as { id: string; displayName: string }[]).map((d) => [d.id, d.displayName])), [desigs]);
 
   const decideMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.retake.decide(id, body),
@@ -166,6 +194,11 @@ export default function TeamMemberPage() {
       <PageHeader
         title={data?.user.fullName ?? 'Team Member'}
         description={data?.user.employeeId ? `Employee ID: ${data.user.employeeId}` : undefined}
+        actions={
+          <Button variant="outline" onClick={() => setJdOpen(true)}>
+            <FileText className="h-4 w-4" /> View Job Description
+          </Button>
+        }
       />
 
       <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -178,12 +211,15 @@ export default function TeamMemberPage() {
       {/* Pending retake requests awaiting this supervisor's decision */}
       {pendingRetakes.length > 0 && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <h2 className="mb-2 text-sm font-semibold text-amber-800">Retake requests awaiting your approval</h2>
+          <h2 className="mb-2 text-sm font-semibold text-amber-800">Requests awaiting your approval</h2>
           <ul className="space-y-2">
             {pendingRetakes.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-200 bg-white p-3">
                 <div>
-                  <div className="font-medium text-slate-800">{r.topic}</div>
+                  <div className="flex items-center gap-2 font-medium text-slate-800">
+                    {r.topic}
+                    <Badge tone={r.requestType === 'OVERDUE_ACCESS' ? 'PENDING' : 'IN_PROGRESS'}>{REQUEST_LABEL(r.requestType)}</Badge>
+                  </div>
                   <div className="text-xs text-slate-500">Requested {formatDateTime(r.createdAt)} · “{r.justification}”</div>
                 </div>
                 {canApprove ? (
@@ -223,11 +259,57 @@ export default function TeamMemberPage() {
         </div>
       )}
 
+      {/* Team member's Job Description(s) — supervisor view, mirrors Team CVs. */}
+      <Dialog
+        open={jdOpen}
+        onClose={() => setJdOpen(false)}
+        className="max-w-2xl"
+        title="Job Description"
+        footer={<Button onClick={() => setJdOpen(false)}>Close</Button>}
+      >
+        {jdLoading ? (
+          <PageLoader />
+        ) : !memberJDs || memberJDs.length === 0 ? (
+          <p className="text-sm text-slate-500">No active job description is assigned to this team member.</p>
+        ) : (
+          <div className="space-y-6">
+            {memberJDs.map((jd) => (
+              <div key={jd.id} className="text-sm">
+                <div className="rounded-t-md border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-base font-semibold uppercase tracking-wide text-slate-800">Job Description</div>
+                      <div className="text-xs text-slate-500">{jd.title}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge tone={jd.status}>{jd.status.replace(/_/g, ' ')}</Badge>
+                      <span className="rounded bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">Version v{jd.version}</span>
+                    </div>
+                  </div>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-x border-slate-200 px-4 py-4 text-slate-700 sm:grid-cols-3">
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">Employee Name</dt><dd className="font-medium">{data?.user.fullName ?? '—'}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">Employee Code</dt><dd className="font-medium">{data?.user.employeeId ?? '—'}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">Department</dt><dd className="font-medium">{jd.departmentId ? deptName.get(jd.departmentId) ?? '—' : '—'}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">Functional Role</dt><dd className="font-medium">{jd.functionalRoleId ? roleName.get(jd.functionalRoleId) ?? '—' : '—'}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">JD Version</dt><dd className="font-medium">v{jd.version}</dd></div>
+                  <div><dt className="text-xs uppercase tracking-wide text-slate-400">Acknowledged</dt><dd className="font-medium">{jd.acknowledgedAt ? `Yes · ${formatDate(jd.acknowledgedAt)}` : 'Pending'}</dd></div>
+                </dl>
+                <div className="rounded-b-md border border-slate-200 px-4 py-4">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Job Description Details</div>
+                  <div className="prose-sm text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(jd.content ?? '') }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Dialog>
+
       <ESignatureModal
         open={decision.open}
         onClose={() => setDecision((s) => ({ ...s, open: false }))}
         onConfirm={confirmDecision}
-        title={`${decision.kind === 'APPROVE' ? 'Approve' : 'Reject'} Retake — ${decision.row?.topic ?? ''}`}
+        title={`${decision.kind === 'APPROVE' ? 'Approve' : 'Reject'} ${REQUEST_LABEL(decision.row?.requestType)} — ${decision.row?.topic ?? ''}`}
         defaultMeaning={decision.kind === 'APPROVE' ? 'Approved' : 'Rejected'}
         requireReason
       />

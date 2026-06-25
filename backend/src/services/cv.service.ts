@@ -57,7 +57,8 @@ export async function upsertMyCV(userId: string, input: UpsertCvInput) {
     publications: (input.publications ?? []) as Prisma.InputJsonValue,
   };
   const existing = await prisma.curriculumVitae.findFirst({ where: { userId } });
-  if (existing) return prisma.curriculumVitae.update({ where: { id: existing.id }, data });
+  // Each save is a new version of the CV (history is preserved in the audit trail).
+  if (existing) return prisma.curriculumVitae.update({ where: { id: existing.id }, data: { ...data, version: { increment: 1 } } });
   return prisma.curriculumVitae.create({ data: { ...data, userId, createdBy: userId } });
 }
 

@@ -54,6 +54,7 @@ interface StartResult {
 interface IncorrectDetail {
   questionId: string;
   questionText: string;
+  isCorrect?: boolean;
   userAnswer?: unknown;
   correctAnswer: unknown;
   explanation?: string | null;
@@ -69,6 +70,7 @@ interface SubmitResult {
   attemptNumber: number;
   maxAttempts: number;
   incorrectDetails?: IncorrectDetail[];
+  allDetails?: IncorrectDetail[];
   certificateId?: string;
 }
 
@@ -487,22 +489,48 @@ export default function TakeAssessmentPage() {
           <p className="mb-4 text-sm text-red-600">You have reached the maximum number of attempts. This assessment is now blocked pending coordinator review.</p>
         )}
 
-        {/* A2: show every wrong answer (selected + correct + explanation) on pass AND fail. */}
-        {result.incorrectDetails && result.incorrectDetails.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="text-sm font-semibold uppercase text-slate-500">Review — incorrect answers</h2>
-            {result.incorrectDetails.map((d) => (
-              <Card key={d.questionId}>
-                <CardContent>
-                  <p className="font-medium text-slate-800">{d.questionText}</p>
-                  <p className="mt-1 text-sm text-red-700">Your answer: {formatCorrect(d.userAnswer) || '—'}</p>
-                  <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>
-                  {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        {/* A2: full review — every question (correct + incorrect) with the user's answer,
+            the correct answer and any explanation. Falls back to incorrect-only if the
+            server didn't send the full breakdown. */}
+        {(() => {
+          const review = result.allDetails?.length ? result.allDetails : result.incorrectDetails;
+          if (!review || review.length === 0) return null;
+          const showingAll = !!result.allDetails?.length;
+          return (
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold uppercase text-slate-500">
+                {showingAll ? 'Review — all questions' : 'Review — incorrect answers'}
+              </h2>
+              {review.map((d, i) => {
+                const correct = d.isCorrect === true;
+                return (
+                  <Card key={d.questionId} className={correct ? 'border-green-200' : 'border-red-200'}>
+                    <CardContent>
+                      <div className="flex items-start gap-2">
+                        {showingAll &&
+                          (correct ? (
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                          ) : (
+                            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                          ))}
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-800">
+                            {i + 1}. {d.questionText}
+                          </p>
+                          <p className={`mt-1 text-sm ${correct ? 'text-green-700' : 'text-red-700'}`}>
+                            Your answer: {formatCorrect(d.userAnswer) || '—'}
+                          </p>
+                          {!correct && <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>}
+                          {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         <Link to="/assessments" className="mt-6 inline-block">
           <Button variant="outline">

@@ -407,8 +407,12 @@ model RetakeRequest {
   id              String              @id @default(uuid()) @map("_id")
   userId          String // the trainee requesting the retake
   topicId         String
-  assignmentId    String // the BLOCKED assignment being retaken
+  assignmentId    String // the BLOCKED/OVERDUE assignment being retaken / re-opened
   supervisorId    String? // direct line manager who must decide (snapshot at request time)
+  // RETAKE = blocked (max attempts) → grant fresh attempts; OVERDUE_ACCESS = overdue
+  // course → re-open it so the trainee can start. Both route to the supervisor.
+  // Optional so pre-existing requests (which predate this field) read as RETAKE.
+  requestType     RetakeRequestType?  @default(RETAKE)
   justification   String
   status          RetakeRequestStatus @default(PENDING_APPROVAL)
   decidedBy       String?
@@ -430,6 +434,11 @@ enum RetakeRequestStatus {
   PENDING_APPROVAL
   APPROVED
   REJECTED
+}
+
+enum RetakeRequestType {
+  RETAKE
+  OVERDUE_ACCESS
 }
 
 model Attendance {
@@ -975,6 +984,7 @@ model BundleTopic {
 model CurriculumVitae {
   id            String   @id @default(uuid()) @map("_id")
   userId        String   @unique
+  version       Int?     @default(1) // bumped on every save; full history is in the audit trail (optional so pre-existing CVs read cleanly)
   languagesKnown String? // legacy free text (back-compat)
   languages      Json    @default("[]") // #4: [{ language, read, write, understand }]
   qualifications Json    @default("[]") // [{ year, degree, specialization, institute }]

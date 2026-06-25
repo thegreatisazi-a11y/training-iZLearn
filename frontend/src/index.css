@@ -13,7 +13,16 @@ body,
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-slate-50 text-slate-900 antialiased font-sans;
+}
+
+/* Keep the whole UI on one typeface: form controls and buttons inherit the
+   app font instead of the browser's default (which otherwise differs). */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* Reusable component classes */

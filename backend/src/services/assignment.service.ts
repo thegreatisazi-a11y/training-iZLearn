@@ -118,7 +118,7 @@ export async function listMyTrainings(userId: string) {
     topicIds.length
       ? prisma.trainingTopic.findMany({
           where: { id: { in: topicIds } },
-          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, materialViewSeconds: true, supersededByTopicId: true },
+          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, durationMinutes: true, materialViewSeconds: true, supersededByTopicId: true },
         })
       : Promise.resolve([]),
     prisma.assessmentAttempt.findMany({ where: { userId, isDeleted: false }, orderBy: { attemptNumber: 'desc' } }),

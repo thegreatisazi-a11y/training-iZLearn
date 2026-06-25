@@ -19,7 +19,7 @@ export function printHtml(title: string, bodyHtml: string, meta?: { printedBy?: 
 <title>${escapeHtml(title)}</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #1e293b; margin: 32px; }
+  body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #1e293b; margin: 32px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: #64748b; font-size: 12px; margin-bottom: 20px; }
   table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }

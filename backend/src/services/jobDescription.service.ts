@@ -117,6 +117,22 @@ export async function listMyJDs(userId: string) {
 }
 
 /**
+ * Visibility-gated read of another user's (non-obsolete) JDs — mirrors the CV rule:
+ * readable by the owner, the owner's direct supervisor, or a SUPER_ADMIN. Lets a
+ * supervisor open a team member's JD just like their CV.
+ */
+export async function getUserJDsForViewer(targetUserId: string, requester: { id: string; roleNames: string[] }) {
+  if (targetUserId !== requester.id && !requester.roleNames.includes('SUPER_ADMIN')) {
+    const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
+    if (!target) throw AppError.notFound('User not found');
+    if (target.supervisorId !== requester.id) {
+      throw AppError.forbidden('You may only view your own JD or the JDs of your direct reports.');
+    }
+  }
+  return listMyJDs(targetUserId);
+}
+
+/**
  * I4/I5: assign a JD to a user from a chosen template. The title/content/department
  * come from the (editable) request — the edited copy is stored on the JD instance and
  * never changes the template. Assigned directly as APPROVED (no separate review step),

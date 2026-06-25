@@ -33,6 +33,7 @@ interface MyTraining {
     currentVersion: number;
     status: string;
     trainingType: string;
+    durationMinutes?: number | null;
   } | null;
   result: { isPassed: boolean; score: number | null; attempts: number } | null;
 }
@@ -69,9 +70,13 @@ export default function MyTrainingsPage() {
     mutationFn: (body: unknown) => svc.retake.create(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['my-retakes'] });
+      toast.success(
+        retakeFor?.status === 'OVERDUE'
+          ? 'Access request submitted to your supervisor.'
+          : 'Retake request submitted to your supervisor.',
+      );
       setRetakeFor(null);
       setJustification('');
-      toast.success('Retake request submitted to your supervisor.');
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -98,6 +103,7 @@ export default function MyTrainingsPage() {
     { key: 'num', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topic?.topicNumber || r.topic?.topicCode}</span> },
     { key: 'title', header: 'Training', render: (r) => <span className="font-medium text-slate-800">{r.topic?.title}</span> },
     { key: 'type', header: 'Type', render: (r) => (r.topic?.trainingType ?? '').replace(/_/g, ' ') },
+    { key: 'duration', header: 'Duration', render: (r) => (r.topic?.durationMinutes ? `${r.topic.durationMinutes} min` : '—') },
     { key: 'version', header: 'Version', render: (r) => `v${r.topic?.currentVersion ?? '—'}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status.replace(/_/g, ' ')}</Badge> },
     { key: 'due', header: 'Due', render: (r) => formatDate(r.dueDate) },
@@ -116,6 +122,18 @@ export default function MyTrainingsPage() {
             <div className="flex flex-col items-end gap-1">
               <span className="text-xs text-red-600">Blocked — max attempts reached</span>
               <Button size="sm" variant="outline" onClick={() => setRetakeFor(r)}>Request retake</Button>
+            </div>
+          );
+        }
+        // Overdue: the course is locked until the supervisor re-opens it (same flow as retake).
+        if (r.status === 'OVERDUE') {
+          if (pendingByAssignment.has(r.id)) {
+            return <span className="text-xs text-amber-600">Access requested</span>;
+          }
+          return (
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-xs text-red-600">Overdue — past due date</span>
+              <Button size="sm" variant="outline" onClick={() => setRetakeFor(r)}>Request access</Button>
             </div>
           );
         }
@@ -163,11 +181,11 @@ export default function MyTrainingsPage() {
       />
       <p className="mt-3 flex items-center gap-1 text-xs text-slate-400"><GraduationCap className="h-3.5 w-3.5" /> Click Start Training to read the material and take the assessment.</p>
 
-      {/* Request-retake dialog (blocked assessments) */}
+      {/* Request dialog — retake (blocked) or access (overdue). */}
       <Dialog
         open={!!retakeFor}
         onClose={() => setRetakeFor(null)}
-        title={`Request Retake — ${retakeFor?.topic?.title ?? ''}`}
+        title={`${retakeFor?.status === 'OVERDUE' ? 'Request Access' : 'Request Retake'} — ${retakeFor?.topic?.title ?? ''}`}
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setRetakeFor(null)}>Cancel</Button>
@@ -181,13 +199,14 @@ export default function MyTrainingsPage() {
         }
       >
         <p className="mb-3 text-sm text-slate-600">
-          You have reached the maximum attempts for this assessment. Explain why you should be allowed to retake it — your
-          request will be sent to your supervisor for approval.
+          {retakeFor?.status === 'OVERDUE'
+            ? 'This training is past its due date and is locked. Explain why you still need to take it — your request will be sent to your supervisor for approval.'
+            : 'You have reached the maximum attempts for this assessment. Explain why you should be allowed to retake it — your request will be sent to your supervisor for approval.'}
         </p>
         <textarea
           className="w-full rounded-md border border-slate-300 p-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           rows={4}
-          placeholder="Reason for requesting a retake (min 5 characters)…"
+          placeholder={`Reason for requesting ${retakeFor?.status === 'OVERDUE' ? 'access' : 'a retake'} (min 5 characters)…`}
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
         />

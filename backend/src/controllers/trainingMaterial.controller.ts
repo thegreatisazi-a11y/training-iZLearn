@@ -115,7 +115,8 @@ export const attachFromLibrary = asyncHandler(async (req: Request, res: Response
 
 export const setViewTime = asyncHandler(async (req: Request, res: Response) => {
   const { requiredViewSeconds } = updateMaterialSchema.parse(req.body);
-  sendSuccess(res, await svc.setRequiredViewSeconds(req.params.id, requiredViewSeconds), 'Reading time updated');
+  const applyToAll = (req.body as { applyToAll?: unknown }).applyToAll === true;
+  sendSuccess(res, await svc.setRequiredViewSeconds(req.params.id, requiredViewSeconds, applyToAll), 'Reading time updated');
 });
 
 /** Reading-gate endpoints (server-enforced minimum reading time). */

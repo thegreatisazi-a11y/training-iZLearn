@@ -71,6 +71,7 @@ export default function JDPage() {
   const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' | 'REACTIVATE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
   const [viewing, setViewing] = useState<JD | null>(null);
+  const [viewingTemplate, setViewingTemplate] = useState<JDTemplate | null>(null);
 
   // Select option sources.
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
@@ -78,6 +79,8 @@ export default function JDPage() {
   const userOptions = ((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => ({ value: u.id, label: u.fullName }));
   // Resolve approver id → name for the "Approved By" column (show name, not the UUID).
   const userName = new Map(((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => [u.id, u.fullName]));
+  // Employee code (employeeId) per user, for the JD document header.
+  const userCode = new Map(((users?.data ?? []) as { id: string; employeeId?: string }[]).map((u) => [u.id, u.employeeId ?? '']));
   const departmentOptions = ((departments?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
   // D-JD1: JD templates are keyed by Functional Role (DesignationMaster).
   const { data: functionalRoles } = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }) });
@@ -179,23 +182,31 @@ export default function JDPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  const jdEmployeeName = (jd: JD) => jd.userFullName ?? (jd.userId ? userName.get(jd.userId) ?? '—' : '—');
+  const jdEmployeeCode = (jd: JD) => (jd.userId ? userCode.get(jd.userId) || '—' : '—');
+  const jdDepartment = (jd: JD) => (jd.departmentId ? deptName.get(jd.departmentId) ?? '—' : '—');
+  const jdRole = (jd: JD) => (jd.functionalRoleId ? frName.get(jd.functionalRoleId) ?? '—' : '—');
+
   const printJD = (jd: JD) => {
     const body = `
-      <h1>${escapeHtml(jd.title)}</h1>
-      <div class="sub">Status: ${escapeHtml(jd.status.replace(/_/g, ' '))}</div>
+      <h1>Job Description</h1>
+      <div class="sub">${escapeHtml(jd.title)} · v${jd.version} · ${escapeHtml(jd.status.replace(/_/g, ' '))}</div>
       ${printTable(
-        ['User', 'Functional Role', 'Approved By', 'Acknowledged'],
-        [[
-          jd.userFullName ?? '—',
-          jd.functionalRoleId ? frName.get(jd.functionalRoleId) ?? '—' : '—',
-          jd.approvedByName ?? '—',
-          jd.acknowledgedAt ? `Yes · ${formatDate(jd.acknowledgedAt)}` : 'Pending',
-        ]],
+        ['Field', 'Value'],
+        [
+          ['Employee Name', jdEmployeeName(jd)],
+          ['Employee Code', jdEmployeeCode(jd)],
+          ['Department', jdDepartment(jd)],
+          ['Functional Role', jdRole(jd)],
+          ['JD Version', `v${jd.version}`],
+          ['Approved By', jd.approvedByName ?? '—'],
+          ['Acknowledged', jd.acknowledgedAt ? `Yes · ${formatDate(jd.acknowledgedAt)}` : 'Pending'],
+        ],
       )}
-      <div class="section">Content</div>
+      <div class="section">Job Description Details</div>
       <div>${DOMPurify.sanitize(jd.content ?? '')}</div>
     `;
-    printHtml(jd.title, body, { printedBy: currentUserName });
+    printHtml(`Job Description — ${jd.title}`, body, { printedBy: currentUserName });
   };
 
   // A JD is "active" once it is approved/under review and not obsoleted.
@@ -309,12 +320,18 @@ export default function JDPage() {
       key: 'actions',
       header: '',
       className: 'text-right',
-      render: (r) =>
-        canWrite ? (
-          <Button size="sm" variant="outline" onClick={() => navigate(`/job-descriptions/templates/${r.id}`)}>
-            Edit
+      render: (r) => (
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => setViewingTemplate(r)}>
+            <Eye className="h-4 w-4" /> View
           </Button>
-        ) : null,
+          {canWrite && (
+            <Button size="sm" variant="outline" onClick={() => navigate(`/job-descriptions/templates/${r.id}`)}>
+              Edit
+            </Button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -502,7 +519,7 @@ export default function JDPage() {
         open={!!viewing}
         onClose={() => setViewing(null)}
         className="max-w-2xl"
-        title={viewing?.title ?? 'Job Description'}
+        title="Job Description"
         footer={
           <>
             {canPrint && viewing && (
@@ -515,19 +532,58 @@ export default function JDPage() {
         }
       >
         {viewing && (
-          <div className="space-y-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={viewing.status}>{viewing.status.replace(/_/g, ' ')}</Badge>
-              <span className="text-slate-500">v{viewing.version}</span>
+          <div className="text-sm">
+            {/* Document-style header band */}
+            <div className="rounded-t-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-base font-semibold uppercase tracking-wide text-slate-800">Job Description</div>
+                  <div className="text-xs text-slate-500">{viewing.title}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone={viewing.status}>{viewing.status.replace(/_/g, ' ')}</Badge>
+                  <span className="rounded bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">Version v{viewing.version}</span>
+                </div>
+              </div>
             </div>
-            <dl className="grid grid-cols-2 gap-2 text-slate-700">
-              <div><dt className="text-xs text-slate-400">User</dt><dd>{viewing.userFullName ?? (viewing.userId ? userName.get(viewing.userId) ?? '—' : '—')}</dd></div>
-              <div><dt className="text-xs text-slate-400">Functional Role</dt><dd>{viewing.functionalRoleId ? frName.get(viewing.functionalRoleId) ?? '—' : '—'}</dd></div>
-              <div><dt className="text-xs text-slate-400">Department</dt><dd>{viewing.departmentId ? deptName.get(viewing.departmentId) ?? '—' : 'Any'}</dd></div>
-              <div><dt className="text-xs text-slate-400">Approved By</dt><dd>{viewing.approvedByName ?? '—'}</dd></div>
-              <div><dt className="text-xs text-slate-400">Acknowledged</dt><dd>{viewing.acknowledgedAt ? `Yes · ${formatDate(viewing.acknowledgedAt)}` : 'Pending'}</dd></div>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-x border-slate-200 px-4 py-4 text-slate-700 sm:grid-cols-3">
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Employee Name</dt><dd className="font-medium">{jdEmployeeName(viewing)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Employee Code</dt><dd className="font-medium">{jdEmployeeCode(viewing)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Department</dt><dd className="font-medium">{jdDepartment(viewing)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Functional Role</dt><dd className="font-medium">{jdRole(viewing)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">JD Version</dt><dd className="font-medium">v{viewing.version}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Acknowledged</dt><dd className="font-medium">{viewing.acknowledgedAt ? `Yes · ${formatDate(viewing.acknowledgedAt)}` : 'Pending'}</dd></div>
             </dl>
-            <div className="prose-sm border-t border-slate-100 pt-3 text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.content ?? '') }} />
+            <div className="rounded-b-md border border-slate-200 px-4 py-4">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Job Description Details</div>
+              <div className="prose-sm text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.content ?? '') }} />
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* View JD Template (read-only) */}
+      <Dialog
+        open={!!viewingTemplate}
+        onClose={() => setViewingTemplate(null)}
+        className="max-w-2xl"
+        title="JD Template"
+        footer={<Button onClick={() => setViewingTemplate(null)}>Close</Button>}
+      >
+        {viewingTemplate && (
+          <div className="text-sm">
+            <div className="rounded-t-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-base font-semibold uppercase tracking-wide text-slate-800">JD Template</div>
+              <div className="text-xs text-slate-500">{viewingTemplate.title}</div>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-x border-slate-200 px-4 py-4 text-slate-700">
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Functional Role</dt><dd className="font-medium">{viewingTemplate.functionalRoleId ? frName.get(viewingTemplate.functionalRoleId) ?? '—' : '—'}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-slate-400">Department</dt><dd className="font-medium">{viewingTemplate.departmentId ? deptName.get(viewingTemplate.departmentId) ?? '—' : 'Any'}</dd></div>
+            </dl>
+            <div className="rounded-b-md border border-slate-200 px-4 py-4">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Template Content</div>
+              <div className="prose-sm text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewingTemplate.content ?? '') }} />
+            </div>
           </div>
         )}
       </Dialog>

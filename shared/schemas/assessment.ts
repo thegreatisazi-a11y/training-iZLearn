@@ -42,5 +42,7 @@ export interface AssessmentResult {
   maxAttempts: number;
   /** Only populated when the attempt failed. */
   incorrectDetails?: QuestionResult[];
+  /** Every question in the attempt (correct + incorrect), in display order. */
+  allDetails?: QuestionResult[];
   certificateId?: string;
 }

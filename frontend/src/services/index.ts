@@ -93,7 +93,7 @@ export const svc = {
     /** Replace a specific material with an existing Material Library file (reason required). */
     replaceFromLibrary: (id: string, sourceMaterialId: string, reasonForChange: string) =>
       data(api.post(`/materials/${id}/replace-from-library`, { sourceMaterialId, reasonForChange })),
-    setViewTime: (id: string, requiredViewSeconds: number) => data(api.patch(`/materials/${id}`, { requiredViewSeconds })),
+    setViewTime: (id: string, requiredViewSeconds: number, applyToAll = false) => data(api.patch(`/materials/${id}`, { requiredViewSeconds, applyToAll })),
     startView: (id: string) => data(api.post(`/materials/${id}/view/start`, {})),
     completeView: (id: string) => data(api.post(`/materials/${id}/view/complete`, {})),
     // A4: auto-save accumulated reading seconds so the session can resume.
@@ -172,6 +172,8 @@ export const svc = {
     ...createCrud('/job-descriptions'),
     transition: (id: string, body: unknown) => data(api.post(`/job-descriptions/${id}/transition`, body)),
     history: (userId: string) => data(api.get(`/job-descriptions/user/${userId}/history`)),
+    /** Supervisor/admin: a team member's (non-obsolete) JDs — owner/supervisor/admin only. */
+    user: (userId: string) => data(api.get(`/job-descriptions/user/${userId}`)),
     listTemplates: (params?: ListParams) => api.get('/job-descriptions/templates', { params }).then((r) => r.data),
     createTemplate: (body: unknown) => data(api.post('/job-descriptions/templates', body)),
     updateTemplate: (id: string, body: unknown) => data(api.patch(`/job-descriptions/templates/${id}`, body)),

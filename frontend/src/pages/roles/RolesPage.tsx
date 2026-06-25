@@ -337,10 +337,11 @@ export default function RolesPage() {
       (editDesc.trim() || '') !== (editRole.description ?? ''));
 
   function printMatrix(role: RoleRow) {
+    // Show ALL permissions (granted + not granted), consistent with Export to Excel.
     const body =
       `<h1>Role Permissions — ${role.roleName}</h1>` +
       `<div class="meta">Status: ${role.isActive ? 'Active' : 'Inactive'} · Printed by ${me?.fullName ?? '—'}</div>` +
-      printTable(MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)).filter((r) => r[5] === 'Yes'));
+      printTable(MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
     printHtml(`Role Permissions — ${role.roleName}`, body);
   }
   function exportMatrix(role: RoleRow) {

@@ -796,6 +796,7 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
       assignmentId: r.assignmentId,
       topic: tMap.get(r.topicId)?.title ?? r.topicId,
       status: r.status,
+      requestType: r.requestType,
       justification: r.justification,
       decisionRemarks: r.decisionRemarks,
       createdAt: r.createdAt,

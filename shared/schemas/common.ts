@@ -49,7 +49,12 @@ export const paginationQuery = z.object({
   search: z.string().trim().optional(),
   sortBy: z.string().trim().optional(),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
-  includeInactive: z.coerce.boolean().default(false),
+  // NOTE: do NOT use z.coerce.boolean() here — it does Boolean("false") === true, so the
+  // string "false" coming off a query string would wrongly enable inactive rows (this broke
+  // the "Active only" filters). Parse the string explicitly instead.
+  includeInactive: z
+    .preprocess((v) => (typeof v === 'string' ? v === 'true' || v === '1' : v ?? false), z.boolean())
+    .default(false),
 });
 export type PaginationQuery = z.infer<typeof paginationQuery>;
 

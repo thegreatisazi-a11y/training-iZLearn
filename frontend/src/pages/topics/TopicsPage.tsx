@@ -412,11 +412,15 @@ export default function TopicsPage() {
             ))}
           </div>
         </div>
-        {/* G1: Duration / Department / Refresher / Min-reading / Next-Review / Sequence removed from the form. */}
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <Field label="Effective Date">
-          <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Duration (minutes)" hint="Optional. Auto-recalculated from material reading time once set.">
+            <Input type="number" min={0} value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })} placeholder="e.g. 30" />
+          </Field>
+          <Field label="Effective Date">
+            <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
+          </Field>
+        </div>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
           <div className="text-xs font-medium uppercase text-slate-500">Assessment settings</div>
           <label className="flex items-center gap-2 text-sm text-slate-700">
