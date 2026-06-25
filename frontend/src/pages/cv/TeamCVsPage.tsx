@@ -24,6 +24,7 @@ interface TeamRow {
 interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null }
 interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
 interface CvData {
+  version?: number;
   languagesKnown?: string | null;
   languages?: LanguageItem[];
   qualifications?: { year?: string; degree?: string; specialization?: string; institute?: string }[];
@@ -103,7 +104,7 @@ export default function TeamCVsPage() {
       : `<p>${cv?.languagesKnown || '—'}</p>`;
     const body =
       `<h1>Curriculum Vitae</h1>` +
-      `<div class="meta">${h.employeeName} (${h.employeeCode}) · ${h.functionalRole ?? ''} · ${h.departmentName ?? ''}</div>` +
+      `<div class="meta">${h.employeeName} (${h.employeeCode}) · ${h.functionalRole ?? ''} · ${h.departmentName ?? ''} · v${cv?.version ?? 1}</div>` +
       `<div class="section">Languages Known</div>${languagesBlock}` +
       `<div class="section">Educational Qualifications</div>` +
       printTable(['Year', 'Degree', 'Specialization', 'Institute'], (cv?.qualifications ?? []).map((q) => [q.year, q.degree, q.specialization, q.institute])) +

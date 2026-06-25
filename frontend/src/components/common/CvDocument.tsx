@@ -15,6 +15,7 @@ export interface CvDocHeader {
 }
 export interface CvDocLanguage { language?: string; read?: boolean; write?: boolean; understand?: boolean }
 export interface CvDocData {
+  version?: number;
   languagesKnown?: string | null;
   languages?: CvDocLanguage[];
   qualifications?: { year?: string; degree?: string; specialization?: string; institute?: string }[];
@@ -58,11 +59,12 @@ export function CvDocument({ header, cv }: { header?: CvDocHeader; cv?: CvDocDat
       {header && (
         <Card className="mb-4">
           <CardContent>
-            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-5">
               <div><div className="text-xs text-slate-500">Employee Name</div><div className="font-medium">{header.employeeName}</div></div>
               <div><div className="text-xs text-slate-500">Employee Code</div><div className="font-medium">{header.employeeCode}</div></div>
               <div><div className="text-xs text-slate-500">Functional Role</div><div className="font-medium">{header.functionalRole ?? '—'}</div></div>
               <div><div className="text-xs text-slate-500">Department</div><div className="font-medium">{header.departmentName ?? '—'}</div></div>
+              <div><div className="text-xs text-slate-500">CV Version</div><div className="font-medium">v{cv?.version ?? 1}</div></div>
             </div>
           </CardContent>
         </Card>

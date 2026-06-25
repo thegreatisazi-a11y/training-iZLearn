@@ -23,6 +23,7 @@ interface MyJD {
   id: string;
   title: string;
   content: string;
+  version: number;
   status: string;
   departmentId: string;
   functionalRoleId?: string | null;
@@ -50,7 +51,7 @@ export default function MyJobDescriptionPage() {
   const printMyJD = (j: MyJD) => {
     printHtml(
       j.title,
-      `<h1>${escapeHtml(j.title)}</h1><div class="sub">Status: ${escapeHtml(j.status)}${j.acknowledgedAt ? ` · Acknowledged ${escapeHtml(formatDateTime(j.acknowledgedAt))}` : ''}</div><div>${DOMPurify.sanitize(j.content)}</div>`,
+      `<h1>${escapeHtml(j.title)}</h1><div class="sub">Status: ${escapeHtml(j.status)} · Version v${j.version}${j.acknowledgedAt ? ` · Acknowledged ${escapeHtml(formatDateTime(j.acknowledgedAt))}` : ''}</div><div>${DOMPurify.sanitize(j.content)}</div>`,
       { printedBy: userName },
     );
   };
@@ -108,6 +109,10 @@ export default function MyJobDescriptionPage() {
         ),
       },
       { key: 'assignedByName', header: 'Assigned by', render: (j) => j.assignedByName ?? '—' },
+      // Show the version + status so a reviewed/updated JD is distinguishable from the
+      // original copy of the same JD (a person can hold several versions at once).
+      { key: 'version', header: 'Version', render: (j) => <span className="font-medium tabular-nums">v{j.version}</span> },
+      { key: 'status', header: 'Status', render: (j) => <Badge tone={j.status}>{j.status.replace(/_/g, ' ')}</Badge> },
       {
         key: 'acknowledgedAt',
         header: 'Acknowledged',
@@ -170,15 +175,18 @@ export default function MyJobDescriptionPage() {
               <div className="font-semibold text-slate-800">{jd.title}</div>
               <div className="text-xs text-slate-500">
                 {jd.assignedAt ? `Assigned ${formatDateTime(jd.assignedAt)}` : 'Assigned'}
-                {jd.assignedByName ? ` by ${jd.assignedByName}` : ''} · Status: {jd.status}
+                {jd.assignedByName ? ` by ${jd.assignedByName}` : ''} · Status: {jd.status} · Version v{jd.version}
               </div>
             </div>
           </div>
-          {acknowledged ? (
-            <Badge tone="COMPLETED">Acknowledged</Badge>
-          ) : (
-            <Badge tone="PENDING">Pending acknowledgement</Badge>
-          )}
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">v{jd.version}</span>
+            {acknowledged ? (
+              <Badge tone="COMPLETED">Acknowledged</Badge>
+            ) : (
+              <Badge tone="PENDING">Pending acknowledgement</Badge>
+            )}
+          </div>
         </CardContent>
       </Card>
 

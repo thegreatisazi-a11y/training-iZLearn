@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -81,6 +81,7 @@ function seedForm(cv: CvData | null | undefined): FormState {
 }
 
 export default function MyCVPage() {
+  const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(emptyForm());
   const [editing, setEditing] = useState(false); // C1: read-only until Edit is clicked
   const { data, isLoading } = useQuery({
@@ -106,7 +107,12 @@ export default function MyCVPage() {
         trainings: form.trainings.filter((t) => t.detail),
         publications: form.publications.filter((p) => p.detail),
       }),
-    onSuccess: () => { toast.success('CV saved.'); setEditing(false); },
+    onSuccess: () => {
+      toast.success('CV saved.');
+      setEditing(false);
+      // Refetch so the bumped version number (and other server-set fields) show immediately.
+      qc.invalidateQueries({ queryKey: ['my-cv'] });
+    },
     onError: (e) => toast.error(apiError(e)),
   });
 
