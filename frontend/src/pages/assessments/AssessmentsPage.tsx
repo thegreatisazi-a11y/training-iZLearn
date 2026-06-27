@@ -25,6 +25,7 @@ interface Attempt {
   isPassed: boolean;
   completedAt: string | null;
   timeSpentSeconds?: number | null;
+  submissionReasonLabel?: string | null;
 }
 interface BlockedAssignment {
   id: string;
@@ -104,6 +105,9 @@ export default function AssessmentsPage() {
     { key: 'score', header: 'Score', render: (r) => (r.score == null ? '—' : `${r.score}%`) },
     { key: 'isPassed', header: 'Result', render: (r) => (r.completedAt ? <Badge tone={r.isPassed ? 'COMPLETED' : 'REJECTED'}>{r.isPassed ? 'Passed' : 'Failed'}</Badge> : <Badge tone="IN_PROGRESS">In Progress</Badge>) },
     { key: 'time', header: 'Time spent', render: (r) => fmtDuration(r.timeSpentSeconds) },
+    // Why the attempt ended — so a technical failure (network/system/device) is visible
+    // and the learner isn't unfairly judged on a result caused by something outside them.
+    { key: 'reason', header: 'Reason', render: (r) => r.submissionReasonLabel ?? '—' },
     { key: 'completedAt', header: 'Completed', render: (r) => formatDateTime(r.completedAt) },
   ];
 

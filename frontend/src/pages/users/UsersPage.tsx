@@ -299,6 +299,10 @@ export default function UsersPage() {
   // though they are now edited from inside the Edit User dialog.
   const changeRolesMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.users.changeRoles(id, body),
+    onSuccess: () => {
+      // Refresh the user list so updated roles show immediately.
+      qc.invalidateQueries({ queryKey: ['users'] });
+    },
     onError: (e) => toast.error(apiError(e)),
   });
 

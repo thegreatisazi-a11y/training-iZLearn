@@ -9,10 +9,11 @@ import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
 import { SearchableSelect, type SearchOption } from '@/components/common/SearchableSelect';
 import { SignatureBlock, SignatureRecord } from '@/components/common/SignatureBlock';
+import { RichTextEditor } from '@/components/common/RichTextEditor';
 import { Tabs } from '@/components/ui/tabs';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input, Textarea, Field } from '@/components/ui/input';
+import { Input, Field } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
@@ -450,7 +451,9 @@ export default function JDPage() {
           <Input value={assignForm.title} onChange={(e) => setAssignForm({ ...assignForm, title: e.target.value })} />
         </Field>
         <Field label="Content" required>
-          <Textarea className="min-h-[160px]" value={assignForm.content} onChange={(e) => setAssignForm({ ...assignForm, content: e.target.value })} placeholder="Responsibilities, qualifications…" />
+          {/* BUG: a raw textarea showed the template's HTML markup. The rich editor
+              renders it as formatted, human-readable content (and still emits HTML). */}
+          <RichTextEditor value={assignForm.content} onChange={(html) => setAssignForm({ ...assignForm, content: html })} minHeightClass="min-h-[180px]" />
         </Field>
       </Dialog>
 
@@ -499,7 +502,7 @@ export default function JDPage() {
           <Input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
         </Field>
         <Field label="Content">
-          <Textarea className="min-h-[200px]" value={editForm.content} onChange={(e) => setEditForm({ ...editForm, content: e.target.value })} />
+          <RichTextEditor value={editForm.content} onChange={(html) => setEditForm({ ...editForm, content: html })} minHeightClass="min-h-[220px]" />
         </Field>
       </Dialog>
 
@@ -540,10 +543,8 @@ export default function JDPage() {
                   <div className="text-base font-semibold uppercase tracking-wide text-slate-800">Job Description</div>
                   <div className="text-xs text-slate-500">{viewing.title}</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge tone={viewing.status}>{viewing.status.replace(/_/g, ' ')}</Badge>
-                  <span className="rounded bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">Version v{viewing.version}</span>
-                </div>
+                {/* Version is shown once in the metadata grid below (JD Version). */}
+                <Badge tone={viewing.status}>{viewing.status.replace(/_/g, ' ')}</Badge>
               </div>
             </div>
             <dl className="grid grid-cols-2 gap-x-6 gap-y-3 border-x border-slate-200 px-4 py-4 text-slate-700 sm:grid-cols-3">

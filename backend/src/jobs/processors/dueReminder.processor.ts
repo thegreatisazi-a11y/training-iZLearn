@@ -1,12 +1,18 @@
 import { prisma } from '../../config/prisma';
 import { getList } from '../../services/systemConfig.service';
 import { notifyTrainingDue, notifyTrainingOverdue, notifyTrainingAssigned } from '../../services/notification.service';
+import { finalizeStaleAttempts } from '../../services/assessment.service';
 import { startOfDay, endOfDay, addDays } from '../../utils/dateUtils';
 import { logger } from '../../config/logger';
 
 /** Daily due/overdue reminders using configurable thresholds (Module 10). */
 export async function runDueReminderCheck() {
   const now = new Date();
+
+  // Record the failure reason for any assessment that was started but never submitted
+  // (system/power/network died mid-test) — so even when the learner never returns, the
+  // attempt is finalized with its distinct reason in the audit trail and nothing is lost.
+  const staleFinalized = await finalizeStaleAttempts().catch(() => 0);
 
   // CR-57: activate assign-later (DEFERRED) assignments whose activateOn has arrived.
   const toActivate = await prisma.trainingAssignment.findMany({
@@ -45,6 +51,6 @@ export async function runDueReminderCheck() {
       if (a.dueDate) await notifyTrainingDue(a.userId, a.topicId, a.dueDate);
     }
   }
-  logger.info(`Due-reminder check: ${overdue.length} marked overdue.`);
-  return { overdue: overdue.length };
+  logger.info(`Due-reminder check: ${overdue.length} marked overdue; ${staleFinalized} stale attempt(s) finalized.`);
+  return { overdue: overdue.length, staleFinalized };
 }

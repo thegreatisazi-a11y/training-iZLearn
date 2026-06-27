@@ -10,7 +10,8 @@ import { notifyAssessmentBlocked } from './notification.service';
 import { issueForAttempt } from './certificate.service';
 import { hasCompletedRequiredReading } from './materialView.service';
 import { gradeQuestion } from '../utils/grading';
-import type { AssessmentResult, QuestionResult } from '@izlearn/shared';
+import { failureReasonLabel, failureReasonIsTechnical, failureReasonCountsAsAttempt } from '@izlearn/shared';
+import type { AssessmentResult, QuestionResult, AssessmentFailureReason } from '@izlearn/shared';
 
 interface SnapshotQuestion {
   id: string;
@@ -144,19 +145,27 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     throw AppError.conflict('You have already passed this assessment.');
   }
 
-  // CR-39: an assessment is a single continuous attempt — it cannot be resumed.
-  // Any previously started but unfinished attempt (e.g. the tab was closed) is
-  // finalized here as an auto-submitted failure, so it counts as a used attempt.
+  // CR-39: an assessment is a single continuous attempt — it cannot be resumed. Any
+  // previously started but unfinished attempt (e.g. the tab/system was closed) is
+  // finalized here with its recorded failure reason so nothing is lost.
   for (const ab of priorAttempts.filter((a) => !a.completedAt)) {
     await finalizeAbandonedAttempt(ab.id);
   }
 
-  // After finalizing, every prior attempt counts towards the maximum. An approved
-  // retake grants extra attempts on the assignment, raising the effective limit
-  // (effective = topic.maxAttempts + extraAttempts) so the user can take it again.
+  // An approved retake grants extra attempts on the assignment, raising the effective
+  // limit (effective = topic.maxAttempts + extraAttempts). Fairness: a server-confirmed
+  // no-submission failure (ABANDONED / SYSTEM_FAILURE — e.g. the system/power/network died
+  // before any answers reached the server) does NOT consume an attempt, so a learner is
+  // never penalized for a technical interruption beyond their control. The reason is still
+  // recorded in the audit trail for transparency. (Re-read fresh: the loop above just
+  // updated some reasons.)
   const extraAttempts = assignments.reduce((m, a) => Math.max(m, a.extraAttempts ?? 0), 0);
   const effectiveMax = topic.maxAttempts + extraAttempts;
-  const completedCount = priorAttempts.length;
+  const finalized = await prisma.assessmentAttempt.findMany({
+    where: { userId, topicId, isDeleted: false, completedAt: { not: null } },
+    select: { submissionReason: true },
+  });
+  const completedCount = finalized.filter((a) => !a.submissionReason || failureReasonCountsAsAttempt(a.submissionReason as AssessmentFailureReason)).length;
   if (topic.blockAfterMaxAttempts && completedCount >= effectiveMax) {
     if (assignmentId) await prisma.trainingAssignment.update({ where: { id: assignmentId }, data: { status: 'BLOCKED' } }).catch(() => undefined);
     throw AppError.conflict('Maximum attempts reached. This assessment is blocked pending supervisor review.');
@@ -266,10 +275,54 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
 async function finalizeAbandonedAttempt(attemptId: string): Promise<void> {
   const a = await prisma.assessmentAttempt.findUnique({ where: { id: attemptId } });
   if (!a || a.completedAt) return;
+  // No submission ever arrived for a started attempt. If the time had run out it is a
+  // time-out; otherwise it was interrupted (device shutdown / power loss / browser crash
+  // / lost connection) — a technical issue, not the user's own answers.
+  const reason: AssessmentFailureReason = a.expiresAt && new Date() > a.expiresAt ? 'TIME_LIMIT_EXCEEDED' : 'ABANDONED';
   await prisma.assessmentAttempt.update({
     where: { id: attemptId },
-    data: { score: 0, isPassed: false, autoSubmitted: true, completedAt: new Date() },
+    data: { score: 0, isPassed: false, autoSubmitted: true, submissionReason: reason, completedAt: new Date() },
   });
+  await recordEvent({
+    action: 'ASSESSMENT_SUBMITTED',
+    entityType: 'AssessmentAttempt',
+    entityId: attemptId,
+    newValue: {
+      score: 0,
+      isPassed: false,
+      outcome: 'Failed',
+      attemptNumber: a.attemptNumber,
+      submissionReason: failureReasonLabel(reason),
+      reasonCategory: 'Technical issue (not the user’s fault)',
+      note: 'Attempt was started but never submitted (auto-finalized).',
+    },
+  });
+}
+
+/**
+ * Sweep started-but-unsubmitted attempts and finalize the stale ones, so the failure
+ * reason is ALWAYS recorded even when the learner never returns (e.g. the system or power
+ * died mid-test and the tab never closed cleanly). An attempt is stale when its timer has
+ * expired, or — for untimed tests — when it has been open longer than a generous grace
+ * window. Best-effort and idempotent; safe to call opportunistically and from a daily job.
+ */
+export async function finalizeStaleAttempts(opts: { userId?: string } = {}): Promise<number> {
+  const graceMinutes = await getNumber('assessment.abandon_after_minutes', 180);
+  const cutoff = new Date(Date.now() - graceMinutes * 60 * 1000);
+  const open = await prisma.assessmentAttempt.findMany({
+    where: { completedAt: null, isDeleted: false, ...(opts.userId ? { userId: opts.userId } : {}) },
+    select: { id: true, startedAt: true, expiresAt: true },
+  });
+  let finalized = 0;
+  for (const a of open) {
+    const expired = a.expiresAt ? new Date() > a.expiresAt : false;
+    const stale = a.startedAt < cutoff;
+    if (expired || stale) {
+      await finalizeAbandonedAttempt(a.id).catch(() => undefined);
+      finalized++;
+    }
+  }
+  return finalized;
 }
 
 /** Submit & grade an attempt; returns the full result with explanations on failure. */
@@ -278,6 +331,7 @@ export async function submitAttempt(
   answers: Record<string, unknown>,
   userId: string,
   autoSubmitted = false,
+  reason?: AssessmentFailureReason,
 ): Promise<AssessmentResult> {
   const attempt = await prisma.assessmentAttempt.findFirst({ where: { id: attemptId, isDeleted: false } });
   if (!attempt) throw AppError.notFound('Attempt not found');
@@ -288,6 +342,13 @@ export async function submitAttempt(
   // auto-submission (the answers captured so far are still graded normally).
   const expired = Boolean(attempt.expiresAt && new Date() > attempt.expiresAt);
   const wasAutoSubmitted = autoSubmitted || expired;
+
+  // Determine the distinct submission/failure reason for the audit trail. The server is
+  // authoritative on time expiry; otherwise we trust the client's proximate cause
+  // (network/session/tab-close), defaulting to a voluntary user submission.
+  const submissionReason: AssessmentFailureReason = expired
+    ? 'TIME_LIMIT_EXCEEDED'
+    : reason ?? (autoSubmitted ? 'TAB_CLOSED' : 'USER_SUBMITTED');
 
   const topic = await prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } });
   if (!topic) throw AppError.notFound('Training topic not found');
@@ -334,7 +395,7 @@ export async function submitAttempt(
 
   await prisma.assessmentAttempt.update({
     where: { id: attemptId },
-    data: { answers: answers as unknown as object, score, isPassed, autoSubmitted: wasAutoSubmitted, completedAt },
+    data: { answers: answers as unknown as object, score, isPassed, autoSubmitted: wasAutoSubmitted, submissionReason, completedAt },
   });
 
   let isBlocked = false;
@@ -394,7 +455,17 @@ export async function submitAttempt(
     action: 'ASSESSMENT_SUBMITTED',
     entityType: 'AssessmentAttempt',
     entityId: attemptId,
-    newValue: { score, isPassed, attemptNumber: attempt.attemptNumber },
+    // Capture the distinct failure/submission reason so the audit trail clearly shows
+    // whether a failure was the user's own action or a technical issue (and they are
+    // not penalized unfairly for a network/system/device problem).
+    newValue: {
+      score,
+      isPassed,
+      outcome: isPassed ? 'Passed' : 'Failed',
+      attemptNumber: attempt.attemptNumber,
+      submissionReason: failureReasonLabel(submissionReason),
+      reasonCategory: failureReasonIsTechnical(submissionReason) ? 'Technical issue (not the user’s fault)' : 'User action',
+    },
   });
 
   return {
@@ -417,6 +488,9 @@ export async function submitAttempt(
     // BUG-05: surface the actual time spent on the assessment and reading.
     timeSpentSeconds,
     readingTimeSeconds,
+    // Recorded reason for this submission (so the result screen can show it).
+    submissionReason,
+    submissionReasonLabel: failureReasonLabel(submissionReason),
     certificateId,
   };
 }
@@ -498,6 +572,9 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
 }
 
 export async function listAttempts(filters: { userId?: string; topicId?: string }) {
+  // Opportunistically finalize any of this user's stale/interrupted attempts so the
+  // failure reason is recorded and visible whenever results are viewed (best-effort).
+  if (filters.userId) await finalizeStaleAttempts({ userId: filters.userId }).catch(() => undefined);
   const rows = await prisma.assessmentAttempt.findMany({
     where: { isDeleted: false, ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.topicId ? { topicId: filters.topicId } : {}) },
     orderBy: { startedAt: 'desc' },
@@ -516,6 +593,8 @@ export async function listAttempts(filters: { userId?: string; topicId?: string 
       topicTitle: t?.title ?? null,
       topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
       timeSpentSeconds: r.completedAt ? Math.max(0, Math.round((r.completedAt.getTime() - r.startedAt.getTime()) / 1000)) : null,
+      // The recorded failure/submission reason + human label for display in records.
+      submissionReasonLabel: r.submissionReason ? failureReasonLabel(r.submissionReason as AssessmentFailureReason) : null,
     };
   });
 }

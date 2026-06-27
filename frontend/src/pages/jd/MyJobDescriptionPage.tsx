@@ -175,7 +175,7 @@ export default function MyJobDescriptionPage() {
               <div className="font-semibold text-slate-800">{jd.title}</div>
               <div className="text-xs text-slate-500">
                 {jd.assignedAt ? `Assigned ${formatDateTime(jd.assignedAt)}` : 'Assigned'}
-                {jd.assignedByName ? ` by ${jd.assignedByName}` : ''} · Status: {jd.status} · Version v{jd.version}
+                {jd.assignedByName ? ` by ${jd.assignedByName}` : ''} · Status: {jd.status}
               </div>
             </div>
           </div>

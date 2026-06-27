@@ -4,6 +4,7 @@ import {
   Save, ClipboardCheck, Lock, Database, Network, KeyRound, Mail, Building2, Upload,
   ShieldCheck, Clock, Bell, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { RichTextEditor } from '@/components/common/RichTextEditor';
@@ -156,7 +157,7 @@ function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
               {canWrite ? (
                 <RichTextEditor value={body} onChange={setBody} minHeightClass="min-h-[240px]" />
               ) : (
-                <div className="rounded-md border border-slate-200 p-3 text-sm" dangerouslySetInnerHTML={{ __html: body || '<em class="text-slate-400">Default template</em>' }} />
+                <div className="prose-sm rounded-md border border-slate-200 p-3 text-sm" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(body || '<em class="text-slate-400">Default template</em>') }} />
               )}
             </Field>
           </div>

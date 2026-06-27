@@ -519,6 +519,9 @@ model AssessmentAttempt {
   startedAt     DateTime  @default(now())
   expiresAt     DateTime? // CR-38: server-side deadline = startedAt + assessmentTimeMinutes; submissions after this are auto-failed
   autoSubmitted Boolean   @default(false) // CR-38: set when the attempt was force-submitted on timeout / leaving the page
+  // Distinct reason the attempt ended — for transparent audit of whether a failure was
+  // the user's own action or a technical issue beyond their control.
+  submissionReason AssessmentSubmissionReason?
   completedAt   DateTime?
   score         Float?
   isPassed      Boolean?
@@ -533,6 +536,18 @@ model AssessmentAttempt {
   @@index([userId])
   @@index([topicId])
   @@index([assignmentId])
+}
+
+enum AssessmentSubmissionReason {
+  USER_SUBMITTED
+  TIME_LIMIT_EXCEEDED
+  SESSION_TIMEOUT
+  NETWORK_FAILURE
+  TAB_CLOSED
+  BROWSER_CRASH
+  DEVICE_OR_POWER_FAILURE
+  SYSTEM_FAILURE
+  ABANDONED
 }
 
 model Certificate {

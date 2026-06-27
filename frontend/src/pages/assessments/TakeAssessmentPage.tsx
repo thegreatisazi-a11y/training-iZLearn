@@ -73,6 +73,8 @@ interface SubmitResult {
   allDetails?: IncorrectDetail[];
   timeSpentSeconds?: number;
   readingTimeSeconds?: number;
+  submissionReason?: string;
+  submissionReasonLabel?: string;
   certificateId?: string;
 }
 
@@ -228,7 +230,7 @@ export default function TakeAssessmentPage() {
   const answersRef = useRef<Record<string, Answer>>({});
   const submittedRef = useRef(false);
   const liveRef = useRef({ started: false, hasResult: false });
-  const submitFnRef = useRef<(auto: boolean) => void>(() => {});
+  const submitFnRef = useRef<(auto: boolean, reason?: string) => void>(() => {});
   const [activeMaterialIdx, setActiveMaterialIdx] = useState(0);
   const [secsLeft, setSecsLeft] = useState<Record<string, number>>({});
   const [done, setDone] = useState<Set<string>>(new Set());
@@ -271,11 +273,13 @@ export default function TakeAssessmentPage() {
     },
   });
   const submit = useMutation({
-    mutationFn: (opts?: { auto?: boolean }) =>
+    mutationFn: (opts?: { auto?: boolean; reason?: string }) =>
       svc.assessments.submit({
         attemptId: start.data?.attemptId,
         answers: answersRef.current,
         autoSubmitted: opts?.auto ?? false,
+        // Distinct failure reason for the audit trail (server overrides on real time-out).
+        reason: opts?.reason,
       }) as unknown as Promise<SubmitResult>,
     onSuccess: (r) => {
       setResult(r);
@@ -408,10 +412,10 @@ export default function TakeAssessmentPage() {
     answersRef.current = answers;
   }, [answers]);
   liveRef.current = { started: !!start.data, hasResult: !!result };
-  submitFnRef.current = (auto: boolean) => {
+  submitFnRef.current = (auto: boolean, reason?: string) => {
     if (submittedRef.current || !start.data || result) return;
     submittedRef.current = true;
-    submit.mutate({ auto });
+    submit.mutate({ auto, reason });
   };
 
   // CR-38: server-stamped countdown; auto-submit when it reaches zero.
@@ -421,7 +425,7 @@ export default function TakeAssessmentPage() {
     const tick = () => {
       const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
       setTimeLeft(left);
-      if (left <= 0) submitFnRef.current(true);
+      if (left <= 0) submitFnRef.current(true, 'TIME_LIMIT_EXCEEDED');
     };
     tick();
     const id = window.setInterval(tick, 1000);
@@ -440,7 +444,11 @@ export default function TakeAssessmentPage() {
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', onBeforeUnload);
-      if (!submittedRef.current && liveRef.current.started && !liveRef.current.hasResult) submitFnRef.current(true);
+      // Leaving with the test still open: record whether the cause was a lost connection
+      // (offline) vs the tab/window being closed or navigated away.
+      if (!submittedRef.current && liveRef.current.started && !liveRef.current.hasResult) {
+        submitFnRef.current(true, typeof navigator !== 'undefined' && navigator.onLine === false ? 'NETWORK_FAILURE' : 'TAB_CLOSED');
+      }
     };
   }, [phase]);
 
@@ -529,6 +537,10 @@ export default function TakeAssessmentPage() {
             <div className="text-sm text-slate-600">
               <div>Time on assessment: <strong>{fmtDuration(result.timeSpentSeconds)}</strong></div>
               <div>Time on reading: <strong>{fmtDuration(result.readingTimeSeconds)}</strong></div>
+              {/* The recorded reason this attempt ended (transparency for technical failures). */}
+              {result.submissionReasonLabel && result.submissionReason !== 'USER_SUBMITTED' && (
+                <div>Ended due to: <strong>{result.submissionReasonLabel}</strong></div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -775,7 +787,7 @@ export default function TakeAssessmentPage() {
 
   function handleManualSubmit() {
     if (answeredCount < total && !window.confirm(`You have answered ${answeredCount} of ${total} questions. Submit now? This assessment cannot be resumed.`)) return;
-    submitFnRef.current(false);
+    submitFnRef.current(false, 'USER_SUBMITTED');
   }
 
   const topicMeta = [start.data.topicNumber ?? start.data.topicCode, start.data.topicVersion ? `v${start.data.topicVersion}` : '']

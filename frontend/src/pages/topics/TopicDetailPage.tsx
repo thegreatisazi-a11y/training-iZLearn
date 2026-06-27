@@ -448,6 +448,7 @@ export default function TopicDetailPage() {
     mutationFn: () => svc.bundles.addTopicToBundles(id, selectedBundleIds),
     onSuccess: () => {
       toast.success('Topic added to bundle(s)');
+      qc.invalidateQueries({ queryKey: ['bundles'] });
       setBundleDialogOpen(false);
       setSelectedBundleIds([]);
     },

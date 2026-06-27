@@ -20,6 +20,7 @@ interface ScheduleRow {
   id: string;
   topicId: string;
   topicTitle?: string;
+  topicNumber?: string | null;
   scheduledDate: string;
   trainingType: string;
   venue?: string | null;
@@ -46,7 +47,7 @@ function NewScheduleDialog({ open, onClose }: { open: boolean; onClose: () => vo
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
-  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: String(t.title ?? t.topicCode ?? t.id) })), [topics.data]);
+  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
 
   const [topicId, setTopicId] = useState('');
@@ -142,7 +143,7 @@ function OjtDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
-  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: String(t.title ?? t.id) })), [topics.data]);
+  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -208,7 +209,7 @@ function OfflineDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
-  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: String(t.title ?? t.id) })), [topics.data]);
+  const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
   const today = new Date().toISOString().slice(0, 10);
 
@@ -292,7 +293,7 @@ export default function SchedulesPage() {
   });
 
   const columns: Column<ScheduleRow>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—') },
     { key: 'scheduledDate', header: 'Scheduled', render: (r) => formatDate(r.scheduledDate) },
     { key: 'trainingType', header: 'Type' },
     { key: 'venue', header: 'Venue', render: (r) => r.venue || '—' },
