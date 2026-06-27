@@ -3,7 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ArrowLeft, Clock, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { printHtml } from '@/lib/print';
+import { printHtml, escapeHtml } from '@/lib/print';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,7 +71,17 @@ interface SubmitResult {
   maxAttempts: number;
   incorrectDetails?: IncorrectDetail[];
   allDetails?: IncorrectDetail[];
+  timeSpentSeconds?: number;
+  readingTimeSeconds?: number;
   certificateId?: string;
+}
+
+/** Format a duration in seconds as "Xm Ys" (or "Ys"). */
+function fmtDuration(s?: number | null): string {
+  if (s === null || s === undefined) return '—';
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
 
 type Answer = string | string[] | Record<string, string>;
@@ -228,6 +238,9 @@ export default function TakeAssessmentPage() {
   const [resumed, setResumed] = useState<Set<string>>(new Set());
   // A4: throttle progress auto-saves (materialId → last-saved elapsed seconds).
   const savedElapsedRef = useRef<Record<string, number>>({});
+  // BUG-05: actual wall-clock time the user keeps each material open (counts UP beyond
+  // the required minimum), seeded from prior sessions and persisted as elapsedSeconds.
+  const actualSpentRef = useRef<Record<string, number>>({});
   // A4: latest secsLeft reachable from the tick cleanup (to persist on material switch).
   const secsLeftRef = useRef<Record<string, number>>({});
 
@@ -286,6 +299,10 @@ export default function TakeAssessmentPage() {
   const topicQ = useQuery({ queryKey: ['topic-meta', topicId], queryFn: () => svc.topics.get(topicId), enabled: !!topicId });
   const readingQ = useQuery({ queryKey: ['reading-status', topicId], queryFn: () => svc.materials.readingStatus(topicId) as unknown as Promise<ReadingItem[]>, enabled: !!topicId });
   const topicTitle = (topicQ.data as { title?: string } | undefined)?.title;
+  // BUG-04: show the topic number alongside the title wherever the topic is named.
+  const topicMeta0 = topicQ.data as { topicNumber?: string; topicCode?: string } | undefined;
+  const topicNumber = topicMeta0?.topicNumber ?? topicMeta0?.topicCode;
+  const topicLabel = topicTitle ? `${topicNumber ? `${topicNumber} – ` : ''}${topicTitle}` : undefined;
   const mats = useMemo(() => (readingQ.data ?? []) as ReadingItem[], [readingQ.data]);
   const active = mats[activeMaterialIdx];
   const allDone = mats.length === 0 || mats.every((m) => done.has(m.materialId));
@@ -301,6 +318,7 @@ export default function TakeAssessmentPage() {
       if (m.isCompleted || m.requiredSeconds <= 0) d.add(m.materialId);
       const prior = Math.max(0, Math.floor(m.elapsedSeconds ?? 0));
       savedElapsedRef.current[m.materialId] = prior;
+      actualSpentRef.current[m.materialId] = prior; // BUG-05: continue accruing actual time
       const remaining = Math.max(0, m.requiredSeconds - prior);
       s[m.materialId] = m.isCompleted ? 0 : remaining;
       if (!m.isCompleted && prior > 0 && m.requiredSeconds > 0) r.add(m.materialId);
@@ -364,6 +382,24 @@ export default function TakeAssessmentPage() {
   useEffect(() => {
     secsLeftRef.current = secsLeft;
   }, [secsLeft]);
+
+  // BUG-05: capture the ACTUAL time spent on each material — keep counting while the
+  // material is open and the tab is visible, even after the required minimum is met,
+  // and persist it (stored as elapsedSeconds via a monotonic max on the server).
+  useEffect(() => {
+    if (phase !== 'material' || !active) return;
+    const id = active.materialId;
+    const flush = () => svc.materials.saveProgress(id, actualSpentRef.current[id] ?? 0).catch(() => undefined);
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      actualSpentRef.current[id] = (actualSpentRef.current[id] ?? 0) + 1;
+      if (actualSpentRef.current[id] % 10 === 0) flush();
+    }, 1000);
+    return () => {
+      clearInterval(t);
+      flush();
+    };
+  }, [phase, active]);
 
   const questions = useMemo(() => start.data?.questions ?? [], [start.data]);
 
@@ -429,29 +465,45 @@ export default function TakeAssessmentPage() {
   }
 
   if (result) {
+    // BUG-07: the printout must mirror the full on-screen result — summary AND every
+    // question with the user's answer, the correct answer and any explanation.
+    const printResult = () => {
+      const head = start.data?.topicNumber ?? start.data?.topicCode;
+      const heading = `${head ? `${head} – ` : ''}${(start.data?.topicTitle ?? topicTitle) || 'Assessment'}`;
+      const summary =
+        `<table>` +
+        `<tr><th>Result</th><td>${result.isPassed ? 'Passed' : 'Failed'}</td></tr>` +
+        `<tr><th>Score</th><td>${result.score}%</td></tr>` +
+        `<tr><th>Passing score</th><td>${result.passingScorePercent}%</td></tr>` +
+        `<tr><th>Correct</th><td>${result.correctCount}</td></tr>` +
+        `<tr><th>Incorrect</th><td>${result.incorrectCount}</td></tr>` +
+        `<tr><th>Attempt</th><td>${result.attemptNumber} of ${result.maxAttempts}</td></tr>` +
+        `<tr><th>Time on assessment</th><td>${fmtDuration(result.timeSpentSeconds)}</td></tr>` +
+        `<tr><th>Time on reading</th><td>${fmtDuration(result.readingTimeSeconds)}</td></tr>` +
+        `</table>`;
+      const review = result.allDetails?.length ? result.allDetails : result.incorrectDetails ?? [];
+      const questions = review
+        .map(
+          (d, i) =>
+            `<div style="margin:10px 0;padding:8px 0;border-top:1px solid #ddd;">` +
+            `<div><strong>${i + 1}. ${escapeHtml(d.questionText)}</strong>${d.isCorrect === true ? ' ✓' : d.isCorrect === false ? ' ✗' : ''}</div>` +
+            `<div>Your answer: ${escapeHtml(formatCorrect(d.userAnswer) || '—')}</div>` +
+            `<div>Correct answer: ${escapeHtml(formatCorrect(d.correctAnswer))}</div>` +
+            `${d.explanation ? `<div>Explanation: ${escapeHtml(String(d.explanation))}</div>` : ''}` +
+            `</div>`,
+        )
+        .join('');
+      printHtml('Assessment Result', `<h2>${escapeHtml(heading)}</h2>${summary}${questions ? `<h3>Questions</h3>${questions}` : ''}`);
+    };
     return (
       <div>
         <PageHeader
           title="Assessment Result"
-          description={start.data?.topicTitle ?? topicTitle}
+          description={
+            `${(start.data?.topicNumber ?? start.data?.topicCode ?? topicNumber) ? `${start.data?.topicNumber ?? start.data?.topicCode ?? topicNumber} – ` : ''}${start.data?.topicTitle ?? topicTitle ?? ''}`
+          }
           actions={
-            <Button
-              variant="outline"
-              onClick={() =>
-                printHtml(
-                  'Assessment Result',
-                  `<h2>${(start.data?.topicTitle ?? topicTitle) || 'Assessment'}</h2>
-                   <table>
-                     <tr><th>Result</th><td>${result.isPassed ? 'Passed' : 'Failed'}</td></tr>
-                     <tr><th>Score</th><td>${result.score}%</td></tr>
-                     <tr><th>Passing score</th><td>${result.passingScorePercent}%</td></tr>
-                     <tr><th>Correct</th><td>${result.correctCount}</td></tr>
-                     <tr><th>Incorrect</th><td>${result.incorrectCount}</td></tr>
-                     <tr><th>Attempt</th><td>${result.attemptNumber} of ${result.maxAttempts}</td></tr>
-                   </table>`,
-                )
-              }
-            >
+            <Button variant="outline" onClick={printResult}>
               <Printer className="h-4 w-4" /> Print
             </Button>
           }
@@ -472,6 +524,11 @@ export default function TakeAssessmentPage() {
               <div>
                 Attempt {result.attemptNumber} of {result.maxAttempts}
               </div>
+            </div>
+            {/* BUG-05: actual time the user spent (not just the minimum required). */}
+            <div className="text-sm text-slate-600">
+              <div>Time on assessment: <strong>{fmtDuration(result.timeSpentSeconds)}</strong></div>
+              <div>Time on reading: <strong>{fmtDuration(result.readingTimeSeconds)}</strong></div>
             </div>
           </CardContent>
         </Card>
@@ -560,7 +617,7 @@ export default function TakeAssessmentPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
           <div className="min-w-0">
             <div className="text-xs uppercase tracking-wide text-slate-400">Start Training · Step 1 of 2 — Reading</div>
-            <div className="truncate text-lg font-semibold text-slate-800">{topicTitle ?? 'Training Material'}</div>
+            <div className="truncate text-lg font-semibold text-slate-800">{topicLabel ?? 'Training Material'}</div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
             {totalSeconds > 0 && (
@@ -571,7 +628,8 @@ export default function TakeAssessmentPage() {
             <div className="text-sm text-slate-600">
               Progress: <strong>{doneCount}/{totalChapters}</strong> · {progressPct}%
             </div>
-            <Button variant="ghost" onClick={() => navigate('/assessments')}>Cancel</Button>
+            {/* BUG-11: Cancel returns cleanly to My Trainings (no error). */}
+            <Button variant="ghost" onClick={() => navigate('/my-trainings')}>Cancel</Button>
             {requiresAssessment && (
               <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
                 {start.isPending ? 'Starting…' : 'Continue to Assessment'}
@@ -727,7 +785,7 @@ export default function TakeAssessmentPage() {
   return (
     <div>
       <PageHeader
-        title={start.data.topicTitle ? `Assessment: ${start.data.topicTitle}` : 'Assessment'}
+        title={start.data.topicTitle ? `Assessment: ${start.data.topicNumber ?? start.data.topicCode ? `${start.data.topicNumber ?? start.data.topicCode} – ` : ''}${start.data.topicTitle}` : 'Assessment'}
         description={`${topicMeta ? `${topicMeta} • ` : ''}Attempt ${start.data.attemptNumber} of ${start.data.maxAttempts}`}
         actions={
           timed ? (

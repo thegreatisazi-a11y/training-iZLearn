@@ -36,6 +36,8 @@ export default function MaterialLibraryPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canWrite = hasPermission('materialManagement', 'write');
   const canBulkUpload = hasPermission('materialManagement', 'create') || canWrite;
+  // BUG-10: explicit downloads are limited to material managers (download permission).
+  const canDownload = canWrite || hasPermission('courseManagement', 'write');
   const bulkInputRef = useRef<HTMLInputElement>(null);
 
   const [page, setPage] = useState(1);
@@ -119,13 +121,15 @@ export default function MaterialLibraryPage() {
           >
             <Eye className="h-4 w-4" /> View
           </button>
-          <button
-            type="button"
-            onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <Download className="h-4 w-4" /> Download
-          </button>
+          {canDownload && (
+            <button
+              type="button"
+              onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <Download className="h-4 w-4" /> Download
+            </button>
+          )}
           {canWrite && (
             <button className="text-red-600 hover:text-red-700" onClick={() => setDeleting(r)} aria-label="Delete">
               <Trash2 className="h-4 w-4" />

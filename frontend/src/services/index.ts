@@ -100,7 +100,9 @@ export const svc = {
     saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
     readingStatus: (topicId: string) => data(api.get('/materials/reading-status', { params: { topicId } })),
     downloadUrl: (id: string) => `/api/materials/${id}/download`,
-    download: (id: string, name = 'material') => downloadAuthed(`/materials/${id}/download`, name),
+    // BUG-10: ?download=1 marks an explicit save (blocked server-side for view-only users);
+    // the inline viewer fetches the same route WITHOUT the flag and stays available to all.
+    download: (id: string, name = 'material') => downloadAuthed(`/materials/${id}/download?download=1`, name),
     remove: (id: string, reasonForChange: string) => api.delete(`/materials/${id}`, { data: { reasonForChange } }),
     /** Discard a staged (pending) file before it goes live — no reason required. */
     discardStaged: (id: string) => api.delete(`/materials/${id}/staged`).then((r) => r.data.data),

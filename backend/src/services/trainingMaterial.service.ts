@@ -11,20 +11,9 @@ import type { PaginationQuery } from '@izlearn/shared';
 
 /** Object-storage key for a material's stored file. */
 const materialKey = (storedFileName: string) => `materials/${storedFileName}`;
-
-/**
- * Increment a topic's currentVersion. Called when a material change goes LIVE
- * (a draft/unpublished topic) — adding, replacing, or attaching a file is a
- * change to the course content, so the course version moves with it. On a
- * PUBLISHED topic the change is staged and the bump happens on publish instead
- * (publishDraftChanges in trainingTopic.service.ts).
- */
-async function bumpTopicVersion(topicId: string) {
-  await prisma.trainingTopic.update({
-    where: { id: topicId },
-    data: { currentVersion: { increment: 1 } },
-  });
-}
+// BUG-02: course versions are no longer bumped on draft material changes (authoring must
+// not inflate the version). The version only advances when published changes go live —
+// see publishDraftChanges() in trainingTopic.service.ts.
 
 /**
  * Training materials (Module 4) — the uploaded files (PDF/PPT/video/...) that
@@ -67,9 +56,10 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
       where: { topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false },
     });
-    // The course content changed and goes live now — bump the course version.
-    // (On a PUBLISHED topic the change is staged and the version bumps on publish.)
-    await bumpTopicVersion(topicId);
+    // BUG-02: do NOT bump the course version while still drafting — initial authoring
+    // (uploading/replacing several materials) would otherwise inflate the course to
+    // v2, v3, v4… before it is even published. A draft stays at its current version;
+    // the version only increments when published changes go live (publishDraftChanges).
   }
 
   // Use the highest existing version (not the count): materials are copied across
@@ -208,8 +198,8 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
     });
-    // Live replacement → the course content changed; bump the course version.
-    await bumpTopicVersion(old.topicId);
+    // BUG-02: a draft replacement supersedes the old file but does NOT bump the course
+    // version (no version churn during authoring); publishing changes bumps it instead.
   }
 
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
@@ -274,8 +264,8 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
       where: { topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true },
     });
-    // Live attach → the course content changed; bump the course version.
-    await bumpTopicVersion(topicId);
+    // BUG-02: attaching a library file to a draft does NOT bump the course version
+    // (authoring shouldn't inflate versions); publishing changes bumps it instead.
   }
 
   // Use the highest existing version (not the count): materials are copied across
@@ -348,7 +338,7 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
       where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
     });
-    await bumpTopicVersion(old.topicId);
+    // BUG-02: draft library-replace supersedes the old file without bumping the version.
   }
 
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;

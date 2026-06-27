@@ -24,6 +24,7 @@ interface Certificate {
   certificateNumber: string;
   topicId: string;
   topicTitle?: string;
+  topicNumber?: string | null;
   issuedAt: string;
   certificateType: string;
 }
@@ -31,7 +32,8 @@ interface Certificate {
 function columns(): Column<Certificate>[] {
   return [
     { key: 'certificateNumber', header: 'Certificate No.' },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    // BUG-04: show "number – title".
+    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle ?? r.topicId) },
     { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
     { key: 'certificateType', header: 'Type' },
     {

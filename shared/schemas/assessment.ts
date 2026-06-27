@@ -44,5 +44,9 @@ export interface AssessmentResult {
   incorrectDetails?: QuestionResult[];
   /** Every question in the attempt (correct + incorrect), in display order. */
   allDetails?: QuestionResult[];
+  /** BUG-05: actual time the user spent on the assessment (completedAt − startedAt). */
+  timeSpentSeconds?: number;
+  /** BUG-05: actual time the user spent reading the topic's materials. */
+  readingTimeSeconds?: number;
   certificateId?: string;
 }

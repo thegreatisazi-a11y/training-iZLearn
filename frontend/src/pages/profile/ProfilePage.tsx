@@ -29,6 +29,7 @@ interface Certificate {
   id: string;
   certificateNumber: string;
   topicTitle?: string;
+  topicNumber?: string | null;
   topicId: string;
   issuedAt: string;
   certificateType: string;
@@ -187,7 +188,7 @@ export default function ProfilePage() {
   ];
   const certColumns: Column<Certificate>[] = [
     { key: 'certificateNumber', header: 'Certificate No.' },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle || '—' },
+    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle || '—') },
     { key: 'certificateType', header: 'Type' },
     { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
     {

@@ -89,10 +89,30 @@ export async function listAssignments(q: PaginationQuery & { userId?: string; to
     ...(q.topicId ? { topicId: q.topicId } : {}),
     ...(q.status ? { status: q.status as Prisma.EnumAssignmentStatusFilter['equals'] } : {}),
   };
-  const [data, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.trainingAssignment.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.trainingAssignment.count({ where }),
   ]);
+  // BUG-03/04: resolve user + topic so lists (e.g. Blocked Assignments) show the
+  // employee name and "number – title" instead of raw ids.
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
+  const [users, topics] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } }) : [],
+    topicIds.length ? prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } }) : [],
+  ]);
+  const uMap = new Map(users.map((u) => [u.id, u]));
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  const data = rows.map((r) => {
+    const t = tMap.get(r.topicId);
+    return {
+      ...r,
+      userFullName: uMap.get(r.userId)?.fullName ?? null,
+      employeeId: uMap.get(r.userId)?.employeeId ?? null,
+      topicTitle: t?.title ?? null,
+      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+    };
+  });
   return { data, total, page: q.page, pageSize: q.pageSize };
 }
 

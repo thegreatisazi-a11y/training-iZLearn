@@ -32,6 +32,50 @@ function extractMatchPairs(options: unknown): Array<{ left: string; right: strin
   return [];
 }
 
+/** Build an option-id → option-text map from a MULTIPLE_CHOICE options array. */
+function optionTextMap(options: unknown): Map<string, string> {
+  const m = new Map<string, string>();
+  if (Array.isArray(options)) {
+    for (const o of options) {
+      if (o && typeof o === 'object' && 'id' in o) m.set(String((o as { id: unknown }).id), String((o as { text?: unknown }).text ?? (o as { id: unknown }).id));
+    }
+  }
+  return m;
+}
+
+/**
+ * BUG-06/12/13: convert a stored answer (which for choice questions is option *ids*
+ * like "o1"/"o2") into human-readable text for the result/review/print screens.
+ * MATCH pairs and FILL answers are already text, so they pass through unchanged.
+ */
+function humanizeAnswer(q: { questionType: string; options: unknown }, value: unknown): unknown {
+  if (value === null || value === undefined || value === '') return value;
+  switch (q.questionType) {
+    case 'MULTIPLE_CHOICE_SINGLE':
+    case 'MULTIPLE_CHOICE_MULTI': {
+      const map = optionTextMap(q.options);
+      const ids = Array.isArray(value) ? value : [value];
+      return ids.map((id) => map.get(String(id)) ?? String(id));
+    }
+    case 'TRUE_FALSE': {
+      const s = String(value).toLowerCase();
+      if (s === 'true') return 'True';
+      if (s === 'false') return 'False';
+      return optionTextMap(q.options).get(String(value)) ?? value;
+    }
+    default:
+      return value; // FILL_IN_THE_BLANKS, MATCH_THE_WORDS — already human-readable
+  }
+}
+
+/** BUG-06: a help/explanation field left literally as "None" during design must not render. */
+function cleanText(v: string | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const t = v.trim();
+  if (t === '' || t.toLowerCase() === 'none') return null;
+  return v;
+}
+
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -43,7 +87,7 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function sanitizeForClient(q: SnapshotQuestion) {
-  const base = { id: q.id, questionText: q.questionText, questionType: q.questionType, helpText: q.helpText ?? null };
+  const base = { id: q.id, questionText: q.questionText, questionType: q.questionType, helpText: cleanText(q.helpText) };
   // CR-36: for MATCH, send the left prompts and a SHUFFLED, de-duplicated set of
   // right choices — never the correct pairing (which stays server-side for grading).
   if (q.questionType === 'MATCH_THE_WORDS') {
@@ -55,10 +99,24 @@ function sanitizeForClient(q: SnapshotQuestion) {
   return { ...base, options: q.options };
 }
 
+/**
+ * BUG-01: a user may not initiate any training until their Job Description is APPROVED
+ * and their CV has been created. Throws a forbidden error with the required message.
+ */
+async function assertJdAndCvReady(userId: string) {
+  const [jd, cv] = await Promise.all([
+    prisma.jobDescription.findFirst({ where: { userId, status: 'APPROVED', isDeleted: false } }),
+    prisma.curriculumVitae.findFirst({ where: { userId, isDeleted: false } }),
+  ]);
+  if (!jd || !cv) throw AppError.forbidden('Please complete the JD and CV to initiate the training.');
+}
+
 /** Start (generate) an assessment attempt. */
 export async function startAttempt(userId: string, topicId: string, assignmentId?: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
+
+  await assertJdAndCvReady(userId);
 
   // UR-43: restriction criteria / quiz accessibility. A blocked assignment locks
   // the quiz until a coordinator unblocks it, and (when configured) a quiz can be
@@ -246,7 +304,16 @@ export async function submitAttempt(
     if (ua !== undefined && ua !== null && ua !== '') attempted++;
     const isCorrect = gradeQuestion(q, ua);
     if (isCorrect) correctCount++;
-    const detail: QuestionResult = { questionId: q.id, questionText: q.questionText, isCorrect, userAnswer: ua ?? null, correctAnswer: q.correctAnswer, explanation: q.explanation };
+    // BUG-06/12/13: store the human-readable answer text (not option codes) and drop
+    // "None" placeholder explanations so they never render on the result/print screens.
+    const detail: QuestionResult = {
+      questionId: q.id,
+      questionText: q.questionText,
+      isCorrect,
+      userAnswer: humanizeAnswer(q, ua ?? null),
+      correctAnswer: humanizeAnswer(q, q.correctAnswer),
+      explanation: cleanText(q.explanation),
+    };
     allDetails.push(detail);
     if (!isCorrect) incorrectDetails.push(detail);
   }
@@ -255,9 +322,19 @@ export async function submitAttempt(
   const score = Number(((correctCount / total) * 100).toFixed(2));
   const isPassed = score >= topic.passingScorePercent;
 
+  // BUG-05: actual time spent on the assessment = completedAt − startedAt.
+  const completedAt = new Date();
+  const timeSpentSeconds = Math.max(0, Math.round((completedAt.getTime() - attempt.startedAt.getTime()) / 1000));
+  // BUG-05: actual time spent reading this topic's materials (sum of per-material elapsed).
+  const readingLogs = await prisma.materialViewLog.findMany({
+    where: { userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
+    select: { elapsedSeconds: true },
+  });
+  const readingTimeSeconds = readingLogs.reduce((s, l) => s + (l.elapsedSeconds ?? 0), 0);
+
   await prisma.assessmentAttempt.update({
     where: { id: attemptId },
-    data: { answers: answers as unknown as object, score, isPassed, autoSubmitted: wasAutoSubmitted, completedAt: new Date() },
+    data: { answers: answers as unknown as object, score, isPassed, autoSubmitted: wasAutoSubmitted, completedAt },
   });
 
   let isBlocked = false;
@@ -337,6 +414,9 @@ export async function submitAttempt(
     incorrectDetails,
     // A2: the full per-question breakdown (correct + incorrect) for the result review.
     allDetails,
+    // BUG-05: surface the actual time spent on the assessment and reading.
+    timeSpentSeconds,
+    readingTimeSeconds,
     certificateId,
   };
 }
@@ -350,6 +430,8 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
   if (topic.requiresAssessment) throw AppError.badRequest('This training requires an assessment and cannot be completed by acknowledgement.');
+
+  await assertJdAndCvReady(userId);
 
   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
   if (!readingDone) throw AppError.forbidden('You must finish the required reading time before completing this training.');
@@ -416,9 +498,25 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
 }
 
 export async function listAttempts(filters: { userId?: string; topicId?: string }) {
-  return prisma.assessmentAttempt.findMany({
+  const rows = await prisma.assessmentAttempt.findMany({
     where: { isDeleted: false, ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.topicId ? { topicId: filters.topicId } : {}) },
     orderBy: { startedAt: 'desc' },
+  });
+  // BUG-03/04: enrich with topic title + number so the UI never shows a raw topicId,
+  // and BUG-05: surface the actual time spent (completedAt − startedAt).
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
+  const topics = topicIds.length
+    ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })
+    : [];
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  return rows.map((r) => {
+    const t = tMap.get(r.topicId);
+    return {
+      ...r,
+      topicTitle: t?.title ?? null,
+      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+      timeSpentSeconds: r.completedAt ? Math.max(0, Math.round((r.completedAt.getTime() - r.startedAt.getTime()) / 1000)) : null,
+    };
   });
 }
 
@@ -434,5 +532,13 @@ export async function unblockAssignment(assignmentId: string, req: Request) {
   if (!assignment) throw AppError.notFound('Assignment not found');
   await signFromRequest(req, 'TrainingAssignment', assignmentId, 'Approved');
   auditContext.setActionOverride('UPDATE');
-  return prisma.trainingAssignment.update({ where: { id: assignmentId }, data: { status: 'PENDING' } });
+  // BUG-03: simply setting PENDING isn't enough — startAttempt re-blocks immediately
+  // because the used attempts still equal the max. Grant a fresh set of attempts (like
+  // an approved retake) by raising extraAttempts to the attempts used so far, so the
+  // user can actually take the assessment again after being unblocked.
+  const usedAttempts = await prisma.assessmentAttempt.count({ where: { userId: assignment.userId, topicId: assignment.topicId, isDeleted: false } });
+  return prisma.trainingAssignment.update({
+    where: { id: assignmentId },
+    data: { status: 'PENDING', extraAttempts: Math.max(assignment.extraAttempts ?? 0, usedAttempts) },
+  });
 }

@@ -144,9 +144,19 @@ export async function issueForAttempt(attemptId: string) {
 }
 
 export async function listCertificates(filters: { userId?: string }) {
-  return prisma.certificate.findMany({
+  const rows = await prisma.certificate.findMany({
     where: { isDeleted: false, ...(filters.userId ? { userId: filters.userId } : {}) },
     orderBy: { issuedAt: 'desc' },
+  });
+  // BUG-03/04: resolve topic title + number so certificates never show a raw topicId.
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
+  const topics = topicIds.length
+    ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })
+    : [];
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  return rows.map((r) => {
+    const t = tMap.get(r.topicId);
+    return { ...r, topicTitle: t?.title ?? null, topicNumber: t?.topicNumber ?? t?.topicCode ?? null };
   });
 }
 

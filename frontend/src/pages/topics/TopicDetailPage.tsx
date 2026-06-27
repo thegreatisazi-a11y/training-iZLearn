@@ -595,13 +595,15 @@ export default function TopicDetailPage() {
           >
             <Eye className="h-4 w-4" /> View
           </button>
-          <button
-            type="button"
-            onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))}
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            <Download className="h-4 w-4" /> Download
-          </button>
+          {canMaterialWrite && (
+            <button
+              type="button"
+              onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              <Download className="h-4 w-4" /> Download
+            </button>
+          )}
           {canMaterialWrite && (
             <button
               type="button"
@@ -885,7 +887,7 @@ export default function TopicDetailPage() {
                     render: (r) => (
                       <div className="flex justify-end gap-2">
                         <button type="button" onClick={() => setViewingMaterial(r)} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Eye className="h-4 w-4" /> View</button>
-                        <button type="button" onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Download className="h-4 w-4" /> Download</button>
+                        {canMaterialWrite && <button type="button" onClick={() => svc.materials.download(r.id, r.originalFileName).catch((e) => toast.error(apiError(e)))} className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><Download className="h-4 w-4" /> Download</button>}
                       </div>
                     ),
                   },

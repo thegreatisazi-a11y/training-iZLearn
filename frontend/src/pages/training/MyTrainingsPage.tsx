@@ -56,6 +56,10 @@ export default function MyTrainingsPage() {
 
   const { data, isLoading } = useQuery({ queryKey: ['my-trainings'], queryFn: () => svc.assignments.mine() as unknown as Promise<MyTraining[]> });
   const { data: retakes } = useQuery({ queryKey: ['my-retakes'], queryFn: () => svc.retake.mine() as unknown as Promise<RetakeRequest[]> });
+  // BUG-01: training can only be initiated once the user's JD is approved and CV exists.
+  const { data: myJds } = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<{ status: string }[]> });
+  const { data: myCv } = useQuery({ queryKey: ['my-cv'], queryFn: () => svc.cv.mine() as unknown as Promise<{ cv: unknown | null }> });
+  const canInitiate = (myJds ?? []).some((j) => j.status === 'APPROVED') && !!myCv?.cv;
 
   // assignmentId -> latest pending retake status, so a blocked row shows "requested".
   const pendingByAssignment = useMemo(() => {
@@ -134,6 +138,15 @@ export default function MyTrainingsPage() {
             <div className="flex flex-col items-end gap-1">
               <span className="text-xs text-red-600">Overdue — past due date</span>
               <Button size="sm" variant="outline" onClick={() => setRetakeFor(r)}>Request access</Button>
+            </div>
+          );
+        }
+        // BUG-01: block initiating training until JD is approved and CV is completed.
+        if (!canInitiate) {
+          return (
+            <div className="flex flex-col items-end gap-1">
+              <Button size="sm" disabled>{r.status === 'IN_PROGRESS' ? 'Continue' : 'Start Training'}</Button>
+              <span className="text-xs text-red-600">Please complete the JD and CV to initiate the training.</span>
             </div>
           );
         }

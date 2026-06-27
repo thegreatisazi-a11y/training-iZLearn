@@ -70,6 +70,13 @@ export const bulkUpload = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const download = asyncHandler(async (req: Request, res: Response) => {
+  // BUG-10: this endpoint serves BOTH the inline locked viewer (no flag) and explicit
+  // file downloads (?download=1). View-only users may render inline but must not save
+  // the file — only material managers (download permission) can perform a real download.
+  const isExplicitDownload = req.query.download === '1';
+  if (isExplicitDownload && !canManageMaterials(req)) {
+    throw AppError.forbidden('You do not have permission to download this material.');
+  }
   // UR-16: a trainee may only download the current, non-obsolete version.
   if (!canManageMaterials(req)) {
     const material = await svc.getMaterial(req.params.id);

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
+import { useAuthStore } from '@/store/authStore';
 
 /** Full-page, full-width in-app material viewer (Step 6 / UR full-window reading). */
 export default function MaterialViewerPage() {
@@ -13,6 +14,9 @@ export default function MaterialViewerPage() {
   const navigate = useNavigate();
   const name = params.get('name') || 'material';
   const type = params.get('type') || undefined;
+  // BUG-10: only users with material download permission see the Download button.
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canDownload = hasPermission('materialManagement', 'write') || hasPermission('courseManagement', 'write');
 
   return (
     <div className="flex h-[calc(100vh-2rem)] flex-col">
@@ -21,9 +25,13 @@ export default function MaterialViewerPage() {
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <div className="truncate px-3 font-medium text-slate-800">{name}</div>
-        <Button variant="outline" size="sm" onClick={() => svc.materials.download(id, name).catch((e) => toast.error(apiError(e)))}>
-          <Download className="h-4 w-4" /> Download
-        </Button>
+        {canDownload ? (
+          <Button variant="outline" size="sm" onClick={() => svc.materials.download(id, name).catch((e) => toast.error(apiError(e)))}>
+            <Download className="h-4 w-4" /> Download
+          </Button>
+        ) : (
+          <span />
+        )}
       </div>
       <div className="flex-1 overflow-hidden">
         <InlineFileViewer materialId={id} fileName={name} fileType={type} heightClass="h-full" />

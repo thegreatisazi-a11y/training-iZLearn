@@ -19,18 +19,34 @@ interface Attempt {
   id: string;
   topicId: string;
   topicTitle?: string;
+  topicNumber?: string | null;
   attemptNumber: number;
   score: number | null;
   isPassed: boolean;
   completedAt: string | null;
+  timeSpentSeconds?: number | null;
 }
 interface BlockedAssignment {
   id: string;
   userId: string;
   userFullName?: string;
+  employeeId?: string | null;
   topicId: string;
   topicTitle?: string;
+  topicNumber?: string | null;
   status: string;
+}
+
+/** BUG-04: "TT-001 – Title" (falls back gracefully when either part is missing). */
+function topicLabel(number?: string | null, title?: string | null, id?: string): string {
+  const t = title ?? id ?? '';
+  return number ? `${number} – ${t}` : t;
+}
+/** BUG-05: seconds → "Xm Ys". */
+function fmtDuration(s?: number | null): string {
+  if (s === null || s === undefined) return '—';
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s % 60}s`;
 }
 
 export default function AssessmentsPage() {
@@ -49,8 +65,24 @@ export default function AssessmentsPage() {
     enabled: canManage,
   });
 
-  const topicOpts = useMemo(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: String(t.title ?? t.id) })), [topics.data]);
+  // BUG-01: a user may not initiate training until their JD is approved and CV exists.
+  const myJds = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<{ status: string }[]> });
+  const myCv = useQuery({ queryKey: ['my-cv'], queryFn: () => svc.cv.mine() as unknown as Promise<{ cv: unknown | null }> });
+  const jdApproved = (myJds.data ?? []).some((j) => j.status === 'APPROVED');
+  const cvReady = !!myCv.data?.cv;
+  const canInitiate = jdApproved && cvReady;
+
+  // BUG-08: topics the user has already passed must not be startable again.
+  const passedTopicIds = useMemo(() => new Set((mine.data ?? []).filter((a) => a.isPassed).map((a) => a.topicId)), [mine.data]);
+  const topicOpts = useMemo(
+    () =>
+      (topics.data ?? [])
+        .filter((t) => !passedTopicIds.has(String(t.id)))
+        .map((t) => ({ value: String(t.id), label: topicLabel(String(t.topicNumber ?? t.topicCode ?? ''), String(t.title ?? ''), String(t.id)) })),
+    [topics.data, passedTopicIds],
+  );
   const [selectedTopic, setSelectedTopic] = useState('');
+  const selectedPassed = passedTopicIds.has(selectedTopic);
 
   // Unblock flow: e-signature first, then capture the reason for change.
   const [unblockTarget, setUnblockTarget] = useState<BlockedAssignment | null>(null);
@@ -67,16 +99,17 @@ export default function AssessmentsPage() {
   });
 
   const mineColumns: Column<Attempt>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
     { key: 'attemptNumber', header: 'Attempt', render: (r) => `#${r.attemptNumber}` },
     { key: 'score', header: 'Score', render: (r) => (r.score == null ? '—' : `${r.score}%`) },
     { key: 'isPassed', header: 'Result', render: (r) => (r.completedAt ? <Badge tone={r.isPassed ? 'COMPLETED' : 'REJECTED'}>{r.isPassed ? 'Passed' : 'Failed'}</Badge> : <Badge tone="IN_PROGRESS">In Progress</Badge>) },
+    { key: 'time', header: 'Time spent', render: (r) => fmtDuration(r.timeSpentSeconds) },
     { key: 'completedAt', header: 'Completed', render: (r) => formatDateTime(r.completedAt) },
   ];
 
   const blockedColumns: Column<BlockedAssignment>[] = [
-    { key: 'user', header: 'Employee', render: (r) => r.userFullName ?? r.userId },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'user', header: 'Employee', render: (r) => (r.userFullName ? `${r.userFullName}${r.employeeId ? ` (${r.employeeId})` : ''}` : r.userId) },
+    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     {
       key: 'actions',
@@ -97,13 +130,21 @@ export default function AssessmentsPage() {
         <CardHeader>
           <CardTitle>Start an Assessment</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="min-w-64">
-            <Select options={topicOpts} value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} placeholder="Choose an assigned topic…" />
+        <CardContent className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-64">
+              <Select options={topicOpts} value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} placeholder="Choose an assigned topic…" />
+            </div>
+            <Button disabled={!selectedTopic || selectedPassed || !canInitiate} onClick={() => navigate(`/assessments/take/${selectedTopic}`)}>
+              Start Assessment
+            </Button>
           </div>
-          <Button disabled={!selectedTopic} onClick={() => navigate(`/assessments/take/${selectedTopic}`)}>
-            Start Assessment
-          </Button>
+          {/* BUG-01: JD/CV must be ready before any training can be initiated. */}
+          {!canInitiate && (myJds.isSuccess || myCv.isSuccess) && (
+            <p className="text-sm text-red-600">Please complete the JD and CV to initiate the training.</p>
+          )}
+          {/* BUG-08: a passed assessment cannot be restarted. */}
+          {selectedPassed && <p className="text-sm text-amber-600">You have already completed and passed this assessment.</p>}
         </CardContent>
       </Card>
 
