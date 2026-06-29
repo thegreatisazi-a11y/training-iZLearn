@@ -1,0 +1,127 @@
+# izLearn — on-premises / self-hosted server stack (intranet).
+#
+# Runs the WHOLE application on ONE host with Docker:
+#   - mongo     : MongoDB 7 as a single-node REPLICA SET (transactions require it)
+#   - redis     : Bull job queues (email / reminders / backups)
+#   - backend   : Node/Express API (internal only — not published to the host)
+#   - frontend  : nginx that serves the React SPA AND proxies /api -> backend
+#
+# This file is ADDITIVE. It does NOT replace docker-compose.yml (local / Render
+# style) and is ignored by Vercel and Render. Secrets come from a .env file you
+# create on the server (copy .env.server.example -> .env and edit).
+#
+# Start / update the stack:
+#   docker compose -f docker-compose.server.yml up -d --build
+# Stop:
+#   docker compose -f docker-compose.server.yml down
+#
+# A distinct project name keeps this stack's containers/volumes separate from the
+# default docker-compose.yml stack, so the two never collide on one machine.
+name: izlearn-server
+
+services:
+  # ----------------------------------------------------------------------------
+  # MongoDB — single-node replica set. The healthcheck idempotently initialises
+  # the replica set on first boot (member host = the "mongo" service name, so the
+  # backend can reach it over the Docker network) and only reports healthy once
+  # the node is a writable PRIMARY. The backend waits for that before it starts,
+  # so `prisma db push` succeeds on the first try.
+  #
+  # NOTE: Mongo is NOT published to the host (no `ports:`) — it is reachable only
+  # on the internal Docker network. Authentication is left OFF for the initial
+  # intranet pilot; see SERVER.md for how to enable auth + a keyfile to harden.
+  # ----------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) } ; db.hello().isWritablePrimary || quit(1)"
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------------------------
+  # Backend API. Built from backend/Dockerfile (context = repo root). On boot it
+  # runs `prisma db push` -> `seed` (idempotent) -> `start`. Files are stored on a
+  # persistent Docker volume (STORAGE_DRIVER=local) — no 15 MB cap, survives
+  # restarts. Not published to the host; only nginx talks to it.
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      # Self-hosted replica set on the Docker network. Override in .env if needed.
+      DATABASE_URL: ${DATABASE_URL:-mongodb://mongo:27017/izlearn?replicaSet=rs0}
+      REDIS_URL: redis://redis:6379
+      # Files on a persistent local volume (recommended for a self-hosted server).
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      STORAGE_ROOT: /app/storage
+      BACKUP_DESTINATION: /app/backups
+      # Secrets — set these in .env (no safe defaults).
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-8h}
+      BCRYPT_COST: ${BCRYPT_COST:-12}
+      # The intranet URL users will open, e.g. http://izlearn.yourco.local — used
+      # for the CORS whitelist. (Same-origin /api via nginx usually needs no CORS,
+      # but set it correctly anyway.)
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-ChangeMe@123}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+    volumes:
+      - storage:/app/storage
+      - backups:/app/backups
+
+  # ----------------------------------------------------------------------------
+  # Frontend. Built from frontend/Dockerfile — nginx serving the built SPA. The
+  # baked-in frontend/nginx.conf proxies /api/ -> backend:4000, so the website and
+  # the API are the SAME origin (no CORS, no VITE_API_URL needed).
+  #
+  # HTTP only for the initial pilot (port 80). To enable HTTPS later, mount the
+  # TLS nginx config + your cert and publish 443 — see SERVER.md.
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '80:80'
+      # - '443:443'   # uncomment when you switch on TLS (see SERVER.md)
+
+volumes:
+  mongo_data:
+  redis_data:
+  storage:
+  backups:
