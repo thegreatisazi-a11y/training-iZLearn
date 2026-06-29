@@ -137,6 +137,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         .map((x) => ({
           topicCode: m.topics.get(x.topicId)?.topicCode ?? '',
           topicTitle: m.topics.get(x.topicId)?.title ?? '',
+          _userId: x.userId, _topicId: x.topicId,
           employee: m.users.get(x.userId)?.fullName ?? '',
           employeeId: m.users.get(x.userId)?.employeeId ?? '',
           ...userOrgCols(m, x.userId),
@@ -197,6 +198,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const rows = a
         .filter((x) => userPasses(x.userId))
         .map((x) => ({
+          _userId: x.userId, _topicId: x.topicId,
           employee: m.users.get(x.userId)?.fullName ?? '',
           employeeId: m.users.get(x.userId)?.employeeId ?? '',
           ...userOrgCols(m, x.userId),
@@ -233,6 +235,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         agg.set(x.userId, e);
       }
       const rows = [...agg.entries()].filter(([id]) => userPasses(id)).map(([id, v]) => ({
+        _userId: id,
         employee: m.users.get(id)?.fullName ?? '',
         employeeId: m.users.get(id)?.employeeId ?? '',
         ...userOrgCols(m, id),
@@ -295,7 +298,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const rows = attempts.filter((x) => userPasses(x.userId)).map((x) => ({
         topic: m.topics.get(x.topicId)?.title ?? '',
         topicVersion: x.topicVersion,
-        employee: m.users.get(x.userId)?.fullName ?? '',
+        _userId: x.userId, _topicId: x.topicId,
+          employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
         ...userOrgCols(m, x.userId),
         completedAt: formatDate(x.completedAt),
@@ -325,6 +329,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         orderBy: [{ userId: 'asc' }, { version: 'desc' }],
       });
       const rows = jds.filter((j) => userPasses(j.userId)).map((j) => ({
+        _userId: j.userId,
         employee: m.users.get(j.userId)?.fullName ?? '',
         title: j.title,
         version: j.version,
@@ -351,7 +356,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         where: { isDeleted: false, status: 'COMPLETED', ...(f.topicId ? { topicId: f.topicId } : {}), ...(f.userId ? { userId: f.userId } : {}) },
       });
       const rows = a.filter((x) => userPasses(x.userId)).map((x) => ({
-        employee: m.users.get(x.userId)?.fullName ?? '',
+        _userId: x.userId, _topicId: x.topicId,
+          employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
         ...userOrgCols(m, x.userId),
         topic: m.topics.get(x.topicId)?.title ?? '',
@@ -379,7 +385,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: 'OVERDUE' } });
       const rows = a.filter((x) => userPasses(x.userId)).map((x) => ({
         ...userOrgCols(m, x.userId),
-        employee: m.users.get(x.userId)?.fullName ?? '',
+        _userId: x.userId, _topicId: x.topicId,
+          employee: m.users.get(x.userId)?.fullName ?? '',
         employeeId: m.users.get(x.userId)?.employeeId ?? '',
         topic: m.topics.get(x.topicId)?.title ?? '',
         dueDate: formatDate(x.dueDate),
@@ -432,6 +439,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       const inductionTopics = new Set([...m.topics.values()].filter((t) => t.trainingType === 'INDUCTION').map((t) => t.id));
       const certs = await prisma.certificate.findMany({ where: { isDeleted: false, certificateType: 'INDUCTION' } });
       const rows = certs.map((c) => ({
+        _userId: c.userId, _topicId: c.topicId,
         employee: m.users.get(c.userId)?.fullName ?? '',
         employeeId: m.users.get(c.userId)?.employeeId ?? '',
         topic: m.topics.get(c.topicId)?.title ?? '',
@@ -550,7 +558,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           const comp = at?.completedAt ?? null;
           const days = eff && comp ? Math.round((comp.getTime() - eff.getTime()) / 86_400_000) : '';
           return {
-            employee: m.users.get(x.userId)?.fullName ?? '',
+            _userId: x.userId, _topicId: x.topicId,
+          employee: m.users.get(x.userId)?.fullName ?? '',
             employeeId: m.users.get(x.userId)?.employeeId ?? '',
             ...userOrgCols(m, x.userId),
             topic: topic?.title ?? '',
@@ -601,6 +610,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           const comp = at.completedAt ?? null;
           const days = eff && comp ? Math.round((comp.getTime() - eff.getTime()) / 86_400_000) : '';
           return {
+            _userId: at.userId, _topicId: at.topicId,
             employee: m.users.get(at.userId)?.fullName ?? '',
             employeeId: m.users.get(at.userId)?.employeeId ?? '',
             ...userOrgCols(m, at.userId),

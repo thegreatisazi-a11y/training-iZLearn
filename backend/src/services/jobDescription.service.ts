@@ -295,6 +295,9 @@ export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
       ...(input.functionalRoleId !== undefined ? { functionalRoleId: input.functionalRoleId } : {}),
       ...(reAcknowledge ? { acknowledgedAt: null, acknowledgementText: null, acknowledgementSignatureId: null } : {}),
+      // Every edit to a JD is a new version (computed explicitly so a record whose version
+      // field is absent/legacy still advances correctly, e.g. v1 → v2).
+      version: (jd.version ?? 1) + 1,
     },
   });
 }

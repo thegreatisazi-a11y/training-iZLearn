@@ -20,6 +20,11 @@ export function DataTable<T extends { id?: string }>({
   total = 0,
   onPageChange,
   emptyText,
+  onRowClick,
+  selectable,
+  selectedIds,
+  onToggleRow,
+  onToggleAll,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -29,16 +34,35 @@ export function DataTable<T extends { id?: string }>({
   total?: number;
   onPageChange?: (p: number) => void;
   emptyText?: string;
+  /** Drill-down: when set, rows become clickable and call this with the row. */
+  onRowClick?: (row: T) => void;
+  /** Bulk operations: render a leading checkbox column and manage selection. */
+  selectable?: boolean;
+  selectedIds?: Set<string>;
+  onToggleRow?: (id: string) => void;
+  onToggleAll?: (ids: string[], checked: boolean) => void;
 }) {
   if (loading) return <PageLoader />;
   if (!rows.length) return <EmptyState message={emptyText} />;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rowIds = rows.map((r) => r.id).filter((id): id is string => !!id);
+  const allSelected = selectable && rowIds.length > 0 && rowIds.every((id) => selectedIds?.has(id));
 
   return (
     <div className="iz-card overflow-hidden">
       <Table>
         <THead>
           <TR>
+            {selectable && (
+              <TH className="w-10">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={!!allSelected}
+                  onChange={(e) => onToggleAll?.(rowIds, e.target.checked)}
+                />
+              </TH>
+            )}
             {columns.map((c) => (
               <TH key={c.key} className={c.className}>
                 {c.header}
@@ -48,7 +72,21 @@ export function DataTable<T extends { id?: string }>({
         </THead>
         <TBody>
           {rows.map((r, i) => (
-            <TR key={r.id ?? i}>
+            <TR
+              key={r.id ?? i}
+              className={onRowClick ? 'cursor-pointer' : undefined}
+              onClick={onRowClick ? () => onRowClick(r) : undefined}
+            >
+              {selectable && (
+                <TD className="w-10" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select row"
+                    checked={!!(r.id && selectedIds?.has(r.id))}
+                    onChange={() => r.id && onToggleRow?.(r.id)}
+                  />
+                </TD>
+              )}
               {columns.map((c) => (
                 <TD key={c.key} className={c.className}>
                   {c.render ? c.render(r) : String((r as Record<string, unknown>)[c.key] ?? '—')}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -25,6 +26,7 @@ function labelFor(type: string) {
 }
 
 export default function ReportsPage() {
+  const navigate = useNavigate();
   const canExport = useAuthStore((s) => s.hasPermission)('reports', 'export');
   const canPrint = useAuthStore((s) => s.hasPermission)('reports', 'print');
 
@@ -77,6 +79,16 @@ export default function ReportsPage() {
     header: c.header,
     render: (row) => String(row[c.key] ?? '—'),
   }));
+
+  // #7: drill-down — rows that carry a hidden _userId / _topicId open the matching
+  // detail (employee → My Team member view; topic → course detail), like My Teams.
+  const rowsHaveDrill = (result?.rows ?? []).some((r) => r._userId || r._topicId);
+  function drillInto(row: Record<string, unknown>) {
+    const uid = row._userId as string | undefined;
+    const tid = row._topicId as string | undefined;
+    if (uid) navigate(`/team/${uid}`);
+    else if (tid) navigate(`/topics/${tid}`);
+  }
 
   return (
     <div>
@@ -148,7 +160,13 @@ export default function ReportsPage() {
       {result && (
         <div>
           <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">{result.title}</h2>
-          <DataTable columns={columns} rows={result.rows} emptyText="No data for the selected filters." />
+          {rowsHaveDrill && <p className="mb-2 text-xs text-slate-400">Tip: click a row to open its details.</p>}
+          <DataTable
+            columns={columns}
+            rows={result.rows}
+            emptyText="No data for the selected filters."
+            onRowClick={rowsHaveDrill ? drillInto : undefined}
+          />
         </div>
       )}
     </div>

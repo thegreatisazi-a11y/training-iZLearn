@@ -22,6 +22,7 @@ interface AuditEntry {
   action: string;
   entityType: string;
   entityId: string | null;
+  entityLabel?: string | null;
   reasonForChange: string | null;
   oldValue?: Record<string, unknown> | null;
   newValue?: Record<string, unknown> | null;
@@ -267,7 +268,9 @@ export default function AuditTrailPage() {
       key: 'record',
       header: 'Record',
       render: (r) => {
-        const name = recordName(r.entityType, r.entityId);
+        // Prefer the backend-resolved label (covers all entity types), then the local
+        // resolver, then fall back to the raw id only if nothing resolved.
+        const name = r.entityLabel ?? recordName(r.entityType, r.entityId);
         return name ? (
           <span className="text-slate-700">{name}</span>
         ) : r.entityId ? (

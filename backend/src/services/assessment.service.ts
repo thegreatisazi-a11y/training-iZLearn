@@ -203,8 +203,11 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const rnd = topic.randomizeQuestions;
   const count = topic.questionLimit ?? (await getNumber('assessment.default_question_count', 10));
   const pool = await prisma.question.findMany({
-    // G4: staged (draft) questions never enter a live assessment until published.
-    where: { topicId, topicVersion: topic.currentVersion, isActive: true, isDeleted: false, isStaged: false },
+    // The live question set = all active, non-deleted questions for this topic. (We do NOT
+    // pin to topicVersion: a question change now bumps the course version, and pinning
+    // would orphan every pre-existing question from the assessment. Staged drafts, if any
+    // legacy ones remain, are still excluded.)
+    where: { topicId, isActive: true, isDeleted: false, isStaged: false },
   });
   const mandatory = pool.filter((q) => q.isMandatory);
   const optionalPool = pool.filter((q) => !q.isMandatory);
@@ -308,19 +311,26 @@ async function finalizeAbandonedAttempt(attemptId: string): Promise<void> {
  */
 export async function finalizeStaleAttempts(opts: { userId?: string } = {}): Promise<number> {
   const graceMinutes = await getNumber('assessment.abandon_after_minutes', 180);
-  const cutoff = new Date(Date.now() - graceMinutes * 60 * 1000);
-  const open = await prisma.assessmentAttempt.findMany({
-    where: { completedAt: null, isDeleted: false, ...(opts.userId ? { userId: opts.userId } : {}) },
-    select: { id: true, startedAt: true, expiresAt: true },
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - graceMinutes * 60 * 1000);
+  // NOTE: a freshly-started attempt is stored WITHOUT a completedAt field (absent, not
+  // null), and Prisma+Mongo `{ completedAt: null }` does NOT match absent fields — so we
+  // select by the stale/expired window (startedAt/expiresAt are always set) and check
+  // completedAt in JS. This is what makes the reason get recorded even if the learner
+  // never returns.
+  const candidates = await prisma.assessmentAttempt.findMany({
+    where: {
+      isDeleted: false,
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      OR: [{ startedAt: { lt: cutoff } }, { expiresAt: { lt: now } }],
+    },
+    select: { id: true, startedAt: true, expiresAt: true, completedAt: true },
   });
   let finalized = 0;
-  for (const a of open) {
-    const expired = a.expiresAt ? new Date() > a.expiresAt : false;
-    const stale = a.startedAt < cutoff;
-    if (expired || stale) {
-      await finalizeAbandonedAttempt(a.id).catch(() => undefined);
-      finalized++;
-    }
+  for (const a of candidates) {
+    if (a.completedAt) continue; // already submitted/finalized
+    await finalizeAbandonedAttempt(a.id).catch(() => undefined);
+    finalized++;
   }
   return finalized;
 }

@@ -47,6 +47,21 @@ export default function MaterialLibraryPage() {
   const [uploadTopicId, setUploadTopicId] = useState('');
   const [deleting, setDeleting] = useState<Material | null>(null);
   const [viewing, setViewing] = useState<Material | null>(null);
+  // Bulk operations: multi-select + bulk delete.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const toggleRow = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAll = (ids: string[], checked: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => (checked ? next.add(id) : next.delete(id)));
+      return next;
+    });
 
   const { data: topics } = useQuery({ queryKey: ['topics', 'all'], queryFn: () => svc.topics.list({ pageSize: 200 }) });
   const topicOptions = ((topics?.data ?? []) as { id: string; title: string }[]).map((t) => ({ value: t.id, label: t.title }));
@@ -98,6 +113,24 @@ export default function MaterialLibraryPage() {
     onSuccess: () => {
       toast.success('Material deleted');
       qc.invalidateQueries({ queryKey: ['materials'] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Bulk delete: remove every selected material with one shared reason for change.
+  const bulkDeleteMut = useMutation({
+    mutationFn: async (reason: string) => {
+      const ids = [...selected];
+      const results = await Promise.allSettled(ids.map((id) => svc.materials.remove(id, reason)));
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      return { total: ids.length, failed };
+    },
+    onSuccess: ({ total, failed }) => {
+      if (failed > 0) toast.error(`${total - failed} deleted, ${failed} failed (a material in use by a course can't be deleted).`);
+      else toast.success(`${total} material(s) deleted`);
+      qc.invalidateQueries({ queryKey: ['materials'] });
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -222,6 +255,19 @@ export default function MaterialLibraryPage() {
         />
       </div>
 
+      {/* Bulk action bar — appears once one or more rows are selected. */}
+      {canWrite && selected.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          <span className="font-medium text-slate-700">{selected.size} selected</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setSelected(new Set())}>Clear</Button>
+            <Button size="sm" variant="danger" onClick={() => setBulkDeleteOpen(true)} disabled={bulkDeleteMut.isPending}>
+              <Trash2 className="h-4 w-4" /> Delete selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       <DataTable<Material>
         columns={columns}
         rows={(data?.data ?? []) as unknown as Material[]}
@@ -231,6 +277,17 @@ export default function MaterialLibraryPage() {
         total={data?.total}
         onPageChange={setPage}
         emptyText="No materials found."
+        selectable={canWrite}
+        selectedIds={selected}
+        onToggleRow={toggleRow}
+        onToggleAll={toggleAll}
+      />
+
+      <ReasonForChangeDialog
+        open={bulkDeleteOpen}
+        onClose={() => setBulkDeleteOpen(false)}
+        onConfirm={async (r) => { await bulkDeleteMut.mutateAsync(r); }}
+        title={`Delete ${selected.size} material(s)`}
       />
 
       <ReasonForChangeDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={async (r) => { await deleteMut.mutateAsync(r); }} title="Delete Material" />

@@ -77,5 +77,94 @@ export async function queryAuditTrail(filters: AuditQueryFilters) {
     prisma.auditTrail.count({ where }),
   ]);
 
-  return { data, total, page, pageSize };
+  return { data: await enrichEntityLabels(data), total, page, pageSize };
+}
+
+/**
+ * CR-AU1: the "Record" column must show a human-readable name, never a raw id. Resolve
+ * each audited record's id → a label appropriate to its entity type, in batched queries.
+ * Unknown types (or deleted records) fall back to the id on the client.
+ */
+async function enrichEntityLabels<T extends { entityType: string; entityId: string | null }>(rows: T[]): Promise<(T & { entityLabel: string | null })[]> {
+  const idsByType = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.entityId) continue;
+    if (!idsByType.has(r.entityType)) idsByType.set(r.entityType, new Set());
+    idsByType.get(r.entityType)!.add(r.entityId);
+  }
+  const label = new Map<string, string>(); // `${type}:${id}` → label
+  const put = (type: string, id: string, v: string) => label.set(`${type}:${id}`, v);
+  const idsOf = (type: string) => Array.from(idsByType.get(type) ?? []);
+  const truncate = (s: string, n = 60) => (s && s.length > n ? `${s.slice(0, n)}…` : s);
+
+  // Resolve user + topic ids first — several relational records label via these.
+  const allUserIds = new Set<string>(idsOf('User'));
+  const allTopicIds = new Set<string>(idsOf('TrainingTopic'));
+  // Relational records whose label is composed from their user/topic.
+  const relational = ['TrainingAssignment', 'AssessmentAttempt', 'RetakeRequest', 'CurriculumVitae'] as const;
+  const relRecords: Record<string, { userId?: string; topicId?: string }> = {};
+  await Promise.all(
+    relational.map(async (type) => {
+      const ids = idsOf(type);
+      if (!ids.length) return;
+      try {
+        const model = (prisma as unknown as Record<string, { findMany: (a: unknown) => Promise<Array<{ id: string; userId?: string; topicId?: string }>> }>)[
+          type.charAt(0).toLowerCase() + type.slice(1)
+        ];
+        const recs = await model.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true, ...(type !== 'CurriculumVitae' ? { topicId: true } : {}) } });
+        for (const rec of recs) {
+          relRecords[`${type}:${rec.id}`] = { userId: rec.userId, topicId: rec.topicId };
+          if (rec.userId) allUserIds.add(rec.userId);
+          if (rec.topicId) allTopicIds.add(rec.topicId);
+        }
+      } catch {
+        /* unknown shape — skip */
+      }
+    }),
+  );
+
+  const [users, topics] = await Promise.all([
+    allUserIds.size ? prisma.user.findMany({ where: { id: { in: [...allUserIds] } }, select: { id: true, fullName: true, employeeId: true } }) : [],
+    allTopicIds.size ? prisma.trainingTopic.findMany({ where: { id: { in: [...allTopicIds] } }, select: { id: true, title: true, topicNumber: true, topicCode: true } }) : [],
+  ]);
+  const userLabel = new Map(users.map((u) => [u.id, `${u.fullName} (${u.employeeId})`]));
+  const topicLabel = new Map(topics.map((t) => [t.id, `${t.topicNumber ?? t.topicCode} – ${t.title}`]));
+
+  // Simple, single-field label types.
+  const simple: Array<[string, () => Promise<Array<{ id: string; label: string }>>]> = [
+    ['User', async () => users.filter((u) => idsByType.get('User')?.has(u.id)).map((u) => ({ id: u.id, label: userLabel.get(u.id)! }))],
+    ['TrainingTopic', async () => topics.filter((t) => idsByType.get('TrainingTopic')?.has(t.id)).map((t) => ({ id: t.id, label: topicLabel.get(t.id)! }))],
+    ['Role', async () => (await prisma.role.findMany({ where: { id: { in: idsOf('Role') } }, select: { id: true, roleName: true } })).map((r) => ({ id: r.id, label: r.roleName }))],
+    ['Department', async () => (await prisma.department.findMany({ where: { id: { in: idsOf('Department') } }, select: { id: true, name: true } })).map((r) => ({ id: r.id, label: r.name }))],
+    ['Location', async () => (await prisma.location.findMany({ where: { id: { in: idsOf('Location') } }, select: { id: true, name: true } })).map((r) => ({ id: r.id, label: r.name }))],
+    ['DesignationMaster', async () => (await prisma.designationMaster.findMany({ where: { id: { in: idsOf('DesignationMaster') } }, select: { id: true, displayName: true } })).map((r) => ({ id: r.id, label: r.displayName }))],
+    ['TrainingMaterial', async () => (await prisma.trainingMaterial.findMany({ where: { id: { in: idsOf('TrainingMaterial') } }, select: { id: true, originalFileName: true } })).map((r) => ({ id: r.id, label: r.originalFileName }))],
+    ['Question', async () => (await prisma.question.findMany({ where: { id: { in: idsOf('Question') } }, select: { id: true, questionText: true } })).map((r) => ({ id: r.id, label: truncate(r.questionText) }))],
+    ['Certificate', async () => (await prisma.certificate.findMany({ where: { id: { in: idsOf('Certificate') } }, select: { id: true, certificateNumber: true } })).map((r) => ({ id: r.id, label: r.certificateNumber }))],
+    ['JobDescription', async () => (await prisma.jobDescription.findMany({ where: { id: { in: idsOf('JobDescription') } }, select: { id: true, title: true } })).map((r) => ({ id: r.id, label: r.title }))],
+    ['JDTemplate', async () => (await prisma.jDTemplate.findMany({ where: { id: { in: idsOf('JDTemplate') } }, select: { id: true, title: true } })).map((r) => ({ id: r.id, label: r.title }))],
+    ['TopicBundle', async () => (await prisma.topicBundle.findMany({ where: { id: { in: idsOf('TopicBundle') } }, select: { id: true, name: true } })).map((r) => ({ id: r.id, label: r.name }))],
+  ];
+  await Promise.all(
+    simple.map(async ([type, fetch]) => {
+      if (!idsByType.has(type)) return;
+      try {
+        for (const { id, label: l } of await fetch()) put(type, id, l);
+      } catch {
+        /* skip */
+      }
+    }),
+  );
+
+  // Relational composite labels: "<user> · <topic>".
+  for (const type of relational) {
+    for (const id of idsOf(type)) {
+      const rec = relRecords[`${type}:${id}`];
+      if (!rec) continue;
+      const parts = [rec.userId ? userLabel.get(rec.userId) : null, rec.topicId ? topicLabel.get(rec.topicId) : null].filter(Boolean);
+      if (parts.length) put(type, id, parts.join(' · '));
+    }
+  }
+
+  return rows.map((r) => ({ ...r, entityLabel: r.entityId ? label.get(`${r.entityType}:${r.entityId}`) ?? null : null }));
 }

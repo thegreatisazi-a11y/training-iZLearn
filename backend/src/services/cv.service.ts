@@ -58,7 +58,9 @@ export async function upsertMyCV(userId: string, input: UpsertCvInput) {
   };
   const existing = await prisma.curriculumVitae.findFirst({ where: { userId } });
   // Each save is a new version of the CV (history is preserved in the audit trail).
-  if (existing) return prisma.curriculumVitae.update({ where: { id: existing.id }, data: { ...data, version: { increment: 1 } } });
+  // Computed explicitly (not { increment }) so a pre-existing CV whose version field is
+  // absent still advances visibly: a CV shown as v1 becomes v2 on the next save.
+  if (existing) return prisma.curriculumVitae.update({ where: { id: existing.id }, data: { ...data, version: (existing.version ?? 1) + 1 } });
   return prisma.curriculumVitae.create({ data: { ...data, userId, createdBy: userId } });
 }
 

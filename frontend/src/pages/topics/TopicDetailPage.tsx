@@ -460,6 +460,9 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Question added');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+      // A question change on a published course bumps the version + logs history.
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+      qc.invalidateQueries({ queryKey: ['topic-history', id] });
       setQuestionDialog(false);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -470,6 +473,8 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Question updated');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+      qc.invalidateQueries({ queryKey: ['topic-history', id] });
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -490,6 +495,8 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Question removed');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+      qc.invalidateQueries({ queryKey: ['topic', id] });
+      qc.invalidateQueries({ queryKey: ['topic-history', id] });
       setRemoveQuestionFor(null);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -643,8 +650,9 @@ export default function TopicDetailPage() {
               <Pencil className="h-3.5 w-3.5" /> Edit
             </button>
           )}
-          {/* Remove a live question only before publish (G4: published questions can't be removed in place). */}
-          {canQuestionWrite && String(t.status) !== 'PUBLISHED' && (
+          {/* A question can be removed at any time, including after publish — it is a
+              controlled, versioned change (bumps the course version + logs the removal). */}
+          {canQuestionWrite && (
             <button className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline" onClick={() => setRemoveQuestionFor(r)}>
               <Trash2 className="h-3.5 w-3.5" /> Remove
             </button>
