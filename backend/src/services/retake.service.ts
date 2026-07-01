@@ -99,6 +99,12 @@ export async function listForSupervisor(req: Request, q: PaginationQuery & { sta
   return { data: await withNames(rows), total, page: q.page, pageSize: q.pageSize };
 }
 
+/** #4: when a supervisor re-opens an OVERDUE course (an OVERDUE_ACCESS approval), the
+ * assignment's due date is pushed out by this many days. Without it the nightly overdue
+ * sweep (dueDate < today && status PENDING → OVERDUE) re-blocks the course the same night
+ * and the trainee can never actually start. */
+const OVERDUE_ACCESS_GRACE_DAYS = 7;
+
 /**
  * Supervisor decision on a retake request (e-signed). Only the trainee's direct
  * supervisor (or a SUPER_ADMIN) may decide. APPROVE unblocks the assignment and
@@ -129,7 +135,14 @@ export async function decideRetakeRequest(id: string, input: RetakeDecisionInput
       ? 0
       : await prisma.assessmentAttempt.count({ where: { userId: request.userId, topicId: request.topicId, isDeleted: false } });
     const assignmentData = isOverdue
-      ? { status: 'PENDING' as const, requiresSupervisorApproval: false }
+      ? {
+          status: 'PENDING' as const,
+          requiresSupervisorApproval: false,
+          // #4: extend the due date so the nightly overdue sweep doesn't immediately
+          // re-flag it; clear the notified marker so a future lapse notifies again.
+          dueDate: new Date(Date.now() + OVERDUE_ACCESS_GRACE_DAYS * 24 * 60 * 60 * 1000),
+          overdueNotifiedAt: null,
+        }
       : { status: 'PENDING' as const, extraAttempts: usedAttempts };
     const { updated } = await auditedTransaction(prisma, async (tx) => {
       const updatedRequest = await tx.retakeRequest.update({

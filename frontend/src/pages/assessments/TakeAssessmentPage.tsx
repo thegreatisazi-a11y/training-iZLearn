@@ -133,6 +133,11 @@ function formatCorrect(c: unknown): string {
     }
     return (c as unknown[]).join(', ');
   }
+  // #7: defensive fallback for an object answer (e.g. a fill-in-the-blanks map) so it
+  // never renders as "[object Object]"; the backend normally flattens these already.
+  if (c && typeof c === 'object') {
+    return Object.values(c as Record<string, unknown>).map((v) => String(v)).join(', ');
+  }
   return String(c ?? '');
 }
 

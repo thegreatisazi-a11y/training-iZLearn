@@ -64,8 +64,24 @@ function humanizeAnswer(q: { questionType: string; options: unknown }, value: un
       if (s === 'false') return 'False';
       return optionTextMap(q.options).get(String(value)) ?? value;
     }
+    case 'FILL_IN_THE_BLANKS': {
+      // #7: a fill answer is a per-blank map ({ b1: 'foo' }) or array — flatten to the
+      // entered text so it renders readably instead of "[object Object]".
+      if (Array.isArray(value)) return value.map((v) => String(v));
+      if (typeof value === 'object') return Object.values(value as Record<string, unknown>).map((v) => String(v));
+      return String(value);
+    }
+    case 'MATCH_THE_WORDS': {
+      // #7: normalise to an array of { left, right } so the UI renders "left → right".
+      // Accepts the pairs array (correct answer) or a { left: right } map (user answer).
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'object') {
+        return Object.entries(value as Record<string, unknown>).map(([left, right]) => ({ left, right: String(right) }));
+      }
+      return value;
+    }
     default:
-      return value; // FILL_IN_THE_BLANKS, MATCH_THE_WORDS — already human-readable
+      return value;
   }
 }
 

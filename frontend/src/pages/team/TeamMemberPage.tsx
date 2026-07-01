@@ -114,13 +114,13 @@ export default function TeamMemberPage() {
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.retake.decide(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['team-member', userId] });
-      toast.success('Retake decision recorded.');
     },
     onError: (e) => toast.error(apiError(e)),
   });
 
   async function confirmDecision(signature: ESignaturePayload) {
     if (!decision.row) return;
+    const overdueApprove = decision.kind === 'APPROVE' && decision.row.requestType === 'OVERDUE_ACCESS';
     await decideMutation.mutateAsync({
       id: decision.row.id,
       body: {
@@ -130,6 +130,13 @@ export default function TeamMemberPage() {
         reasonForChange: `Assessment retake ${decision.kind === 'APPROVE' ? 'approved' : 'rejected'}`,
       },
     });
+    toast.success(
+      decision.kind === 'REJECT'
+        ? 'Retake request rejected.'
+        : overdueApprove
+          ? 'Approved — course re-opened and the due date extended by 7 days.'
+          : 'Retake approved.',
+    );
   }
 
   const pendingRetakes = (data?.retakeRequests ?? []).filter((r) => r.status === 'PENDING_APPROVAL');
@@ -221,6 +228,9 @@ export default function TeamMemberPage() {
                     <Badge tone={r.requestType === 'OVERDUE_ACCESS' ? 'PENDING' : 'IN_PROGRESS'}>{REQUEST_LABEL(r.requestType)}</Badge>
                   </div>
                   <div className="text-xs text-slate-500">Requested {formatDateTime(r.createdAt)} · “{r.justification}”</div>
+                  {r.requestType === 'OVERDUE_ACCESS' && (
+                    <div className="mt-1 text-xs text-amber-700">Approving re-opens the course and extends the due date by 7 days.</div>
+                  )}
                 </div>
                 {canApprove ? (
                   <div className="flex gap-1">
