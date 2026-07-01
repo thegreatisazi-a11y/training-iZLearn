@@ -63,10 +63,6 @@ export const publishDraftChanges = asyncHandler(async (req: Request, res: Respon
   sendSuccess(res, await svc.publishDraftChanges(req.params.id, req), 'Draft changes published');
 });
 
-export const updatePassingScore = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.updatePassingScore(req.params.id, req.body, req), 'Passing score updated');
-});
-
 export const revise = asyncHandler(async (req: Request, res: Response) => {
   const topic = await svc.reviseTopic(req.params.id, req);
   sendCreated(res, topic, 'New topic version created');

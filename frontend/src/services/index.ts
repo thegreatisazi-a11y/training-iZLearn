@@ -68,7 +68,6 @@ export const svc = {
     ...createCrud('/topics'),
     revise: (id: string, body: unknown) => data(api.post(`/topics/${id}/revise`, body)),
     publishDraft: (id: string, body: unknown) => data(api.post(`/topics/${id}/publish-draft`, body)),
-    updatePassingScore: (id: string, body: unknown) => data(api.patch(`/topics/${id}/passing-score`, body)),
     updateStatus: (id: string, body: unknown) => data(api.patch(`/topics/${id}/status`, body)),
     history: (id: string, params?: ListParams) => api.get(`/topics/${id}/history`, { params }).then((r) => r.data),
     exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/topics/export${qs(params)}`, 'training-topics.csv'),

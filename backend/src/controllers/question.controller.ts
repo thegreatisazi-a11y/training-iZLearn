@@ -22,9 +22,9 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.updateQuestion(req.params.id, req.body, req.user!.id, req.body.reasonForChange), 'Question updated');
+  sendSuccess(res, await svc.updateQuestion(req.params.id, req.body, req.user!.id), 'Question updated');
 });
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.deactivateQuestion(req.params.id, req.user!.id, req.body.reasonForChange), 'Question deactivated');
+  sendSuccess(res, await svc.deactivateQuestion(req.params.id), 'Question deactivated');
 });

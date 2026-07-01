@@ -69,6 +69,7 @@ interface Question {
   helpText?: string;
   isMandatory: boolean;
   isStaged?: boolean;
+  pendingRemoval?: boolean;
 }
 
 const MAX_OPTIONS = 4; // CR-34
@@ -209,10 +210,6 @@ export default function TopicDetailPage() {
   const canQuestionWrite = can('questionBank', 'write');
 
   const [tab, setTab] = useState('materials');
-  const [changingScore, setChangingScore] = useState(false);
-  const [signScore, setSignScore] = useState(false);
-  const [newScore, setNewScore] = useState('');
-  const [scoreReason, setScoreReason] = useState('');
   const [deletingMaterial, setDeletingMaterial] = useState<Material | null>(null);
   const [questionDialog, setQuestionDialog] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
@@ -244,7 +241,7 @@ export default function TopicDetailPage() {
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM', trainingTypes: [] as string[],
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
     questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
-    requiresAssessment: true, assessmentTimeMinutes: '',
+    requiresAssessment: true, assessmentTimeMinutes: '', passingScorePercent: '',
     signatories: [] as { userId: string; role: string; date: string }[],
     randomizeQuestions: true, showExplanations: true, blockAfterMaxAttempts: true,
   });
@@ -287,19 +284,6 @@ export default function TopicDetailPage() {
   const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
-
-  const scoreMut = useMutation({
-    mutationFn: (sig: ESignaturePayload) =>
-      svc.topics.updatePassingScore(id, {
-        passingScorePercent: Number(newScore),
-        reasonForChange: scoreReason,
-        signature: sig,
-      }),
-    onSuccess: () => {
-      toast.success('Passing score updated');
-      qc.invalidateQueries({ queryKey: ['topic', id] });
-    },
-  });
 
   const uploadMut = useMutation({
     mutationFn: (file: File) => svc.materials.upload(file, id),
@@ -420,6 +404,7 @@ export default function TopicDetailPage() {
         departmentId: editTopicForm.departmentId || undefined,
         designationIds: editTopicForm.designationIds,
         requiresAssessment: editTopicForm.requiresAssessment,
+        passingScorePercent: editTopicForm.passingScorePercent !== '' ? Number(editTopicForm.passingScorePercent) : undefined,
         signatories: editTopicForm.signatories.filter((s) => s.userId),
         assessmentTimeMinutes: Number(editTopicForm.assessmentTimeMinutes) > 0 ? Number(editTopicForm.assessmentTimeMinutes) : null,
         durationMinutes: editTopicForm.durationMinutes !== '' ? Number(editTopicForm.durationMinutes) : undefined,
@@ -516,36 +501,41 @@ export default function TopicDetailPage() {
   const t = topic as Record<string, unknown> & { topicCode: string; title: string };
 
   function openEditTopic() {
+    // On a published course, pending edits are staged in draftMeta. Populate the form
+    // from draftMeta merged over the live values so successive edits accumulate instead
+    // of overwriting one another (the display cards still show the live values).
+    const src = { ...t, ...((t.draftMeta as Record<string, unknown> | null) ?? {}) };
     setEditTopicForm({
-      title: String(t.title ?? ''),
-      topicNumber: String(t.topicNumber ?? ''),
-      sopNumber: String(t.sopNumber ?? ''),
-      description: String(t.description ?? ''),
-      trainingType: String(t.trainingType ?? 'CLASSROOM'),
-      trainingTypes: Array.isArray(t.trainingTypes) && (t.trainingTypes as string[]).length ? (t.trainingTypes as string[]) : t.trainingType ? [String(t.trainingType)] : [],
-      signatories: Array.isArray(t.signatories)
-        ? (t.signatories as { userId: string; role: string; date?: string }[]).map((s) => ({ userId: s.userId, role: s.role || 'PREPARED', date: s.date ?? '' }))
-        : Array.isArray(t.signatoryUserIds)
-          ? (t.signatoryUserIds as string[]).map((uid) => ({ userId: uid, role: 'PREPARED', date: '' }))
+      title: String(src.title ?? ''),
+      topicNumber: String(src.topicNumber ?? ''),
+      sopNumber: String(src.sopNumber ?? ''),
+      description: String(src.description ?? ''),
+      trainingType: String(src.trainingType ?? 'CLASSROOM'),
+      trainingTypes: Array.isArray(src.trainingTypes) && (src.trainingTypes as string[]).length ? (src.trainingTypes as string[]) : src.trainingType ? [String(src.trainingType)] : [],
+      signatories: Array.isArray(src.signatories)
+        ? (src.signatories as { userId: string; role: string; date?: string }[]).map((s) => ({ userId: s.userId, role: s.role || 'PREPARED', date: s.date ?? '' }))
+        : Array.isArray(src.signatoryUserIds)
+          ? (src.signatoryUserIds as string[]).map((uid) => ({ userId: uid, role: 'PREPARED', date: '' }))
           : [],
-      departmentId: String(t.departmentId ?? ''),
-      designationId: String(t.designationId ?? ''),
-      designationIds: Array.isArray(t.designationIds) && (t.designationIds as string[]).length
-        ? (t.designationIds as string[])
-        : t.designationId ? [String(t.designationId)] : [],
-      roleIds: Array.isArray(t.roleIds) && (t.roleIds as string[]).length ? (t.roleIds as string[]) : t.roleId ? [String(t.roleId)] : [],
-      durationMinutes: t.durationMinutes != null ? String(t.durationMinutes) : '',
-      maxAttempts: t.maxAttempts != null ? String(t.maxAttempts) : '',
-      questionLimit: t.questionLimit != null ? String(t.questionLimit) : '',
-      refresherIntervalMonths: t.refresherIntervalMonths != null ? String(t.refresherIntervalMonths) : '',
-      materialViewSeconds: t.materialViewSeconds != null ? String(t.materialViewSeconds) : '',
-      effectiveDate: toDateInput(t.effectiveDate as string | null | undefined),
-      reviewDate: toDateInput(t.reviewDate as string | null | undefined),
-      requiresAssessment: t.requiresAssessment !== false,
-      assessmentTimeMinutes: t.assessmentTimeMinutes != null ? String(t.assessmentTimeMinutes) : '',
-      randomizeQuestions: t.randomizeQuestions !== false,
-      showExplanations: t.showExplanations !== false,
-      blockAfterMaxAttempts: t.blockAfterMaxAttempts !== false,
+      departmentId: String(src.departmentId ?? ''),
+      designationId: String(src.designationId ?? ''),
+      designationIds: Array.isArray(src.designationIds) && (src.designationIds as string[]).length
+        ? (src.designationIds as string[])
+        : src.designationId ? [String(src.designationId)] : [],
+      roleIds: Array.isArray(src.roleIds) && (src.roleIds as string[]).length ? (src.roleIds as string[]) : src.roleId ? [String(src.roleId)] : [],
+      durationMinutes: src.durationMinutes != null ? String(src.durationMinutes) : '',
+      maxAttempts: src.maxAttempts != null ? String(src.maxAttempts) : '',
+      questionLimit: src.questionLimit != null ? String(src.questionLimit) : '',
+      refresherIntervalMonths: src.refresherIntervalMonths != null ? String(src.refresherIntervalMonths) : '',
+      materialViewSeconds: src.materialViewSeconds != null ? String(src.materialViewSeconds) : '',
+      effectiveDate: toDateInput(src.effectiveDate as string | null | undefined),
+      reviewDate: toDateInput(src.reviewDate as string | null | undefined),
+      requiresAssessment: src.requiresAssessment !== false,
+      assessmentTimeMinutes: src.assessmentTimeMinutes != null ? String(src.assessmentTimeMinutes) : '',
+      passingScorePercent: src.passingScorePercent != null ? String(src.passingScorePercent) : '',
+      randomizeQuestions: src.randomizeQuestions !== false,
+      showExplanations: src.showExplanations !== false,
+      blockAfterMaxAttempts: src.blockAfterMaxAttempts !== false,
     });
     setEditTopicOpen(true);
   }
@@ -633,7 +623,12 @@ export default function TopicDetailPage() {
   ];
 
   const questionColumns: Column<Question>[] = [
-    { key: 'questionText', header: 'Question', render: (r) => <span className="text-slate-800">{r.questionText}</span> },
+    { key: 'questionText', header: 'Question', render: (r) => (
+      <span className="text-slate-800">
+        {r.questionText}
+        {r.pendingRemoval && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700">Pending removal</span>}
+      </span>
+    ) },
     { key: 'questionType', header: 'Type', render: (r) => r.questionType.replace(/_/g, ' ') },
     { key: 'isMandatory', header: 'Mandatory', render: (r) => (r.isMandatory ? <Badge tone="APPROVED">Yes</Badge> : <Badge tone="WAIVED">No</Badge>) },
     {
@@ -671,12 +666,13 @@ export default function TopicDetailPage() {
   const archivedMaterials = allMaterials.filter((m) => m.isObsolete);
   // G4: split questions into live and staged (pending) for a published topic.
   const allQuestions = (questions?.data ?? []) as unknown as Question[];
-  const liveQuestions = allQuestions.filter((q) => !q.isStaged);
+  const liveQuestions = allQuestions.filter((q) => !q.isStaged); // includes pending-removal (still live until publish)
   const stagedQuestions = allQuestions.filter((q) => q.isStaged);
+  const pendingRemovalQuestions = allQuestions.filter((q) => !q.isStaged && q.pendingRemoval);
   const isPublished = String(t.status) === 'PUBLISHED';
   // G4: a published topic with staged metadata edits and/or staged material/question changes.
   const hasDraftMeta = !!(t as { draftMeta?: unknown }).draftMeta;
-  const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0 || stagedQuestions.length > 0);
+  const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0 || stagedQuestions.length > 0 || pendingRemovalQuestions.length > 0);
   const materialNameById = (mid?: string | null) => (mid ? allMaterials.find((m) => m.id === mid)?.originalFileName ?? null : null);
   const userName = (uid?: string | null) => {
     if (!uid) return '—';
@@ -737,19 +733,8 @@ export default function TopicDetailPage() {
                 </Button>
               )} */}
               {/* G2: full-course "Revise (new version)" removed — Archive only; material/draft
-                  changes are published in place via "Publish changes" (no full-course clone). */}
-              {canEdit && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setNewScore(String(t.passingScorePercent ?? ''));
-                    setScoreReason('');
-                    setChangingScore(true);
-                  }}
-                >
-                  Change Passing Score
-                </Button>
-              )}
+                  changes are published in place via "Publish changes" (no full-course clone).
+                  Passing score is now edited inline in "Edit details" and staged like everything else. */}
             </>
           )
         }
@@ -764,6 +749,7 @@ export default function TopicDetailPage() {
             {hasDraftMeta && 'Course details have been edited. '}
             {stagedMaterials.length > 0 && `${stagedMaterials.length} material change(s) staged. `}
             {stagedQuestions.length > 0 && `${stagedQuestions.length} question change(s) staged. `}
+            {pendingRemovalQuestions.length > 0 && `${pendingRemovalQuestions.length} question(s) pending removal. `}
             These are <strong>not yet live</strong> — the published course is unchanged until you publish the changes.
           </span>
           {canEdit && (
@@ -772,7 +758,7 @@ export default function TopicDetailPage() {
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3">
         <Card>
           <CardContent>
             <div className="text-xs text-slate-500">Duration</div>
@@ -789,12 +775,6 @@ export default function TopicDetailPage() {
           <CardContent>
             <div className="text-xs text-slate-500">Max Attempts</div>
             <div className="text-lg font-semibold text-slate-800">{String(t.maxAttempts)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent>
-            <div className="text-xs text-slate-500">Refresher</div>
-            <div className="text-lg font-semibold text-slate-800">{t.refresherIntervalMonths ? `${String(t.refresherIntervalMonths)} mo` : '—'}</div>
           </CardContent>
         </Card>
       </div>
@@ -1073,43 +1053,6 @@ export default function TopicDetailPage() {
           );
         })()}
       </Dialog>
-
-      <Dialog
-        open={changingScore}
-        onClose={() => setChangingScore(false)}
-        title="Change Passing Score"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setChangingScore(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!newScore || scoreReason.trim().length < 5}
-              onClick={() => {
-                setChangingScore(false);
-                setSignScore(true);
-              }}
-            >
-              Continue to sign
-            </Button>
-          </>
-        }
-      >
-        <p className="mb-3 text-xs text-slate-500">Changing the passing score is a controlled change and requires an electronic signature.</p>
-        <Field label="New Passing Score %">
-          <Input type="number" min={0} max={100} value={newScore} onChange={(e) => setNewScore(e.target.value)} />
-        </Field>
-        <Field label="Reason for change (required)">
-          <Textarea value={scoreReason} onChange={(e) => setScoreReason(e.target.value)} placeholder="Describe why the passing score is changing…" />
-        </Field>
-      </Dialog>
-
-      <ESignatureModal
-        open={signScore}
-        onClose={() => setSignScore(false)}
-        onConfirm={async (sig) => { await scoreMut.mutateAsync(sig); }}
-        title="Sign — Change Passing Score"
-      />
 
       <Dialog
         open={questionDialog}
@@ -1512,11 +1455,11 @@ export default function TopicDetailPage() {
           </div>
         </div>
         {/* The edit form mirrors the create form's fields so a course shows the same
-            inputs (pre-filled) on edit as on creation. Passing Score is shown read-only
-            here because it is a controlled change made via its own e-signed action. */}
+            inputs (pre-filled) on edit as on creation. On a published course, saving stages
+            all of these (including Passing Score) until "Publish changes" is e-signed. */}
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Passing Score %" hint="Changed via the “Change Passing Score” action (e-signed).">
-            <Input type="number" value={String(t.passingScorePercent ?? '')} disabled readOnly />
+          <Field label="Passing Score %">
+            <Input type="number" min={0} max={100} value={editTopicForm.passingScorePercent} onChange={(e) => setEditTopicForm((f) => ({ ...f, passingScorePercent: e.target.value }))} />
           </Field>
           <Field label="Duration (minutes)" hint="Optional. Auto-recalculated from material reading time once set.">
             <Input type="number" min={0} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} placeholder="e.g. 30" />

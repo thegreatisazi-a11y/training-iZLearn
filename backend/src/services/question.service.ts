@@ -2,27 +2,17 @@ import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
-import { snapshotVersion } from './topicVersionHistory.service';
 import type { CreateQuestionInput, UpdateQuestionInput, PaginationQuery } from '@izlearn/shared';
 
 /**
- * A change to a PUBLISHED course's question set is a controlled change: it bumps the
- * course version and writes a version-history snapshot describing what changed (added /
- * edited / removed a question). Draft authoring (before first publish) does not bump —
- * the course publishes at v1 and only post-publish changes are versioned. Returns the
- * (possibly unchanged) current version.
+ * Question changes on a PUBLISHED course follow the staged-draft flow (like materials
+ * and course details): an add/edit/remove is STAGED and does not touch the live
+ * assessment. The staged changes go live only via `publishDraftChanges` (e-signed),
+ * which bumps the course version ONCE and writes a single version-history entry. On a
+ * DRAFT course (still being authored, nothing live yet) changes apply in place.
  */
-async function recordQuestionChange(topicId: string, changedBy: string, note: string, reason?: string | null): Promise<void> {
-  const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false }, select: { status: true } });
-  if (!topic || topic.status !== 'PUBLISHED') return;
-  const updated = await prisma.trainingTopic.update({ where: { id: topicId }, data: { currentVersion: { increment: 1 } } });
-  await snapshotVersion({ topicId, version: updated.currentVersion, changedBy, reason: reason ?? null, note });
-}
-
-/** A short, audit-friendly label of a question for the version-history note. */
-function questionLabel(text: string): string {
-  const t = (text ?? '').trim();
-  return t.length > 80 ? `${t.slice(0, 80)}…` : t;
+function isPublishedTopic(status?: string): boolean {
+  return status === 'PUBLISHED';
 }
 
 /**
@@ -66,6 +56,9 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       ? ((input.matchPairs ?? []) as Prisma.InputJsonValue)
       : (input.correctAnswer as Prisma.InputJsonValue);
 
+  // On a published course a new question is STAGED (inert) until the changes are
+  // published; on a draft course it is live immediately.
+  const staged = isPublishedTopic(topic.status);
   const question = await prisma.question.create({
     data: {
       topicId: input.topicId,
@@ -77,12 +70,10 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       explanation: input.explanation ?? null,
       helpText: input.helpText ?? null,
       isMandatory: input.isMandatory,
-      isStaged: false,
+      isStaged: staged,
       createdBy,
     },
   });
-  // Adding a question to a published course is a versioned, logged change.
-  await recordQuestionChange(input.topicId, createdBy, `Added question: "${questionLabel(input.questionText)}"`);
   return question;
 }
 
@@ -111,7 +102,7 @@ export async function getQuestion(id: string) {
   return question;
 }
 
-export async function updateQuestion(id: string, input: UpdateQuestionInput, changedBy = 'SYSTEM', reason?: string | null) {
+export async function updateQuestion(id: string, input: UpdateQuestionInput, changedBy = 'SYSTEM') {
   const existing = await getQuestion(id);
   // 4.5: the question type itself is editable. When it changes (or options/pairs are
   // supplied) the options JSON is rebuilt for the effective type so the stored shape
@@ -143,26 +134,64 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput, cha
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
   };
 
-  // Editing a question is applied in place. On a PUBLISHED course it is a versioned,
-  // logged change (the course version is bumped and a version-history snapshot recorded).
-  const updated = await prisma.question.update({ where: { id }, data });
-  await recordQuestionChange(
-    existing.topicId,
-    changedBy,
-    `Edited question: "${questionLabel((data.questionText as string) ?? existing.questionText)}"`,
-    reason,
-  );
-  return updated;
+  const topic = await prisma.trainingTopic.findFirst({
+    where: { id: existing.topicId, isDeleted: false },
+    select: { status: true, currentVersion: true },
+  });
+  // On a PUBLISHED course an edit is STAGED — never mutate the live question in place.
+  // Editing a draft row itself (isStaged) or any edit on a DRAFT course applies in place.
+  if (isPublishedTopic(topic?.status) && !existing.isStaged) {
+    // If a staged edit for this live question already exists, update that draft;
+    // otherwise create a staged copy (live content overlaid with the edits) that
+    // supersedes the live question when published. The live row stays untouched.
+    const draft = await prisma.question.findFirst({
+      where: { topicId: existing.topicId, isDeleted: false, isStaged: true, supersedesQuestionId: existing.id },
+    });
+    if (draft) return prisma.question.update({ where: { id: draft.id }, data });
+    const base = {
+      questionText: existing.questionText,
+      questionType: existing.questionType,
+      options: existing.options as Prisma.InputJsonValue,
+      correctAnswer: existing.correctAnswer as Prisma.InputJsonValue,
+      explanation: existing.explanation,
+      helpText: existing.helpText,
+      isMandatory: existing.isMandatory,
+      isActive: existing.isActive,
+    };
+    return prisma.question.create({
+      data: {
+        ...base,
+        ...data,
+        topicId: existing.topicId,
+        topicVersion: topic!.currentVersion,
+        isStaged: true,
+        supersedesQuestionId: existing.id,
+        createdBy: changedBy,
+      },
+    });
+  }
+  return prisma.question.update({ where: { id }, data });
 }
 
 /**
- * Soft-delete a question (the only kind of delete in izLearn). A question CAN be removed
- * even after the course is published — doing so is a controlled, versioned change: the
- * course version is bumped and the removal is logged in the version history.
+ * Soft-delete a question (the only kind of delete in izLearn). On a PUBLISHED course the
+ * removal is STAGED: a staged draft row is simply discarded, while a live question is
+ * flagged pendingRemoval and stays served until the changes are published (then it is
+ * soft-deleted). On a DRAFT course it is soft-deleted in place.
  */
-export async function deactivateQuestion(id: string, changedBy = 'SYSTEM', reason?: string | null) {
+export async function deactivateQuestion(id: string) {
   const q = await getQuestion(id);
-  const removed = await prisma.question.update({ where: { id }, data: { isActive: false, isDeleted: true } });
-  await recordQuestionChange(q.topicId, changedBy, `Removed question: "${questionLabel(q.questionText)}"`, reason);
-  return removed;
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: q.topicId, isDeleted: false }, select: { status: true } });
+  if (isPublishedTopic(topic?.status)) {
+    // A staged add/edit that never went live → just discard the draft (no live impact).
+    if (q.isStaged) return prisma.question.update({ where: { id }, data: { isActive: false, isDeleted: true } });
+    // A live question → stage its removal; it stays served until the changes publish.
+    // Also discard any staged EDIT of this question so the two don't both fire on publish.
+    await prisma.question.updateMany({
+      where: { topicId: q.topicId, isDeleted: false, isStaged: true, supersedesQuestionId: q.id },
+      data: { isActive: false, isDeleted: true },
+    });
+    return prisma.question.update({ where: { id }, data: { pendingRemoval: true } });
+  }
+  return prisma.question.update({ where: { id }, data: { isActive: false, isDeleted: true } });
 }

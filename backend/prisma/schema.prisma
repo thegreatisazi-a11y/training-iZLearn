@@ -303,6 +303,9 @@ model Question {
   // in the live assessment until "Publish changes" promotes it.
   isStaged            Boolean @default(false)
   supersedesQuestionId String? // when a staged edit, the live question it replaces on publish
+  // A staged REMOVAL on a published topic: the live question stays served until the
+  // change is published, then it is soft-deleted. (Deferred like edits/adds.)
+  pendingRemoval      Boolean @default(false)
   isActive      Boolean      @default(true)
   isDeleted     Boolean      @default(false)
   createdAt     DateTime     @default(now())

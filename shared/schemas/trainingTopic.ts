@@ -60,6 +60,7 @@ export const updateTopicSchema = z.object({
   roleId: uuid.optional(),
   roleIds: z.array(uuid).optional(), // CR-30
   requiresAssessment: z.coerce.boolean().optional(), // CR-41
+  passingScorePercent: z.coerce.number().int().min(0).max(100).optional(), // edited inline; staged like other details on a published course
   assessmentTimeMinutes: z.coerce.number().int().positive().nullable().optional(), // CR-38 (null clears)
   // G1: duration is optional/demoted — 0 means "unspecified" and must be accepted on edit.
   durationMinutes: z.coerce.number().int().min(0).optional(),

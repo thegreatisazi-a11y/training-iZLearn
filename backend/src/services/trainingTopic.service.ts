@@ -13,7 +13,6 @@ import { notifyCourseRevised, notifyTrainingAssigned } from './notification.serv
 import type {
   CreateTopicInput,
   UpdateTopicInput,
-  UpdatePassingScoreInput,
   TopicStatus,
   PaginationQuery,
 } from '@izlearn/shared';
@@ -186,6 +185,7 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.roleId !== undefined ? { roleId: input.roleId ?? null } : {}),
       ...(input.roleIds !== undefined ? { roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue } : {}),
       ...(input.requiresAssessment !== undefined ? { requiresAssessment: input.requiresAssessment } : {}),
+      ...(input.passingScorePercent !== undefined ? { passingScorePercent: input.passingScorePercent } : {}),
       ...(input.assessmentTimeMinutes !== undefined ? { assessmentTimeMinutes: input.assessmentTimeMinutes ?? null } : {}),
       ...(input.signatories !== undefined
         ? { signatories: input.signatories as Prisma.InputJsonValue, signatoryUserIds: input.signatories.map((s) => s.userId) as Prisma.InputJsonValue }
@@ -225,11 +225,12 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
 export async function publishDraftChanges(id: string, req: Request) {
   const topic = await getTopic(id);
   if (topic.status !== 'PUBLISHED') throw AppError.conflict('Only a published course can publish draft changes.');
-  const [stagedCount, stagedQuestionCount] = await Promise.all([
+  const [stagedCount, stagedQuestionCount, pendingRemovalCount] = await Promise.all([
     prisma.trainingMaterial.count({ where: { topicId: id, isDeleted: false, isStaged: true } }),
     prisma.question.count({ where: { topicId: id, isDeleted: false, isStaged: true } }),
+    prisma.question.count({ where: { topicId: id, isDeleted: false, pendingRemoval: true } }),
   ]);
-  if (!topic.draftMeta && stagedCount === 0 && stagedQuestionCount === 0) {
+  if (!topic.draftMeta && stagedCount === 0 && stagedQuestionCount === 0 && pendingRemovalCount === 0) {
     throw AppError.badRequest('There are no pending draft changes to publish.');
   }
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
@@ -257,12 +258,16 @@ export async function publishDraftChanges(id: string, req: Request) {
 
   // G4: promote staged questions to live. A staged EDIT supersedes the live question it
   // replaces (old → soft-deleted); the staged question becomes a live assessment question.
+  let questionEdits = 0;
+  let questionAdds = 0;
   if (stagedQuestionCount > 0) {
     const stagedQs = await prisma.question.findMany({
       where: { topicId: id, isDeleted: false, isStaged: true },
       select: { id: true, supersedesQuestionId: true },
     });
     const supersededIds = stagedQs.map((q) => q.supersedesQuestionId).filter((v): v is string => !!v);
+    questionEdits = supersededIds.length;
+    questionAdds = stagedQs.length - supersededIds.length;
     if (supersededIds.length) {
       await prisma.question.updateMany({
         where: { id: { in: supersededIds }, isDeleted: false },
@@ -275,18 +280,37 @@ export async function publishDraftChanges(id: string, req: Request) {
     });
   }
 
+  // Apply staged question REMOVALS: live questions flagged pendingRemoval are soft-deleted.
+  if (pendingRemovalCount > 0) {
+    await prisma.question.updateMany({
+      where: { topicId: id, isDeleted: false, pendingRemoval: true },
+      data: { isActive: false, isDeleted: true, pendingRemoval: false },
+    });
+  }
+
+  // Every publish of pending changes is a new controlled version: bump currentVersion
+  // ONCE (regardless of how many changes are batched) and clear the staged metadata.
   const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
   const promoted = await prisma.trainingTopic.update({
     where: { id },
-    data: {
-      ...draft,
-      draftMeta: null,
-      // Material changes that were staged on this published course now go live —
-      // bump the course version to mark the new content (mirrors the draft-topic
-      // path where a live material change bumps the version immediately).
-      ...(stagedCount > 0 ? { currentVersion: { increment: 1 } } : {}),
-    },
+    data: { ...draft, draftMeta: null, currentVersion: { increment: 1 } },
   });
+
+  // One version-history entry describing the batch of changes published in this version.
+  const parts: string[] = [];
+  if (topic.draftMeta) parts.push('course details updated');
+  if (stagedCount > 0) parts.push(`${stagedCount} material change(s)`);
+  if (questionAdds > 0) parts.push(`${questionAdds} question(s) added`);
+  if (questionEdits > 0) parts.push(`${questionEdits} question(s) edited`);
+  if (pendingRemovalCount > 0) parts.push(`${pendingRemovalCount} question(s) removed`);
+  await snapshotVersion({
+    topicId: id,
+    version: promoted.currentVersion,
+    changedBy: req.user!.id,
+    reason: auditContext.getStore()?.reasonForChange ?? null,
+    note: `Published changes: ${parts.join('; ')}`,
+  });
+
   // After promoting the draft, refresh the signatory completion records (so signatories
   // added/changed during the edit get their COMPLETED record), and assign any newly-
   // matching functional-role users.
@@ -398,16 +422,6 @@ async function markSignatoriesComplete(topicId: string, actorId: string) {
   } catch {
     /* signatory auto-completion is best-effort */
   }
-}
-
-/** Controlled change — changing the passing score requires an e-signature. */
-export async function updatePassingScore(id: string, input: UpdatePassingScoreInput, req: Request) {
-  await getTopic(id);
-  await signFromRequest(req, 'TrainingTopic', id, 'Approved');
-  return prisma.trainingTopic.update({
-    where: { id },
-    data: { passingScorePercent: input.passingScorePercent },
-  });
 }
 
 /**

@@ -7,7 +7,6 @@ import { requireReasonForChange } from '../middlewares/reasonForChange.middlewar
 import {
   createTopicSchema,
   updateTopicSchema,
-  updatePassingScoreSchema,
   updateTopicStatusSchema,
   reviseTopicSchema,
 } from '@izlearn/shared';
@@ -43,13 +42,6 @@ router.patch(
   requireReasonForChange,
   validate(updateTopicSchema),
   c.update,
-);
-router.patch(
-  '/:id/passing-score',
-  requirePermission('courseManagement', 'edit'),
-  requireReasonForChange,
-  validate(updatePassingScoreSchema),
-  c.updatePassingScore,
 );
 // G4: publish a published topic's staged draft edits to the live record (e-signed).
 router.post(
