@@ -7,6 +7,7 @@ import { getNumber } from './systemConfig.service';
 import * as storage from './storage.service';
 import { recordEvent } from './auditTrail.service';
 import { snapshotVersion } from './topicVersionHistory.service';
+import { isConvertibleOffice, ensureConvertedPdfKey } from './officeConvert.service';
 import type { PaginationQuery } from '@izlearn/shared';
 
 /** Object-storage key for a material's stored file. */
@@ -409,6 +410,23 @@ export async function getMaterial(id: string) {
   const material = await prisma.trainingMaterial.findFirst({ where: { id, isDeleted: false } });
   if (!material) throw AppError.notFound('Training material not found');
   return material;
+}
+
+/**
+ * Resolve the storage key of a PDF rendering suitable for the locked in-app viewer.
+ * Native PDFs pass through; Office documents (doc/docx/ppt/pptx/xls/xlsx) are converted
+ * to PDF (cached) via LibreOffice so they render in the same locked pdf.js surface.
+ * Images / video / audio are rendered directly by the client and never reach this path.
+ */
+export async function getViewablePdf(id: string): Promise<{ key: string; originalFileName: string }> {
+  const material = await getMaterial(id);
+  const ext = material.fileType.toLowerCase();
+  if (ext === 'pdf') return { key: material.filePath, originalFileName: material.originalFileName };
+  if (isConvertibleOffice(ext)) {
+    const key = await ensureConvertedPdfKey(material);
+    return { key, originalFileName: material.originalFileName };
+  }
+  throw AppError.badRequest('This file type cannot be shown as a PDF.');
 }
 
 /** Returns the storage key + display name + type; the controller streams the file. */

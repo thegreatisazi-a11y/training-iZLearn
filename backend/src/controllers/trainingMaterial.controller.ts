@@ -98,6 +98,32 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
   await streamDownload(res, key, originalFileName, contentTypeForExt(fileType), { inline: true });
 });
 
+/**
+ * Locked, view-only PDF rendering for the in-app viewer. Native PDFs stream through;
+ * Office documents are converted to PDF (cached) server-side. Enforces the SAME access
+ * rules as the inline download (current non-obsolete version only for trainees; the
+ * optional lock-after-completion workflow), then streams the PDF inline.
+ */
+export const viewPdf = asyncHandler(async (req: Request, res: Response) => {
+  if (!canManageMaterials(req)) {
+    const material = await svc.getMaterial(req.params.id);
+    if (material.isObsolete || !material.isCurrentVersion) {
+      throw AppError.forbidden('Only the current version of this material is available.');
+    }
+    if (await getBool('material.lock_after_completion', false)) {
+      const completed = await prisma.trainingAssignment.findFirst({
+        where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
+      });
+      if (completed) {
+        throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+      }
+    }
+  }
+  const { key, originalFileName } = await svc.getViewablePdf(req.params.id);
+  const pdfName = `${originalFileName.replace(/\.[^.]+$/, '')}.pdf`;
+  await streamDownload(res, key, pdfName, 'application/pdf', { inline: true });
+});
+
 export const replace = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw AppError.badRequest('A replacement file is required.');
   const material = await svc.replaceMaterial(req.params.id, req.file, req.user!.id);

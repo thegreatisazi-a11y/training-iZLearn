@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from 
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MoveHorizontal, Maximize2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import DOMPurify from 'dompurify';
 import { api, apiError } from '@/lib/axios';
 
 // pdfjs runs its parser/renderer off the main thread; point it at the bundled worker.
@@ -10,10 +11,29 @@ import { api, apiError } from '@/lib/axios';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
 /**
+ * Extension → render strategy (all locked, view-only):
+ *   - docx / xlsx → rendered IN-BROWSER (mammoth / read-excel-file). No server needed.
+ *   - ppt / pptx / doc / xls → server-converted to PDF (LibreOffice). If conversion is
+ *     unavailable, a graceful "download to view" panel is shown instead of an error, and
+ *     the file auto-upgrades to an inline PDF preview whenever LibreOffice is available.
+ *   - images / video / audio / text → native locked players.
+ */
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
+const VIDEO_EXTS = ['mp4', 'webm', 'ogg'];
+const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga', 'opus'];
+const TEXT_EXTS = ['txt', 'csv', 'log', 'md', 'json'];
+/** Rendered via the server LibreOffice→PDF endpoint (presentations + legacy binaries). */
+const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls'];
+
+/**
  * In-app LOCKED file viewer (CR-32 + CR-MAT1). Fetches the protected material as a
  * blob (so the JWT auth header is sent) and renders it inline as a controlled,
- * view-only surface for ALL roles: PDFs/images/video are shown without any
- * download, print, open-in-Drive, save, or text-selection affordance.
+ * view-only surface for ALL roles — without any download, print, open-in-Drive, save,
+ * or text-selection affordance. Supported types:
+ *   - PDF and Office docs (doc/docx/ppt/pptx/xls/xlsx) → pdf.js. Office files are
+ *     converted to PDF server-side (cached) and shown in the SAME locked surface.
+ *   - images, video, audio → native locked players.
+ *   - plain text/csv → read-only text.
  *
  * PDFs are rendered page-by-page to <canvas> via pdf.js (no text layer → nothing is
  * selectable/copyable and there is no native toolbar). The controls bar offers zoom
@@ -32,6 +52,7 @@ export function InlineFileViewer({
   heightClass?: string;
 }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -39,16 +60,34 @@ export function InlineFileViewer({
   const [zoomMode, setZoomMode] = useState<'fit-width' | 'fit-page' | 'custom'>('fit-width');
   const [zoomPct, setZoomPct] = useState(100);
 
+  const ext = (fileType ?? fileName.split('.').pop() ?? '').toLowerCase();
+  const isImage = IMAGE_EXTS.includes(ext);
+  const isVideo = VIDEO_EXTS.includes(ext);
+  const isAudio = AUDIO_EXTS.includes(ext);
+  const isText = TEXT_EXTS.includes(ext);
+  const isDocx = ext === 'docx';
+  const isXlsx = ext === 'xlsx';
+  const isPdf = ext === 'pdf';
+  const usesServerPdf = SERVER_PDF_EXTS.includes(ext);
+  // PDFs and server-converted Office docs both render through the locked pdf.js viewer.
+  const rendersAsPdf = isPdf || usesServerPdf;
+
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
     setLoading(true);
     setError('');
+    setBlob(null);
+    // Presentations/legacy binaries fetch the server-converted PDF; everything else
+    // (incl. docx/xlsx, which are converted in-browser) streams the raw file.
+    const endpoint = usesServerPdf ? `/materials/${materialId}/view-pdf` : `/materials/${materialId}/download`;
     api
-      .get(`/materials/${materialId}/download`, { responseType: 'blob' })
+      .get(endpoint, { responseType: 'blob' })
       .then((res) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(res.data as Blob);
+        const b = res.data as Blob;
+        setBlob(b);
+        objectUrl = URL.createObjectURL(b);
         setUrl(objectUrl);
       })
       .catch((e) => !cancelled && setError(apiError(e)))
@@ -57,15 +96,17 @@ export function InlineFileViewer({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [materialId]);
+  }, [materialId, usesServerPdf]);
 
-  const ext = (fileType ?? fileName.split('.').pop() ?? '').toLowerCase();
-  const isPdf = ext === 'pdf';
-  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
-  const isVideo = ['mp4', 'webm', 'ogg'].includes(ext);
-
-  if (loading) return <div className="flex h-40 items-center justify-center text-sm text-slate-500">Loading preview…</div>;
-  if (error) return <div className="text-sm text-red-600">{error}</div>;
+  if (loading)
+    return (
+      <div className="flex h-40 items-center justify-center text-sm text-slate-500">
+        {usesServerPdf ? 'Preparing preview… (converting document)' : 'Loading preview…'}
+      </div>
+    );
+  // A failed server conversion (e.g. LibreOffice unavailable) or any fetch error shows a
+  // friendly download-to-view panel rather than a raw error.
+  if (error) return <PreviewUnavailable message={error} heightClass={heightClass} />;
   if (!url) return null;
 
   const lockClass = 'select-none w-full';
@@ -75,8 +116,12 @@ export function InlineFileViewer({
   const zoomIn = () => { setZoomMode('custom'); setZoomPct((p) => Math.min(400, (zoomMode === 'custom' ? p : 100) + 25)); };
   const zoomOut = () => { setZoomMode('custom'); setZoomPct((p) => Math.max(40, (zoomMode === 'custom' ? p : 100) - 25)); };
 
-  if (isPdf) {
+  if (rendersAsPdf) {
     return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
+  }
+
+  if (isDocx || isXlsx) {
+    return <OfficeHtmlViewer blob={blob} kind={isDocx ? 'docx' : 'xlsx'} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
   }
 
   if (isImage) {
@@ -116,9 +161,130 @@ export function InlineFileViewer({
     );
   }
 
+  if (isAudio) {
+    return (
+      <div className={`flex ${heightClass} ${lockClass} items-center justify-center rounded border border-slate-200 bg-slate-50`} style={lockStyle} onContextMenu={onCtx}>
+        <audio src={url} controls controlsList="nodownload noplaybackrate" onContextMenu={onCtx} className="w-4/5 max-w-xl" />
+      </div>
+    );
+  }
+
+  if (isText) {
+    return <TextFileViewer blob={blob} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
+  }
+
+  return <PreviewUnavailable heightClass={heightClass} />;
+}
+
+/**
+ * Friendly panel shown when a file can't be previewed inline (unsupported type, or a
+ * server conversion that isn't available). Keeps the locked surface — it never exposes
+ * the file; downloading (where permitted) is done from the surrounding page's controls.
+ */
+function PreviewUnavailable({ message, heightClass }: { message?: string; heightClass: string }) {
   return (
-    <div className="rounded border border-slate-200 bg-slate-50 p-6 text-center">
-      <p className="text-sm text-slate-600">This file can only be viewed in the controlled viewer and cannot be downloaded.</p>
+    <div className={`flex ${heightClass} items-center justify-center rounded border border-slate-200 bg-slate-50 p-6`}>
+      <div className="max-w-md text-center">
+        <p className="text-sm font-medium text-slate-700">Inline preview isn’t available for this file.</p>
+        <p className="mt-1 text-xs text-slate-500">{message || 'Use the Download option (where permitted) to open it.'}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Convert a sheet's rows to a simple bordered HTML table. */
+function rowsToTableHtml(rows: unknown[][]): string {
+  if (!rows.length) return '';
+  const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const [head, ...body] = rows;
+  const headHtml = `<tr>${head.map((c) => `<th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9;text-align:left">${esc(c)}</th>`).join('')}</tr>`;
+  const bodyHtml = body.map((r) => `<tr>${r.map((c) => `<td style="border:1px solid #cbd5e1;padding:6px">${esc(c)}</td>`).join('')}</tr>`).join('');
+  return `<table style="border-collapse:collapse;width:100%;font-size:12px">${headHtml}${bodyHtml}</table>`;
+}
+
+/**
+ * Locked in-browser viewer for Word (.docx → mammoth) and Excel (.xlsx → read-excel-file).
+ * Conversion runs client-side (no server/LibreOffice), the output HTML is sanitised with
+ * DOMPurify, and the surface is view-only (no selection/copy). On failure it falls back to
+ * the download-to-view panel.
+ */
+function OfficeHtmlViewer({
+  blob,
+  kind,
+  heightClass,
+  lockClass,
+  lockStyle,
+  onCtx,
+}: {
+  blob: Blob | null;
+  kind: 'docx' | 'xlsx';
+  heightClass: string;
+  lockClass: string;
+  lockStyle: { userSelect: 'none' };
+  onCtx: (e: MouseEvent) => void;
+}) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!blob) return;
+    (async () => {
+      try {
+        let out = '';
+        if (kind === 'docx') {
+          const mammoth = await import('mammoth');
+          const arrayBuffer = await blob.arrayBuffer();
+          out = (await mammoth.convertToHtml({ arrayBuffer })).value;
+        } else {
+          const readXlsxFile = (await import('read-excel-file/browser')).default;
+          const rows = (await readXlsxFile(blob)) as unknown[][];
+          out = rowsToTableHtml(rows);
+        }
+        if (!cancelled) setHtml(out || '<p>(Empty document)</p>');
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [blob, kind]);
+
+  if (failed) return <PreviewUnavailable heightClass={heightClass} message="This document couldn’t be rendered. Download it to view." />;
+  if (html === null) return <div className="flex h-40 items-center justify-center text-sm text-slate-500">Rendering preview…</div>;
+  return (
+    <div className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}>
+      <div className="prose prose-sm max-w-none p-4 text-slate-800" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+    </div>
+  );
+}
+
+/** Read-only text/CSV surface — reads the fetched blob and renders it locked (no copy). */
+function TextFileViewer({
+  blob,
+  heightClass,
+  lockClass,
+  lockStyle,
+  onCtx,
+}: {
+  blob: Blob | null;
+  heightClass: string;
+  lockClass: string;
+  lockStyle: { userSelect: 'none' };
+  onCtx: (e: MouseEvent) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!blob) return;
+    blob.text().then((t) => !cancelled && setText(t)).catch(() => !cancelled && setText('Unable to read file.'));
+    return () => {
+      cancelled = true;
+    };
+  }, [blob]);
+  return (
+    <div className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}>
+      <pre className="whitespace-pre-wrap break-words p-4 text-xs text-slate-700">{text ?? 'Loading…'}</pre>
     </div>
   );
 }

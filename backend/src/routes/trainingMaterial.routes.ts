@@ -19,6 +19,9 @@ router.get('/', requirePermission('materialManagement', 'read'), c.list);
 router.get('/reading-status', requirePermission('materialManagement', 'read'), c.readingStatus);
 router.get('/:id', requirePermission('materialManagement', 'read'), c.get);
 router.get('/:id/download', requirePermission('materialManagement', 'read'), c.download);
+// Locked, view-only PDF for the in-app viewer (native PDFs pass through; Office docs are
+// converted to PDF server-side and cached).
+router.get('/:id/view-pdf', requirePermission('materialManagement', 'read'), c.viewPdf);
 router.post('/:id/view/start', requirePermission('materialManagement', 'read'), c.startView);
 router.post('/:id/view/complete', requirePermission('materialManagement', 'read'), c.completeView);
 // A4: auto-save reading progress so a session can resume where the user left off.

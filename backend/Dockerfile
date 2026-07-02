@@ -1,6 +1,7 @@
-# izLearn backend image. Includes Chromium for Puppeteer (PDF generation) and
-# the MongoDB Database Tools (mongodump/mongorestore) for backups. Build context
-# is the repo root.
+# izLearn backend image. Includes Chromium for Puppeteer (PDF generation), the
+# MongoDB Database Tools (mongodump/mongorestore) for backups, and headless
+# LibreOffice for converting Office documents to PDF in the locked material viewer.
+# Build context is the repo root.
 FROM node:20-bookworm-slim
 
 # Set Puppeteer config before apt so Chromium isn't re-downloaded by npm install
@@ -12,6 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
       libcairo2 libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Headless LibreOffice (Writer/Impress/Calc) for Office → PDF conversion in the locked
+# in-app material viewer. Only the three document apps are installed (not the full
+# suite) to keep the image lean; extra fonts improve rendering fidelity of uploads.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libreoffice-writer libreoffice-impress libreoffice-calc \
+      fonts-dejavu fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 # MongoDB Database Tools (mongodump / mongorestore) for the Backup module.
