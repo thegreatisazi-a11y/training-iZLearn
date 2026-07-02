@@ -44,7 +44,7 @@ export async function listSchedules(q: PaginationQuery, filter: ScheduleListFilt
         }
       : {}),
   };
-  const [data, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.trainingSchedule.findMany({
       where,
       skip: (q.page - 1) * q.pageSize,
@@ -53,6 +53,7 @@ export async function listSchedules(q: PaginationQuery, filter: ScheduleListFilt
     }),
     prisma.trainingSchedule.count({ where }),
   ]);
+  const data = await withTopicAndUserNames(rows, (r) => [r.topicId], (r) => [r.trainerId]);
   return { data, total, page: q.page, pageSize: q.pageSize };
 }
 
@@ -149,24 +150,64 @@ export async function cancelSchedule(id: string) {
 
 export async function createOjtRecord(input: OjtRecordInput, createdBy: string) {
   // evaluationDate is constrained to past/present by the shared schema.
-  const record = await prisma.ojtRecord.create({
-    data: {
-      topicId: input.topicId,
-      userId: input.userId,
-      evaluatorId: input.evaluatorId,
-      evaluationDate: input.evaluationDate,
-      evaluationScore: input.evaluationScore,
-      remarks: input.remarks ?? null,
-      createdBy,
-    },
+  // An OJT record is evidence of training that ALREADY happened, so it is recorded
+  // together with a COMPLETED training assignment for the trainee (visible in their
+  // My Training as completed), in one audited transaction.
+  return auditedTransaction(prisma, async (tx) => {
+    const record = await tx.ojtRecord.create({
+      data: {
+        topicId: input.topicId,
+        userId: input.userId,
+        evaluatorId: input.evaluatorId,
+        evaluationDate: input.evaluationDate,
+        evaluationScore: input.evaluationScore,
+        content: input.content ?? null,
+        remarks: input.remarks ?? null,
+        createdBy,
+      },
+    });
+    const assignment = await completeAssignmentTx(tx, input.userId, input.topicId, createdBy);
+    return {
+      result: record,
+      audits: [
+        {
+          action: 'CREATE',
+          entityType: 'OjtRecord',
+          entityId: record.id,
+          newValue: { topicId: record.topicId, userId: record.userId, evaluationScore: record.evaluationScore },
+        },
+        {
+          action: 'UPDATE',
+          entityType: 'TrainingAssignment',
+          entityId: assignment.id,
+          newValue: { userId: assignment.userId, topicId: assignment.topicId, status: 'COMPLETED', via: 'OJT' },
+        },
+      ],
+    };
   });
-  await recordEvent({
-    action: 'CREATE',
-    entityType: 'OjtRecord',
-    entityId: record.id,
-    newValue: { topicId: record.topicId, userId: record.userId, evaluationScore: record.evaluationScore },
+}
+
+/**
+ * Mark a (user, topic) training as COMPLETED: complete an existing active assignment if
+ * present, otherwise create a COMPLETED one. Used by OJT and offline records, which
+ * document training that has already taken place. Runs inside an audited transaction.
+ */
+async function completeAssignmentTx(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  topicId: string,
+  assignedBy: string,
+) {
+  const existing = await tx.trainingAssignment.findFirst({
+    where: { userId, topicId, isDeleted: false, status: { notIn: ['WAIVED'] } },
   });
-  return record;
+  if (existing) {
+    if (existing.status === 'COMPLETED') return existing;
+    return tx.trainingAssignment.update({ where: { id: existing.id }, data: { status: 'COMPLETED' } });
+  }
+  return tx.trainingAssignment.create({
+    data: { userId, topicId, assignmentType: 'COURSE_SPECIFIC', status: 'COMPLETED', assignedBy, createdBy: assignedBy },
+  });
 }
 
 export async function listOjtRecords(q: PaginationQuery, filter: { topicId?: string; userId?: string } = {}) {
@@ -175,7 +216,7 @@ export async function listOjtRecords(q: PaginationQuery, filter: { topicId?: str
     ...(filter.topicId ? { topicId: filter.topicId } : {}),
     ...(filter.userId ? { userId: filter.userId } : {}),
   };
-  const [data, total] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.ojtRecord.findMany({
       where,
       skip: (q.page - 1) * q.pageSize,
@@ -184,7 +225,42 @@ export async function listOjtRecords(q: PaginationQuery, filter: { topicId?: str
     }),
     prisma.ojtRecord.count({ where }),
   ]);
+  const data = await withTopicAndUserNames(rows, (r) => [r.topicId], (r) => [r.userId, r.evaluatorId]);
   return { data, total, page: q.page, pageSize: q.pageSize };
+}
+
+/**
+ * Attach topicTitle / topicNumber and user full names to a set of records for display
+ * in the Scheduling window (MongoDB has no relational join). `topicOf`/`usersOf` extract
+ * the ids to resolve from each row; the result adds topicTitle, topicNumber, and a
+ * `userNames` map (userId → fullName) plus convenience `userFullName`/`evaluatorName`.
+ */
+async function withTopicAndUserNames<T extends Record<string, unknown>>(
+  rows: T[],
+  topicOf: (r: T) => (string | null | undefined)[],
+  usersOf: (r: T) => (string | null | undefined)[],
+): Promise<Array<T & { topicTitle: string | null; topicNumber: string | null; userNames: Record<string, string>; userFullName: string | null; evaluatorName: string | null }>> {
+  const topicIds = Array.from(new Set(rows.flatMap((r) => topicOf(r)).filter(Boolean) as string[]));
+  const userIds = Array.from(new Set(rows.flatMap((r) => usersOf(r)).filter(Boolean) as string[]));
+  const [topics, users] = await Promise.all([
+    topicIds.length ? prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } }) : [],
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true } }) : [],
+  ]);
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  const uMap = new Map(users.map((u) => [u.id, u.fullName]));
+  return rows.map((r) => {
+    const t = tMap.get(topicOf(r)[0] ?? '');
+    const names: Record<string, string> = {};
+    for (const id of usersOf(r)) if (id && uMap.has(id)) names[id] = uMap.get(id)!;
+    return {
+      ...r,
+      topicTitle: t?.title ?? null,
+      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+      userNames: names,
+      userFullName: (r.userId ? uMap.get(r.userId as string) : null) ?? null,
+      evaluatorName: (r.evaluatorId ? uMap.get(r.evaluatorId as string) : null) ?? null,
+    };
+  });
 }
 
 // ---- Offline / classroom training -------------------------------------------
@@ -203,20 +279,11 @@ export async function createOfflineTraining(input: OfflineTrainingInput, created
       },
     });
 
+    // Offline training is a record of training that already occurred, so each trainee's
+    // assignment is marked COMPLETED (shown in their My Training as completed).
     const assignments = [];
     for (const userId of input.traineeIds) {
-      assignments.push(
-        await tx.trainingAssignment.create({
-          data: {
-            userId,
-            topicId: input.topicId,
-            assignmentType: 'COURSE_SPECIFIC',
-            status: 'PENDING',
-            assignedBy: createdBy,
-            createdBy,
-          },
-        }),
-      );
+      assignments.push(await completeAssignmentTx(tx, userId, input.topicId, createdBy));
     }
 
     return {
@@ -229,14 +296,33 @@ export async function createOfflineTraining(input: OfflineTrainingInput, created
           newValue: { topicId: record.topicId, venue: record.venue, trainingDate: record.trainingDate },
         },
         ...assignments.map((a) => ({
-          action: 'CREATE',
+          action: 'UPDATE',
           entityType: 'TrainingAssignment',
           entityId: a.id,
-          newValue: { userId: a.userId, topicId: a.topicId, assignmentType: a.assignmentType },
+          newValue: { userId: a.userId, topicId: a.topicId, status: 'COMPLETED', via: 'OFFLINE' },
         })),
       ],
     };
   });
+}
+
+/** List offline training records (Module 6) — shown in the Scheduling window. */
+export async function listOfflineRecords(q: PaginationQuery, filter: { topicId?: string } = {}) {
+  const where: Prisma.OfflineTrainingRecordWhereInput = {
+    isDeleted: false,
+    ...(filter.topicId ? { topicId: filter.topicId } : {}),
+  };
+  const [rows, total] = await Promise.all([
+    prisma.offlineTrainingRecord.findMany({
+      where,
+      skip: (q.page - 1) * q.pageSize,
+      take: q.pageSize,
+      orderBy: { [q.sortBy || 'trainingDate']: q.sortDir },
+    }),
+    prisma.offlineTrainingRecord.count({ where }),
+  ]);
+  const data = await withTopicAndUserNames(rows, (r) => [r.topicId], () => []);
+  return { data, total, page: q.page, pageSize: q.pageSize };
 }
 
 /**

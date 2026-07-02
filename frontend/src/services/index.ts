@@ -134,6 +134,7 @@ export const svc = {
     createOjt: (body: unknown) => data(api.post('/schedules/ojt', body)),
     listOjt: (params?: ListParams) => api.get('/schedules/ojt/list', { params }).then((r) => r.data),
     createOffline: (body: unknown) => data(api.post('/schedules/offline', body)),
+    listOffline: (params?: ListParams) => api.get('/schedules/offline/list', { params }).then((r) => r.data),
     cancel: (id: string, reasonForChange: string) => data(api.post(`/schedules/${id}/cancel`, { reasonForChange })),
   },
 

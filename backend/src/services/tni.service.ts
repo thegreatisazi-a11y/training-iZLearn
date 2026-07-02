@@ -192,14 +192,32 @@ export async function getRequirementMatrix() {
 /** Upsert one matrix cell (functional role × topic). */
 export async function setRequirement(input: SetTniRequirementInput, createdBy: string) {
   const existing = await prisma.tniRequirement.findFirst({ where: { designationId: input.designationId, topicId: input.topicId } });
-  if (existing) {
-    return prisma.tniRequirement.update({
-      where: { id: existing.id },
-      data: { isRequired: input.isRequired, note: input.note ?? null, isDeleted: false },
-    });
-  }
-  return prisma.tniRequirement.create({
-    data: { designationId: input.designationId, topicId: input.topicId, isRequired: input.isRequired, note: input.note ?? null, createdBy },
+  const cell = existing
+    ? await prisma.tniRequirement.update({
+        where: { id: existing.id },
+        data: { isRequired: input.isRequired, note: input.note ?? null, isDeleted: false },
+      })
+    : await prisma.tniRequirement.create({
+        data: { designationId: input.designationId, topicId: input.topicId, isRequired: input.isRequired, note: input.note ?? null, createdBy },
+      });
+  // Task-1 (reverse sync): reflect the topic's Required functional roles back into the
+  // course details, so the course's Functional Role(s) always mirror the TNI matrix.
+  await syncTopicDesignationsFromMatrix(input.topicId);
+  return cell;
+}
+
+/** Recompute a topic's functional roles (designationIds) from its Required TNI cells. */
+async function syncTopicDesignationsFromMatrix(topicId: string) {
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false }, select: { id: true } });
+  if (!topic) return;
+  const required = await prisma.tniRequirement.findMany({
+    where: { topicId, isDeleted: false, isRequired: true },
+    select: { designationId: true },
+  });
+  const ids = Array.from(new Set(required.map((c) => c.designationId)));
+  await prisma.trainingTopic.update({
+    where: { id: topicId },
+    data: { designationIds: ids as unknown as Prisma.InputJsonValue, designationId: ids[0] ?? null },
   });
 }
 

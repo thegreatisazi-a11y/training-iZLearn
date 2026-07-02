@@ -480,6 +480,7 @@ model OjtRecord {
   evaluatorId     String
   evaluationDate  DateTime
   evaluationScore Float
+  content         String? // optional, multi-line details about the on-the-job training
   remarks         String?
   isDeleted       Boolean  @default(false)
   createdAt       DateTime @default(now())

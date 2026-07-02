@@ -6,10 +6,11 @@ import { DataTable, type Column } from '@/components/common/DataTable';
 import { MultiSelect } from '@/components/common/MultiSelect';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { Button } from '@/components/ui/button';
-import { Input, Field } from '@/components/ui/input';
+import { Input, Field, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
+import { Tabs } from '@/components/ui/tabs';
 import { useAuthStore } from '@/store/authStore';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
@@ -30,6 +31,27 @@ interface Option {
   value: string;
   label: string;
 }
+interface OjtRow {
+  id: string;
+  topicTitle?: string | null;
+  topicNumber?: string | null;
+  userFullName?: string | null;
+  evaluatorName?: string | null;
+  evaluationDate: string;
+  evaluationScore: number;
+  content?: string | null;
+  remarks?: string | null;
+}
+interface OfflineRow {
+  id: string;
+  topicTitle?: string | null;
+  topicNumber?: string | null;
+  trainerName: string;
+  venue: string;
+  trainingDate: string;
+  durationMinutes: number;
+  traineeIds?: string[];
+}
 
 const TRAINING_TYPES = ['CLASSROOM', 'E_LEARNING', 'OJT', 'OFFLINE', 'INDUCTION', 'REFRESHER', 'WORKSHOP'].map((v) => ({ value: v, label: v }));
 
@@ -43,7 +65,7 @@ function useLookup(kind: 'topics' | 'users') {
   });
 }
 
-function NewScheduleDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: () => void }) {
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
@@ -86,8 +108,10 @@ function NewScheduleDialog({ open, onClose }: { open: boolean; onClose: () => vo
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
       toast.success('Schedule created.');
       reset();
+      onSaved?.();
       onClose();
     },
     // The backend returns 400 if the trainer is also listed as a trainee — surface it inline.
@@ -139,7 +163,7 @@ function NewScheduleDialog({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
-function OjtDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: () => void }) {
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
@@ -152,15 +176,19 @@ function OjtDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [evaluatorId, setEvaluatorId] = useState('');
   const [evaluationDate, setEvaluationDate] = useState('');
   const [evaluationScore, setEvaluationScore] = useState('');
+  const [content, setContent] = useState('');
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState('');
 
   const mutation = useMutation({
     mutationFn: () =>
-      svc.schedules.createOjt({ topicId, userId, evaluatorId, evaluationDate, evaluationScore: Number(evaluationScore), remarks: remarks || undefined }),
+      svc.schedules.createOjt({ topicId, userId, evaluatorId, evaluationDate, evaluationScore: Number(evaluationScore), content: content || undefined, remarks: remarks || undefined }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ojt-records'] });
       qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
       toast.success('OJT record saved.');
+      onSaved?.();
       onClose();
     },
     onError: (e) => setError(apiError(e)),
@@ -197,6 +225,9 @@ function OjtDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
       <Field label="Evaluation score (0–100)">
         <Input type="number" min={0} max={100} value={evaluationScore} onChange={(e) => setEvaluationScore(e.target.value)} />
       </Field>
+      <Field label="Content" hint="Optional — detailed information about the training.">
+        <Textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Optional details about the on-the-job training…" />
+      </Field>
       <Field label="Remarks">
         <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional" />
       </Field>
@@ -205,7 +236,7 @@ function OjtDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-function OfflineDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved?: () => void }) {
   const qc = useQueryClient();
   const topics = useLookup('topics');
   const users = useLookup('users');
@@ -225,8 +256,11 @@ function OfflineDialog({ open, onClose }: { open: boolean; onClose: () => void }
     mutationFn: () =>
       svc.schedules.createOffline({ topicId, venue, trainerName, durationMinutes: Number(durationMinutes), trainingDate, traineeIds }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['offline-records'] });
       qc.invalidateQueries({ queryKey: ['schedules'] });
+      qc.invalidateQueries({ queryKey: ['my-trainings'] });
       toast.success('Offline training recorded.');
+      onSaved?.();
       onClose();
     },
     onError: (e) => setError(apiError(e)),
@@ -275,12 +309,24 @@ export default function SchedulesPage() {
   const canWrite = useAuthStore((s) => s.hasPermission)('scheduling', 'write');
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
+  const [tab, setTab] = useState('schedules');
   const [dialog, setDialog] = useState<'new' | 'ojt' | 'offline' | null>(null);
   const [cancelTarget, setCancelTarget] = useState<ScheduleRow | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['schedules', page],
     queryFn: () => svc.schedules.list({ page, pageSize: 50 }),
+    enabled: tab === 'schedules',
+  });
+  const ojt = useQuery({
+    queryKey: ['ojt-records', page],
+    queryFn: () => svc.schedules.listOjt({ page, pageSize: 50 }),
+    enabled: tab === 'ojt',
+  });
+  const offline = useQuery({
+    queryKey: ['offline-records', page],
+    queryFn: () => svc.schedules.listOffline({ page, pageSize: 50 }),
+    enabled: tab === 'offline',
   });
 
   const cancelMutation = useMutation({
@@ -316,6 +362,28 @@ export default function SchedulesPage() {
     },
   ];
 
+  const topicCell = (r: { topicNumber?: string | null; topicTitle?: string | null }) =>
+    r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—';
+
+  const ojtColumns: Column<OjtRow>[] = [
+    { key: 'topic', header: 'Topic', render: topicCell },
+    { key: 'trainee', header: 'Trainee', render: (r) => r.userFullName ?? '—' },
+    { key: 'evaluator', header: 'Evaluator', render: (r) => r.evaluatorName ?? '—' },
+    { key: 'date', header: 'Date', render: (r) => formatDate(r.evaluationDate) },
+    { key: 'score', header: 'Score', render: (r) => `${r.evaluationScore}%` },
+    { key: 'content', header: 'Content', render: (r) => (r.content ? <span className="line-clamp-2 max-w-xs whitespace-pre-wrap text-slate-600">{r.content}</span> : '—') },
+    { key: 'status', header: 'Status', render: () => <Badge tone="COMPLETED">Completed</Badge> },
+  ];
+  const offlineColumns: Column<OfflineRow>[] = [
+    { key: 'topic', header: 'Topic', render: topicCell },
+    { key: 'trainer', header: 'Trainer', render: (r) => r.trainerName },
+    { key: 'venue', header: 'Venue', render: (r) => r.venue || '—' },
+    { key: 'date', header: 'Date', render: (r) => formatDate(r.trainingDate) },
+    { key: 'duration', header: 'Duration', render: (r) => `${r.durationMinutes} min` },
+    { key: 'trainees', header: 'Trainees', render: (r) => String(r.traineeIds?.length ?? 0) },
+    { key: 'status', header: 'Status', render: () => <Badge tone="COMPLETED">Completed</Badge> },
+  ];
+
   return (
     <div>
       <PageHeader
@@ -336,20 +404,58 @@ export default function SchedulesPage() {
         }
       />
 
-      <DataTable
-        columns={columns}
-        rows={(data?.data ?? []) as unknown as ScheduleRow[]}
-        loading={isLoading}
-        page={page}
-        pageSize={data?.pageSize ?? 50}
-        total={data?.total ?? 0}
-        onPageChange={setPage}
-        emptyText="No schedules yet."
+      <Tabs
+        tabs={[
+          { key: 'schedules', label: 'Schedules' },
+          { key: 'ojt', label: 'OJT Records' },
+          { key: 'offline', label: 'Offline Records' },
+        ]}
+        value={tab}
+        onChange={(t) => { setTab(t); setPage(1); }}
       />
 
-      <NewScheduleDialog open={dialog === 'new'} onClose={() => setDialog(null)} />
-      <OjtDialog open={dialog === 'ojt'} onClose={() => setDialog(null)} />
-      <OfflineDialog open={dialog === 'offline'} onClose={() => setDialog(null)} />
+      <div className="mt-4">
+        {tab === 'schedules' && (
+          <DataTable
+            columns={columns}
+            rows={(data?.data ?? []) as unknown as ScheduleRow[]}
+            loading={isLoading}
+            page={page}
+            pageSize={data?.pageSize ?? 50}
+            total={data?.total ?? 0}
+            onPageChange={setPage}
+            emptyText="No schedules yet."
+          />
+        )}
+        {tab === 'ojt' && (
+          <DataTable
+            columns={ojtColumns}
+            rows={(ojt.data?.data ?? []) as unknown as OjtRow[]}
+            loading={ojt.isLoading}
+            page={page}
+            pageSize={ojt.data?.pageSize ?? 50}
+            total={ojt.data?.total ?? 0}
+            onPageChange={setPage}
+            emptyText="No OJT records yet."
+          />
+        )}
+        {tab === 'offline' && (
+          <DataTable
+            columns={offlineColumns}
+            rows={(offline.data?.data ?? []) as unknown as OfflineRow[]}
+            loading={offline.isLoading}
+            page={page}
+            pageSize={offline.data?.pageSize ?? 50}
+            total={offline.data?.total ?? 0}
+            onPageChange={setPage}
+            emptyText="No offline records yet."
+          />
+        )}
+      </div>
+
+      <NewScheduleDialog open={dialog === 'new'} onClose={() => setDialog(null)} onSaved={() => { setTab('schedules'); setPage(1); }} />
+      <OjtDialog open={dialog === 'ojt'} onClose={() => setDialog(null)} onSaved={() => { setTab('ojt'); setPage(1); }} />
+      <OfflineDialog open={dialog === 'offline'} onClose={() => setDialog(null)} onSaved={() => { setTab('offline'); setPage(1); }} />
 
       <ReasonForChangeDialog
         open={!!cancelTarget}

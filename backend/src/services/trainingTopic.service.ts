@@ -116,10 +116,37 @@ export async function getTopic(id: string, canManage = true) {
   return { ...topic, materials, questionCount };
 }
 
+/**
+ * Task-1: keep the TNI requirement matrix in sync with a topic's selected Functional
+ * Roles. Each selected functional role (designationId) becomes a REQUIRED cell for this
+ * topic; roles no longer selected are marked Not-Required. Idempotent — safe to re-run.
+ * Does NOT write back to the topic, so it never loops with the reverse (TNI → topic) sync.
+ */
+export async function syncTniRequirementsFromTopic(topicId: string, designationIds: unknown, createdBy: string) {
+  const ids = Array.from(
+    new Set((Array.isArray(designationIds) ? designationIds : []).filter((d): d is string => typeof d === 'string' && !!d)),
+  );
+  for (const designationId of ids) {
+    const existing = await prisma.tniRequirement.findFirst({ where: { designationId, topicId } });
+    if (existing) {
+      if (!existing.isRequired || existing.isDeleted) {
+        await prisma.tniRequirement.update({ where: { id: existing.id }, data: { isRequired: true, isDeleted: false } });
+      }
+    } else {
+      await prisma.tniRequirement.create({ data: { designationId, topicId, isRequired: true, createdBy } });
+    }
+  }
+  // Roles previously required for this topic but no longer selected → Not Required.
+  await prisma.tniRequirement.updateMany({
+    where: { topicId, isDeleted: false, isRequired: true, designationId: { notIn: ids } },
+    data: { isRequired: false },
+  });
+}
+
 export async function createTopic(input: CreateTopicInput, createdBy: string) {
   const sequence = (await prisma.trainingTopic.count()) + 1;
   const topicCode = generateTopicCode(sequence);
-  return prisma.trainingTopic.create({
+  const created = await prisma.trainingTopic.create({
     data: {
       topicCode,
       topicNumber: input.topicNumber ?? null,
@@ -154,6 +181,9 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       createdBy,
     },
   });
+  // Task-1: reflect the selected functional roles into the TNI requirement matrix.
+  await syncTniRequirementsFromTopic(created.id, input.designationIds ?? (input.designationId ? [input.designationId] : []), createdBy);
+  return created;
 }
 
 /**
@@ -210,9 +240,16 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
 
   if (topic.status === 'PUBLISHED') {
     // G4: stage the edit as a draft working copy; do not touch the live published record.
+    // TNI stays in sync with the LIVE roles; it is re-synced when the draft is published.
     return prisma.trainingTopic.update({ where: { id }, data: { draftMeta: data as Prisma.InputJsonValue } });
   }
-  return prisma.trainingTopic.update({ where: { id }, data });
+  const updated = await prisma.trainingTopic.update({ where: { id }, data });
+  // Task-1: when functional roles change, reflect them into the TNI requirement matrix.
+  if (input.designationIds !== undefined || input.designationId !== undefined) {
+    const actor = auditContext.getStore()?.actor.userId ?? 'SYSTEM';
+    await syncTniRequirementsFromTopic(id, updated.designationIds ?? [], actor);
+  }
+  return updated;
 }
 
 /**
@@ -295,6 +332,8 @@ export async function publishDraftChanges(id: string, req: Request) {
     where: { id },
     data: { ...draft, draftMeta: null, currentVersion: { increment: 1 } },
   });
+  // Task-1: staged functional-role changes are now live — re-sync the TNI matrix.
+  await syncTniRequirementsFromTopic(id, promoted.designationIds ?? [], req.user!.id);
 
   // One version-history entry describing the batch of changes published in this version.
   const parts: string[] = [];

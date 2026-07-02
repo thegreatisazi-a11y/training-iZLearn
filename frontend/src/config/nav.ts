@@ -20,7 +20,9 @@ export const NAV: NavItem[] = [
   { to: '/my-jd', label: 'My Job Description', icon: FileText },
   { to: '/my-cv', label: 'My CV', icon: UserCircle },
   { to: '/team', label: 'My Team', icon: Users, module: 'team', action: 'read' },
-  { to: '/team-cvs', label: 'Team CVs', icon: Users, module: 'team', action: 'read' },
+  // Team CVs are now accessed inside a team member's profile (My Team → member → View CV),
+  // so this top-level item is hidden. Kept (commented) so it can be restored if needed.
+  // { to: '/team-cvs', label: 'Team CVs', icon: Users, module: 'team', action: 'read' },
   { to: '/users', label: 'Users', icon: Users, module: 'userManagement', action: 'read' },
   { to: '/users/requests', label: 'User Requests', icon: UserPlus, module: 'userManagement', action: 'read' },
   { to: '/roles', label: 'Roles & Access Control', icon: Shield, module: 'roleManagement', action: 'read' },

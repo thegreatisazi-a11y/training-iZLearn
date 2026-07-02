@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileText, UserCircle } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { CvDocument } from '@/components/common/CvDocument';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
@@ -68,6 +69,20 @@ interface MemberJD {
   acknowledgedAt?: string | null;
 }
 
+interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null }
+interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
+interface CvData {
+  version?: number;
+  languagesKnown?: string | null;
+  languages?: LanguageItem[];
+  qualifications?: { year?: string; degree?: string; specialization?: string; institute?: string }[];
+  currentRole?: string | null;
+  currentResponsibilities?: string | null;
+  experience?: { organisation?: string; role?: string; tenureFrom?: string; tenureTo?: string; responsibilities?: string }[];
+  trainings?: { detail?: string }[];
+  publications?: { detail?: string }[];
+}
+
 const STATUS_TONE: Record<string, string> = {
   PENDING: 'PENDING',
   IN_PROGRESS: 'IN_PROGRESS',
@@ -92,6 +107,7 @@ export default function TeamMemberPage() {
 
   const [decision, setDecision] = useState<{ open: boolean; kind: 'APPROVE' | 'REJECT'; row?: RetakeRow }>({ open: false, kind: 'APPROVE' });
   const [jdOpen, setJdOpen] = useState(false);
+  const [cvOpen, setCvOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['team-member', userId],
@@ -104,6 +120,12 @@ export default function TeamMemberPage() {
     queryKey: ['team-member-jds', userId],
     queryFn: () => svc.jds.user(userId) as unknown as Promise<MemberJD[]>,
     enabled: !!userId && jdOpen,
+  });
+  // Supervisor/admin view of the team member's CV — fetched on demand (Team CVs moved here).
+  const { data: cvData, isLoading: cvLoading } = useQuery({
+    queryKey: ['team-member-cv', userId],
+    queryFn: () => svc.cv.user(userId) as unknown as Promise<{ header: CvHeader; cv: CvData | null }>,
+    enabled: !!userId && cvOpen,
   });
   const { data: depts } = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: jdOpen });
   const { data: desigs } = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: jdOpen });
@@ -202,9 +224,14 @@ export default function TeamMemberPage() {
         title={data?.user.fullName ?? 'Team Member'}
         description={data?.user.employeeId ? `Employee ID: ${data.user.employeeId}` : undefined}
         actions={
-          <Button variant="outline" onClick={() => setJdOpen(true)}>
-            <FileText className="h-4 w-4" /> View Job Description
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setJdOpen(true)}>
+              <FileText className="h-4 w-4" /> View Job Description
+            </Button>
+            <Button variant="outline" onClick={() => setCvOpen(true)}>
+              <UserCircle className="h-4 w-4" /> View CV
+            </Button>
+          </div>
         }
       />
 
@@ -312,6 +339,23 @@ export default function TeamMemberPage() {
               </div>
             ))}
           </div>
+        )}
+      </Dialog>
+
+      {/* Team member's CV — supervisor/admin view (moved here from the Team CVs menu). */}
+      <Dialog
+        open={cvOpen}
+        onClose={() => setCvOpen(false)}
+        className="max-w-3xl"
+        title={cvData?.header ? `CV — ${cvData.header.employeeName}` : 'Curriculum Vitae'}
+        footer={<Button onClick={() => setCvOpen(false)}>Close</Button>}
+      >
+        {cvLoading ? (
+          <PageLoader />
+        ) : !cvData?.cv ? (
+          <p className="text-sm text-slate-500">This team member has not created a CV yet.</p>
+        ) : (
+          <CvDocument header={cvData.header} cv={cvData.cv} />
         )}
       </Dialog>
 

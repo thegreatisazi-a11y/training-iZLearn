@@ -21,6 +21,7 @@ router.post('/ojt', requirePermission('scheduling', 'write'), validate(ojtRecord
 router.get('/ojt/list', requirePermission('scheduling', 'read'), c.listOjt);
 
 // Offline / classroom records
+router.get('/offline/list', requirePermission('scheduling', 'read'), c.listOffline);
 router.post('/offline', requirePermission('scheduling', 'write'), validate(offlineTrainingSchema), c.createOffline);
 router.post(
   '/offline/:id/attendance-sheet',

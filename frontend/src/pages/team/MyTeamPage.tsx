@@ -97,15 +97,12 @@ export default function MyTeamPage() {
     {
       key: 'actions',
       header: '',
+      // CV and JD are viewed from the member's detail page (Details), so no separate
+      // View CV button is needed here.
       render: (r) => (
-        <div className="flex flex-wrap gap-1">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/team/${r.id}`)}>
-            Details <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate(`/team-cvs?user=${r.id}`)}>
-            View CV
-          </Button>
-        </div>
+        <Button size="sm" variant="ghost" onClick={() => navigate(`/team/${r.id}`)}>
+          Details <ChevronRight className="h-4 w-4" />
+        </Button>
       ),
     },
   ];

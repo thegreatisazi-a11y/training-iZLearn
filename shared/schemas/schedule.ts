@@ -33,6 +33,7 @@ export const ojtRecordSchema = z.object({
   evaluatorId: uuid,
   evaluationDate: z.coerce.date().max(new Date(), { message: 'Date cannot be in the future' }),
   evaluationScore: z.coerce.number().min(0).max(100),
+  content: optionalString, // optional, multi-line training details
   remarks: optionalString,
 });
 export type OjtRecordInput = z.infer<typeof ojtRecordSchema>;

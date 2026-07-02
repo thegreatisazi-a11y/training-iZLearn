@@ -56,6 +56,12 @@ export const createOffline = asyncHandler(async (req: Request, res: Response) =>
   sendCreated(res, r, 'Offline training record created');
 });
 
+export const listOffline = asyncHandler(async (req: Request, res: Response) => {
+  const q = paginationQuery.parse(req.query);
+  const r = await svc.listOfflineRecords(q, { topicId: req.query.topicId as string | undefined });
+  sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
+});
+
 export const uploadOfflineSheet = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw AppError.badRequest('An attendance-sheet file is required.');
   const r = await svc.attachOfflineAttendanceSheet(req.params.id, req.file);
