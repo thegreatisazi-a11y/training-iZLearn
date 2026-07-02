@@ -19,7 +19,19 @@ export async function listForms(q: PaginationQuery & { topicId?: string }) {
     prisma.feedbackForm.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.feedbackForm.count({ where }),
   ]);
-  return { data, total, page: q.page, pageSize: q.pageSize };
+  // MongoDB has no relational join, so resolve each form's topic name (and number)
+  // from its topicId in one batched lookup — the UI shows the topic name, not the id.
+  const topicIds = Array.from(new Set(data.map((f) => f.topicId).filter(Boolean)));
+  const topics = topicIds.length
+    ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true } })
+    : [];
+  const topicById = new Map(topics.map((t) => [t.id, t]));
+  const enriched = data.map((f) => ({
+    ...f,
+    topicTitle: topicById.get(f.topicId)?.title ?? null,
+    topicNumber: topicById.get(f.topicId)?.topicNumber ?? null,
+  }));
+  return { data: enriched, total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function getForm(id: string) {

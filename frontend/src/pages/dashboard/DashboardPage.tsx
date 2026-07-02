@@ -56,6 +56,24 @@ export default function DashboardPage() {
     <div>
       <PageHeader title={`Welcome, ${user?.fullName ?? ''}`} description={`Roles: ${user?.roleNames?.join(', ')}`} />
 
+      {/* Announcements take the highest-priority position — shown above all stats so
+          they are immediately visible on login. */}
+      {announcements.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Announcements</h2>
+          <div className="space-y-3">
+            {announcements.map((a: { id: string; title: string; content: string }) => (
+              <Card key={a.id} className="border-l-4 border-l-primary">
+                <CardContent>
+                  <div className="font-medium text-slate-800">{a.title}</div>
+                  <div className="prose-sm mt-1 text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a.content) }} />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">My Training</h2>
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat icon={Clock} label="Pending" value={me.pending ?? 0} tone="bg-amber-100 text-amber-700" to="/my-trainings" />
@@ -118,21 +136,6 @@ export default function DashboardPage() {
         </>
       )}
 
-      {announcements.length > 0 && (
-        <>
-          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Announcements</h2>
-          <div className="space-y-3">
-            {announcements.map((a: { id: string; title: string; content: string }) => (
-              <Card key={a.id}>
-                <CardContent>
-                  <div className="font-medium text-slate-800">{a.title}</div>
-                  <div className="prose-sm mt-1 text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a.content) }} />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -155,34 +155,37 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
       A('archive', 'Archive Question'),
     ],
   },
-  {
-    module: 'bundleManagement',
-    label: 'Bundles',
-    category: 'training',
-    actions: [
-      A('view', 'View Bundles'),
-      A('create', 'Create Bundle'),
-      A('edit', 'Edit Bundle'),
-      A('archive', 'Archive Bundle'),
-      A('assign', 'Assign Bundle'),
-      A('print', 'Print'),
-      A('export', 'Export'),
-    ],
-  },
-  {
-    module: 'trainingAssignment',
-    label: 'Training Assignments',
-    category: 'training',
-    actions: [
-      A('view', 'View Assignments'),
-      A('create', 'Create Assignment'),
-      A('edit', 'Edit / Assign Later'),
-      A('assign', 'Assign Training'),
-      A('approve', 'Approve Assignment'),
-      A('print', 'Print Assignments'),
-      A('export', 'Export Assignments'),
-    ],
-  },
+  // Hidden from the Roles & Access Control UI for now (commented out, not removed, so
+  // they can be restored later). Existing stored permissions and route guards are
+  // unaffected — this only controls what the permission editor renders.
+  // {
+  //   module: 'bundleManagement',
+  //   label: 'Bundles',
+  //   category: 'training',
+  //   actions: [
+  //     A('view', 'View Bundles'),
+  //     A('create', 'Create Bundle'),
+  //     A('edit', 'Edit Bundle'),
+  //     A('archive', 'Archive Bundle'),
+  //     A('assign', 'Assign Bundle'),
+  //     A('print', 'Print'),
+  //     A('export', 'Export'),
+  //   ],
+  // },
+  // {
+  //   module: 'trainingAssignment',
+  //   label: 'Training Assignments',
+  //   category: 'training',
+  //   actions: [
+  //     A('view', 'View Assignments'),
+  //     A('create', 'Create Assignment'),
+  //     A('edit', 'Edit / Assign Later'),
+  //     A('assign', 'Assign Training'),
+  //     A('approve', 'Approve Assignment'),
+  //     A('print', 'Print Assignments'),
+  //     A('export', 'Export Assignments'),
+  //   ],
+  // },
   {
     module: 'scheduling',
     label: 'Scheduling',

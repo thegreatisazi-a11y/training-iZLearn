@@ -242,16 +242,44 @@ export async function auditedTransaction<T>(
   const prev = store?.inAudit ?? false;
   if (store) store.inAudit = true;
   try {
-    return await prisma.$transaction(async (tx) => {
-      const { result, audits } = await work(tx);
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const { result, audits } = await work(tx);
+        for (const a of audits) {
+          await tx.auditTrail.create({ data: buildAuditData(store, a) });
+        }
+        return result;
+      });
+    } catch (err) {
+      // Interactive transactions require a MongoDB replica set. On a standalone
+      // deployment Prisma throws (e.g. "Transaction numbers are only allowed on a
+      // replica set member or mongos"). Rather than 500 the whole operation, fall
+      // back to running the same writes non-transactionally against the base client.
+      // Atomicity isn't available on such a deployment, but the operation succeeds and
+      // is still fully audited. (No-op on replica sets — the transaction path wins.)
+      if (!isTransactionUnsupported(err)) throw err;
+      logger.warn('Database does not support multi-document transactions — running audited writes non-transactionally.');
+      const { result, audits } = await work(prisma as unknown as Prisma.TransactionClient);
       for (const a of audits) {
-        await tx.auditTrail.create({ data: buildAuditData(store, a) });
+        await prisma.auditTrail.create({ data: buildAuditData(store, a) });
       }
       return result;
-    });
+    }
   } finally {
     if (store) store.inAudit = prev;
   }
+}
+
+/** Detect a "transactions not supported by this deployment" error (standalone MongoDB). */
+function isTransactionUnsupported(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('replica set') ||
+    msg.includes('transaction numbers') ||
+    msg.includes('transactions are not supported') ||
+    msg.includes('this mongodb deployment does not support') ||
+    msg.includes('sessions are not supported')
+  );
 }
 
 /**
