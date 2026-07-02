@@ -214,18 +214,14 @@ export default function TopicDetailPage() {
   const [questionDialog, setQuestionDialog] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [qForm, setQForm] = useState<QuestionForm>(blankQuestionForm());
-  const [editReasonFor, setEditReasonFor] = useState<{ id: string; body: Record<string, unknown> } | null>(null);
   const [viewingQuestion, setViewingQuestion] = useState<Question | null>(null);
-  const [removeQuestionFor, setRemoveQuestionFor] = useState<Question | null>(null);
   // 4.1 replace, 4.2 library attach, 4.3 status, 4.7 bundles
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const [replaceTarget, setReplaceTarget] = useState<Material | null>(null);
-  const [replacePending, setReplacePending] = useState<{ material: Material; file: File } | null>(null);
-  // Replace/Update source chooser: which file is being replaced, and (when via library)
-  // the target + selected source pending a reason-for-change.
+  // Replace/Update source chooser: which file's Replace was clicked, and (library path)
+  // which material to replace from the library.
   const [replaceChoice, setReplaceChoice] = useState<Material | null>(null);
   const [replaceLibraryFor, setReplaceLibraryFor] = useState<Material | null>(null);
-  const [replaceLibraryPending, setReplaceLibraryPending] = useState<{ material: Material; source: Material } | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [statusChange, setStatusChange] = useState<'PUBLISHED' | 'ARCHIVED' | 'DRAFT' | null>(null);
   const [publishDraftOpen, setPublishDraftOpen] = useState(false);
@@ -236,7 +232,6 @@ export default function TopicDetailPage() {
   const [readTimeMin, setReadTimeMin] = useState('');
   const [applyReadTimeToAll, setApplyReadTimeToAll] = useState(false);
   const [editTopicOpen, setEditTopicOpen] = useState(false);
-  const [editTopicReasonOpen, setEditTopicReasonOpen] = useState(false);
   const [editTopicForm, setEditTopicForm] = useState({
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM', trainingTypes: [] as string[],
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
@@ -314,10 +309,12 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // Replace a file (from device). On a published course this stages the change; the
+  // reason (+ e-sign) is captured once at "Publish changes", so none is prompted here.
   const replaceMut = useMutation({
-    mutationFn: (reason: string) => svc.materials.replace(replacePending!.material.id, replacePending!.file, reason),
+    mutationFn: (args: { material: Material; file: File }) => svc.materials.replace(args.material.id, args.file),
     onSuccess: () => {
-      toast.success('File replaced with a new version');
+      toast.success(isPublished ? 'File replacement staged — publish changes to make it live.' : 'File replaced with a new version');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
@@ -327,10 +324,9 @@ export default function TopicDetailPage() {
 
   // Replace a specific file using an existing Material Library file (true replace).
   const replaceFromLibraryMut = useMutation({
-    mutationFn: (reason: string) =>
-      svc.materials.replaceFromLibrary(replaceLibraryPending!.material.id, replaceLibraryPending!.source.id, reason),
+    mutationFn: (args: { materialId: string; sourceId: string }) => svc.materials.replaceFromLibrary(args.materialId, args.sourceId),
     onSuccess: () => {
-      toast.success('File replaced with a library file');
+      toast.success(isPublished ? 'File replacement staged — publish changes to make it live.' : 'File replaced with a library file');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
@@ -371,8 +367,13 @@ export default function TopicDetailPage() {
     },
     onSuccess: () => {
       toast.success('Draft changes published — the live course is updated.');
+      // Refresh everything affected so the staged → live flip (and version bump) shows
+      // immediately: the topic, its materials, its questions, and the version history.
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
+      qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
+      qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
+      qc.invalidateQueries({ queryKey: ['topic-history', id] });
       setPublishDraftOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -393,7 +394,7 @@ export default function TopicDetailPage() {
   });
 
   const updateTopicMut = useMutation({
-    mutationFn: (reasonForChange: string) =>
+    mutationFn: () =>
       svc.topics.update(id, {
         title: editTopicForm.title,
         topicNumber: editTopicForm.topicNumber || undefined,
@@ -417,13 +418,11 @@ export default function TopicDetailPage() {
         randomizeQuestions: editTopicForm.randomizeQuestions,
         showExplanations: editTopicForm.showExplanations,
         blockAfterMaxAttempts: editTopicForm.blockAfterMaxAttempts,
-        reasonForChange,
       }),
     onSuccess: () => {
-      toast.success('Topic details updated');
+      toast.success(isPublished ? 'Details staged — publish changes to make them live.' : 'Topic details updated');
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
-      setEditTopicReasonOpen(false);
       setEditTopicOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -454,9 +453,9 @@ export default function TopicDetailPage() {
   });
 
   const updateQuestionMut = useMutation({
-    mutationFn: (reason: string) => svc.questions.update(editReasonFor!.id, { ...editReasonFor!.body, reasonForChange: reason }),
+    mutationFn: (args: { id: string; body: Record<string, unknown> }) => svc.questions.update(args.id, args.body),
     onSuccess: () => {
-      toast.success('Question updated');
+      toast.success(isPublished ? 'Question edit staged — publish changes to make it live.' : 'Question updated');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
@@ -474,15 +473,15 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  // Remove a question (controlled — reason for change required).
+  // Remove a question. On a published course this stages the removal (published later);
+  // the reason (+ e-sign) is captured at "Publish changes", so none is prompted here.
   const removeQuestionMut = useMutation({
-    mutationFn: (reason: string) => svc.questions.remove(removeQuestionFor!.id, reason),
+    mutationFn: (qid: string) => svc.questions.remove(qid),
     onSuccess: () => {
-      toast.success('Question removed');
+      toast.success(isPublished ? 'Question removal staged — publish changes to make it live.' : 'Question removed');
       qc.invalidateQueries({ queryKey: ['questions', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
-      setRemoveQuestionFor(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -552,10 +551,11 @@ export default function TopicDetailPage() {
   }
   function submitQuestion() {
     if (editingQuestion) {
-      // Edits require a reason for change (21 CFR Part 11).
+      // On a published course this stages the edit; the reason (+ e-sign) is captured
+      // once at "Publish changes", so no per-edit reason is prompted.
       const body = questionBody(qForm, id);
       delete body.topicId;
-      setEditReasonFor({ id: editingQuestion.id, body });
+      updateQuestionMut.mutate({ id: editingQuestion.id, body });
       setQuestionDialog(false);
     } else {
       createQuestionMut.mutate();
@@ -645,10 +645,17 @@ export default function TopicDetailPage() {
               <Pencil className="h-3.5 w-3.5" /> Edit
             </button>
           )}
-          {/* A question can be removed at any time, including after publish — it is a
-              controlled, versioned change (bumps the course version + logs the removal). */}
+          {/* A question can be removed at any time. On a published course the removal is
+              STAGED (published later under one e-signature); on a draft it applies now. */}
           {canQuestionWrite && (
-            <button className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline" onClick={() => setRemoveQuestionFor(r)}>
+            <button
+              className="inline-flex items-center gap-1 text-sm text-red-600 hover:underline"
+              onClick={() => {
+                if (window.confirm(isPublished ? 'Remove this question? The removal is staged and goes live when you publish changes.' : 'Remove this question?')) {
+                  removeQuestionMut.mutate(r.id);
+                }
+              }}
+            >
               <Trash2 className="h-3.5 w-3.5" /> Remove
             </button>
           )}
@@ -894,7 +901,7 @@ export default function TopicDetailPage() {
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file && replaceTarget) setReplacePending({ material: replaceTarget, file });
+              if (file && replaceTarget) replaceMut.mutate({ material: replaceTarget, file });
               e.target.value = '';
             }}
           />
@@ -995,21 +1002,6 @@ export default function TopicDetailPage() {
         onClose={() => setDeletingMaterial(null)}
         onConfirm={async (r) => { await deleteMaterialMut.mutateAsync(r); }}
         title="Delete Material"
-      />
-
-      <ReasonForChangeDialog
-        open={!!editReasonFor}
-        onClose={() => setEditReasonFor(null)}
-        onConfirm={async (r) => { await updateQuestionMut.mutateAsync(r); }}
-        title="Edit Question — Reason for Change"
-      />
-
-      {/* Remove a question (reason for change required) */}
-      <ReasonForChangeDialog
-        open={!!removeQuestionFor}
-        onClose={() => setRemoveQuestionFor(null)}
-        onConfirm={async (r) => { await removeQuestionMut.mutateAsync(r); }}
-        title="Remove Question — Reason for Change"
       />
 
       {/* View a question (read-only) */}
@@ -1239,7 +1231,7 @@ export default function TopicDetailPage() {
               <div className="text-sm text-slate-700">
                 {m.originalFileName} <span className="uppercase text-slate-400">· {m.fileType}</span>
               </div>
-              <Button size="sm" variant="outline" onClick={() => { if (replaceLibraryFor) setReplaceLibraryPending({ material: replaceLibraryFor, source: m }); setReplaceLibraryFor(null); }}>
+              <Button size="sm" variant="outline" onClick={() => { if (replaceLibraryFor) replaceFromLibraryMut.mutate({ materialId: replaceLibraryFor.id, sourceId: m.id }); setReplaceLibraryFor(null); }}>
                 Select
               </Button>
             </div>
@@ -1250,21 +1242,6 @@ export default function TopicDetailPage() {
         </div>
       </Dialog>
 
-      {/* 4.1: replace/update a specific file (device) — confirm with a reason for change */}
-      <ReasonForChangeDialog
-        open={!!replacePending}
-        onClose={() => setReplacePending(null)}
-        onConfirm={async (r) => { await replaceMut.mutateAsync(r); setReplacePending(null); }}
-        title={`Replace "${replacePending?.material.originalFileName ?? ''}" — Reason for Change`}
-      />
-
-      {/* 4.1 (library variant): confirm the library replacement with a reason for change */}
-      <ReasonForChangeDialog
-        open={!!replaceLibraryPending}
-        onClose={() => setReplaceLibraryPending(null)}
-        onConfirm={async (r) => { await replaceFromLibraryMut.mutateAsync(r); setReplaceLibraryPending(null); }}
-        title={`Replace "${replaceLibraryPending?.material.originalFileName ?? ''}" with "${replaceLibraryPending?.source.originalFileName ?? ''}" — Reason for Change`}
-      />
 
       {/* 4.3 / Step 3: publish / unpublish (archive) — controlled, e-signed */}
       <ESignatureModal
@@ -1393,7 +1370,7 @@ export default function TopicDetailPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setEditTopicOpen(false)}>Cancel</Button>
-            <Button disabled={!editTopicForm.title || !editTopicForm.maxAttempts} onClick={() => setEditTopicReasonOpen(true)}>
+            <Button disabled={!editTopicForm.title || !editTopicForm.maxAttempts || updateTopicMut.isPending} onClick={() => updateTopicMut.mutate()}>
               Save…
             </Button>
           </>
@@ -1478,12 +1455,6 @@ export default function TopicDetailPage() {
         </div>
       </Dialog>
 
-      <ReasonForChangeDialog
-        open={editTopicReasonOpen}
-        onClose={() => setEditTopicReasonOpen(false)}
-        onConfirm={async (r) => { await updateTopicMut.mutateAsync(r); }}
-        title="Edit Topic — Reason for Change"
-      />
     </div>
   );
 }

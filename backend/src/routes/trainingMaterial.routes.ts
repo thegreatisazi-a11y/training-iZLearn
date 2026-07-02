@@ -31,19 +31,21 @@ router.post('/', requirePermission('materialManagement', 'write'), uploadFile.si
 router.post('/bulk', requirePermission('materialManagement', 'create'), uploadFile.array('files', 50), c.bulkUpload);
 // 4.2: attach an existing library material to a topic as the current version.
 router.post('/attach', requirePermission('materialManagement', 'write'), captureReasonIfPresent, c.attachFromLibrary);
-// 4.1: replace/update a specific material with a new uploaded version (multipart; reason required).
+// 4.1: replace/update a specific material with a new uploaded version. On a published
+// course this STAGES the change; the reason (+ e-sign) is captured once at "Publish
+// changes", so no reason is required here.
 router.post(
   '/:id/replace',
   requirePermission('materialManagement', 'write'),
   uploadFile.single('file'),
-  requireReasonForChange,
+  captureReasonIfPresent,
   c.replace,
 );
-// 4.1 (library variant): replace a specific material with an existing Material Library file (JSON; reason required).
+// 4.1 (library variant): replace a specific material with an existing Material Library file.
 router.post(
   '/:id/replace-from-library',
   requirePermission('materialManagement', 'write'),
-  requireReasonForChange,
+  captureReasonIfPresent,
   c.replaceFromLibrary,
 );
 router.delete(

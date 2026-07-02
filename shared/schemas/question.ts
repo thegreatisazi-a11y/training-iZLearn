@@ -68,7 +68,9 @@ export const updateQuestionSchema = z
     helpText: optionalString,
     isMandatory: z.boolean().optional(),
     isActive: z.boolean().optional(),
-    reasonForChange,
+    // Question edits on a published course are STAGED; the reason (+ e-signature) is
+    // collected once at "Publish changes", so it is optional here.
+    reasonForChange: reasonForChange.optional(),
   })
   .superRefine((q, ctx) => {
     // When the question TYPE is changed, the answer key must be re-supplied so it

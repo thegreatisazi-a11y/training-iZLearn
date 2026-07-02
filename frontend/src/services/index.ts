@@ -81,16 +81,16 @@ export const svc = {
       fd.append('topicId', topicId);
       return api.post('/materials', fd).then((r) => r.data.data);
     },
-    replace: (id: string, file: File, reasonForChange: string) => {
+    replace: (id: string, file: File, reasonForChange?: string) => {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('reasonForChange', reasonForChange);
+      if (reasonForChange) fd.append('reasonForChange', reasonForChange);
       return api.post(`/materials/${id}/replace`, fd).then((r) => r.data.data);
     },
     attachFromLibrary: (materialId: string, topicId: string, reasonForChange?: string) =>
       data(api.post('/materials/attach', { materialId, topicId, reasonForChange })),
-    /** Replace a specific material with an existing Material Library file (reason required). */
-    replaceFromLibrary: (id: string, sourceMaterialId: string, reasonForChange: string) =>
+    /** Replace a specific material with an existing Material Library file. */
+    replaceFromLibrary: (id: string, sourceMaterialId: string, reasonForChange?: string) =>
       data(api.post(`/materials/${id}/replace-from-library`, { sourceMaterialId, reasonForChange })),
     setViewTime: (id: string, requiredViewSeconds: number, applyToAll = false) => data(api.patch(`/materials/${id}`, { requiredViewSeconds, applyToAll })),
     startView: (id: string) => data(api.post(`/materials/${id}/view/start`, {})),

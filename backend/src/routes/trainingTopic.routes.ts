@@ -3,7 +3,7 @@ import * as c from '../controllers/trainingTopic.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
-import { requireReasonForChange } from '../middlewares/reasonForChange.middleware';
+import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
 import {
   createTopicSchema,
   updateTopicSchema,
@@ -36,10 +36,12 @@ router.patch(
   validate(updateTopicStatusSchema),
   c.updateStatus,
 );
+// Editing course details on a published course STAGES the change; the reason (+ e-sign)
+// is collected once at "Publish changes", so no reason is required here.
 router.patch(
   '/:id',
   requirePermission('courseManagement', 'edit'),
-  requireReasonForChange,
+  captureReasonIfPresent,
   validate(updateTopicSchema),
   c.update,
 );

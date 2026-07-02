@@ -23,6 +23,6 @@ export function createCrud<T = Record<string, unknown>>(base: string) {
     get: async (id: string): Promise<T> => (await api.get(`${base}/${id}`)).data.data,
     create: async (body: unknown): Promise<T> => (await api.post(base, body)).data.data,
     update: async (id: string, body: unknown): Promise<T> => (await api.patch(`${base}/${id}`, body)).data.data,
-    remove: async (id: string, reasonForChange: string) => (await api.delete(`${base}/${id}`, { data: { reasonForChange } })).data,
+    remove: async (id: string, reasonForChange?: string) => (await api.delete(`${base}/${id}`, { data: { reasonForChange } })).data,
   };
 }

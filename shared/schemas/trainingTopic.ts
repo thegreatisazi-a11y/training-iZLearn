@@ -77,7 +77,9 @@ export const updateTopicSchema = z.object({
   effectiveDate: z.coerce.date().optional(),
   reviewDate: z.coerce.date().optional(),
   isActive: z.boolean().optional(),
-  reasonForChange,
+  // Edits on a published course are STAGED; the reason (+ e-signature) is collected once
+  // at "Publish changes", so it is optional here.
+  reasonForChange: reasonForChange.optional(),
 });
 export type UpdateTopicInput = z.infer<typeof updateTopicSchema>;
 
