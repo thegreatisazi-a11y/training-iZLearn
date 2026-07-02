@@ -74,10 +74,21 @@ export default function JDPage() {
   const [viewing, setViewing] = useState<JD | null>(null);
   const [viewingTemplate, setViewingTemplate] = useState<JDTemplate | null>(null);
 
+  const meId = useAuthStore((s) => s.user?.id);
+
   // Select option sources.
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
   const { data: departments } = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }) });
-  const userOptions = ((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => ({ value: u.id, label: u.fullName }));
+  // Assign JD only to the supervisor's OWN team members — and never to themselves.
+  // Loaded only when the Assign dialog is open.
+  const { data: teamData } = useQuery({
+    queryKey: ['users', 'team', 'jd-assign'],
+    queryFn: () => svc.users.team({ pageSize: 1000 }),
+    enabled: creating,
+  });
+  const assignUserOptions = ((teamData?.data ?? []) as { id: string; fullName: string; employeeId?: string }[])
+    .filter((u) => u.id !== meId)
+    .map((u) => ({ value: u.id, label: u.employeeId ? `${u.fullName} (${u.employeeId})` : u.fullName }));
   // Resolve approver id → name for the "Approved By" column (show name, not the UUID).
   const userName = new Map(((users?.data ?? []) as { id: string; fullName: string }[]).map((u) => [u.id, u.fullName]));
   // Employee code (employeeId) per user, for the JD document header.
@@ -429,8 +440,11 @@ export default function JDPage() {
           </>
         }
       >
-        <Field label="User" required>
-          <Select options={userOptions} placeholder="Select user…" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })} />
+        <Field label="Team member" required>
+          <Select options={assignUserOptions} placeholder="Select a team member…" value={assignForm.userId} onChange={(e) => setAssignForm({ ...assignForm, userId: e.target.value })} />
+          {assignUserOptions.length === 0 && (
+            <p className="mt-1 text-xs text-slate-500">No team members found. You can only assign a JD to people who report to you.</p>
+          )}
         </Field>
         <Field label="JD Template (by title)" required>
           <SearchableSelect

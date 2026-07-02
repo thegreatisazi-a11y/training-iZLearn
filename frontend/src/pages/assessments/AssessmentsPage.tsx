@@ -1,19 +1,60 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle2, XCircle } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { PageLoader } from '@/components/ui/spinner';
 import { useAuthStore } from '@/store/authStore';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 import { formatDateTime } from '@/lib/format';
+
+interface ReviewDetail {
+  questionId: string;
+  questionText: string;
+  isCorrect?: boolean;
+  userAnswer?: unknown;
+  correctAnswer: unknown;
+  explanation?: string | null;
+}
+interface AttemptReview {
+  topicTitle?: string | null;
+  topicNumber?: string | null;
+  score: number;
+  passingScorePercent: number;
+  correctCount: number;
+  incorrectCount: number;
+  isPassed: boolean;
+  attemptNumber: number;
+  maxAttempts: number;
+  allDetails?: ReviewDetail[];
+  incorrectDetails?: ReviewDetail[];
+  timeSpentSeconds?: number | null;
+  readingTimeSeconds?: number | null;
+  submissionReason?: string | null;
+  submissionReasonLabel?: string | null;
+}
+
+/** Pretty-print a stored answer (mirrors the post-submit result screen). */
+function formatCorrect(c: unknown): string {
+  if (Array.isArray(c)) {
+    if (c.length && typeof c[0] === 'object' && c[0] && 'left' in (c[0] as object)) {
+      return (c as Array<{ left: string; right: string }>).map((p) => `${p.left} → ${p.right}`).join(', ');
+    }
+    return (c as unknown[]).join(', ');
+  }
+  if (c && typeof c === 'object') return Object.values(c as Record<string, unknown>).map((v) => String(v)).join(', ');
+  return String(c ?? '');
+}
 
 interface Attempt {
   id: string;
@@ -48,6 +89,89 @@ function fmtDuration(s?: number | null): string {
   if (s === null || s === undefined) return '—';
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}m ${s % 60}s` : `${s % 60}s`;
+}
+
+/**
+ * View a completed attempt's questions & answers in the SAME format shown right after
+ * submission — a summary header plus the full per-question breakdown (user answer,
+ * correct answer, explanation). Fetched on open from the review endpoint.
+ */
+function AttemptReviewDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['assessment-review', id],
+    queryFn: () => svc.assessments.review(id as string) as unknown as Promise<AttemptReview>,
+    enabled: !!id,
+  });
+  const title = data ? `${data.topicNumber ? `${data.topicNumber} – ` : ''}${data.topicTitle ?? 'Assessment'}` : 'Assessment Review';
+  return (
+    <Dialog open={!!id} onClose={onClose} className="max-w-2xl" title="Assessment Review" footer={<Button variant="outline" onClick={onClose}>Close</Button>}>
+      {isLoading || !data ? (
+        <PageLoader />
+      ) : (
+        <div className="space-y-4">
+          <div className="text-sm font-medium text-slate-700">{title}</div>
+          <Card>
+            <CardContent className="flex flex-wrap items-center gap-6">
+              <div className="flex items-center gap-3">
+                {data.isPassed ? <CheckCircle2 className="h-10 w-10 text-green-600" /> : <XCircle className="h-10 w-10 text-red-600" />}
+                <div>
+                  <div className="text-3xl font-semibold text-slate-800">{data.score}%</div>
+                  <Badge tone={data.isPassed ? 'COMPLETED' : 'REJECTED'}>{data.isPassed ? 'Passed' : 'Failed'}</Badge>
+                </div>
+              </div>
+              <div className="text-sm text-slate-600">
+                <div>Passing score: {data.passingScorePercent}%</div>
+                <div className="text-green-700">Correct: {data.correctCount}</div>
+                <div className="text-red-700">Incorrect: {data.incorrectCount}</div>
+                <div>Attempt {data.attemptNumber} of {data.maxAttempts}</div>
+              </div>
+              <div className="text-sm text-slate-600">
+                <div>Time on assessment: <strong>{fmtDuration(data.timeSpentSeconds)}</strong></div>
+                <div>Time on reading: <strong>{fmtDuration(data.readingTimeSeconds)}</strong></div>
+                {data.submissionReasonLabel && data.submissionReason !== 'USER_SUBMITTED' && (
+                  <div>Ended due to: <strong>{data.submissionReasonLabel}</strong></div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {(() => {
+            const review = data.allDetails?.length ? data.allDetails : data.incorrectDetails;
+            if (!review || review.length === 0) return <p className="text-sm text-slate-500">No question-level detail is available for this attempt.</p>;
+            const showingAll = !!data.allDetails?.length;
+            return (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold uppercase text-slate-500">{showingAll ? 'Review — all questions' : 'Review — incorrect answers'}</h3>
+                {review.map((d, i) => {
+                  const correct = d.isCorrect === true;
+                  return (
+                    <Card key={d.questionId} className={correct ? 'border-green-200' : 'border-red-200'}>
+                      <CardContent>
+                        <div className="flex items-start gap-2">
+                          {showingAll && (correct ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600" /> : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />)}
+                          <div className="min-w-0">
+                            <p className="font-medium text-slate-800">{i + 1}. {d.questionText}</p>
+                            <p className={`mt-1 text-sm ${correct ? 'text-green-700' : 'text-red-700'}`}>Your answer: {formatCorrect(d.userAnswer) || '—'}</p>
+                            {/* The correct answer / explanation are withheld on a learner's own
+                                review (reattempts are possible) — the backend only sends them for
+                                manager review of another user's attempt. */}
+                            {!correct && d.correctAnswer != null && d.correctAnswer !== '' && (
+                              <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>
+                            )}
+                            {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </Dialog>
+  );
 }
 
 export default function AssessmentsPage() {
@@ -88,6 +212,8 @@ export default function AssessmentsPage() {
   // Unblock flow: e-signature first, then capture the reason for change.
   const [unblockTarget, setUnblockTarget] = useState<BlockedAssignment | null>(null);
   const [signature, setSignature] = useState<ESignaturePayload | null>(null);
+  // View a completed attempt's questions & answers.
+  const [reviewId, setReviewId] = useState<string | null>(null);
 
   const unblockMutation = useMutation({
     mutationFn: ({ assignmentId, reasonForChange, sig }: { assignmentId: string; reasonForChange: string; sig: ESignaturePayload }) =>
@@ -109,6 +235,18 @@ export default function AssessmentsPage() {
     // and the learner isn't unfairly judged on a result caused by something outside them.
     { key: 'reason', header: 'Reason', render: (r) => r.submissionReasonLabel ?? '—' },
     { key: 'completedAt', header: 'Completed', render: (r) => formatDateTime(r.completedAt) },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      // Once completed (passed or failed), let the user review the questions & answers.
+      render: (r) =>
+        r.completedAt ? (
+          <Button size="sm" variant="outline" onClick={() => setReviewId(r.id)}>
+            View
+          </Button>
+        ) : null,
+    },
   ];
 
   const blockedColumns: Column<BlockedAssignment>[] = [
@@ -163,6 +301,9 @@ export default function AssessmentsPage() {
           <DataTable columns={blockedColumns} rows={(blocked.data?.data ?? []) as unknown as BlockedAssignment[]} loading={blocked.isLoading} emptyText="No blocked assignments." />
         </div>
       )}
+
+      {/* View a completed attempt's questions & answers (passed or failed). */}
+      <AttemptReviewDialog id={reviewId} onClose={() => setReviewId(null)} />
 
       {/* Step 1: electronic signature. */}
       <ESignatureModal

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated } from '../utils/response';
+import { hasPermission } from '../utils/permissions';
 import * as svc from '../services/assessment.service';
 
 export const start = asyncHandler(async (req: Request, res: Response) =>
@@ -23,6 +24,13 @@ export const list = asyncHandler(async (req, res) =>
 );
 
 export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.getAttempt(req.params.id)));
+
+// View a completed attempt's full review (questions + answers) — the learner's own, or
+// any attempt for a manager with assessments:write.
+export const review = asyncHandler(async (req, res) => {
+  const canManage = hasPermission(req.user?.permissions, 'assessments', 'write');
+  sendSuccess(res, await svc.reviewAttempt(req.params.id, req.user!.id, canManage));
+});
 
 export const unblock = asyncHandler(async (req, res) =>
   sendSuccess(res, await svc.unblockAssignment(req.params.assignmentId, req), 'Assignment unblocked'),

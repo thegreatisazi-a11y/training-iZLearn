@@ -243,6 +243,9 @@ export default function TakeAssessmentPage() {
   const completedRef = useRef<Set<string>>(new Set());
   // A4: materials that were partially read in a previous session (resumed mid-way).
   const [resumed, setResumed] = useState<Set<string>>(new Set());
+  // #7: materials whose file has finished loading in the viewer — the read-time timer
+  // only starts once the active material is here, so load time isn't counted as reading.
+  const [readyIds, setReadyIds] = useState<Set<string>>(new Set());
   // A4: throttle progress auto-saves (materialId → last-saved elapsed seconds).
   const savedElapsedRef = useRef<Record<string, number>>({});
   // BUG-05: actual wall-clock time the user keeps each material open (counts UP beyond
@@ -338,17 +341,19 @@ export default function TakeAssessmentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingQ.isSuccess, mats.length]);
 
-  // Record a server-side reading session when a material first becomes active.
+  // Record a server-side reading session when a material first becomes active — but only
+  // once its file has actually loaded (#7), so the reading clock excludes load time.
   useEffect(() => {
-    if (phase !== 'material' || !active || done.has(active.materialId) || startedRef.current.has(active.materialId)) return;
+    if (phase !== 'material' || !active || !readyIds.has(active.materialId) || done.has(active.materialId) || startedRef.current.has(active.materialId)) return;
     startedRef.current.add(active.materialId);
     svc.materials.startView(active.materialId).catch(() => undefined);
-  }, [phase, active, done]);
+  }, [phase, active, done, readyIds]);
 
   // Tick the active material's countdown; on reaching zero, confirm completion server-side.
   // A4: every few seconds, persist accumulated reading time so a closed session resumes.
+  // #7: do not start counting until the file has finished loading and is visible.
   useEffect(() => {
-    if (phase !== 'material' || !active || done.has(active.materialId)) return;
+    if (phase !== 'material' || !active || done.has(active.materialId) || !readyIds.has(active.materialId)) return;
     const id = active.materialId;
     const required = active.requiredSeconds;
     const t = setInterval(() => {
@@ -385,7 +390,7 @@ export default function TakeAssessmentPage() {
         }
       }
     };
-  }, [phase, active, done]);
+  }, [phase, active, done, readyIds]);
 
   // A4: mirror secsLeft into a ref so the countdown cleanup can read the latest value.
   useEffect(() => {
@@ -396,7 +401,8 @@ export default function TakeAssessmentPage() {
   // material is open and the tab is visible, even after the required minimum is met,
   // and persist it (stored as elapsedSeconds via a monotonic max on the server).
   useEffect(() => {
-    if (phase !== 'material' || !active) return;
+    // #7: only accrue actual reading time once the file is loaded and visible.
+    if (phase !== 'material' || !active || !readyIds.has(active.materialId)) return;
     const id = active.materialId;
     const flush = () => svc.materials.saveProgress(id, actualSpentRef.current[id] ?? 0).catch(() => undefined);
     const t = setInterval(() => {
@@ -408,7 +414,7 @@ export default function TakeAssessmentPage() {
       clearInterval(t);
       flush();
     };
-  }, [phase, active]);
+  }, [phase, active, readyIds]);
 
   const questions = useMemo(() => start.data?.questions ?? [], [start.data]);
 
@@ -711,7 +717,13 @@ export default function TakeAssessmentPage() {
               {active && (
                 <Card>
                   <CardContent>
-                    <InlineFileViewer materialId={active.materialId} fileName={active.originalFileName} fileType={active.fileType} heightClass="h-[72vh]" />
+                    <InlineFileViewer
+                      materialId={active.materialId}
+                      fileName={active.originalFileName}
+                      fileType={active.fileType}
+                      heightClass="h-[72vh]"
+                      onReady={(mid) => setReadyIds((s) => (s.has(mid) ? s : new Set(s).add(mid)))}
+                    />
                   </CardContent>
                 </Card>
               )}

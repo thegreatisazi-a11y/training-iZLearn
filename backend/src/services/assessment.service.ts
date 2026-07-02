@@ -631,6 +631,75 @@ export async function getAttempt(id: string) {
   return a;
 }
 
+/**
+ * View a COMPLETED attempt's full question-by-question review — the same breakdown
+ * (score, per-question user answer / correct answer / explanation) shown immediately
+ * after submission, rebuilt from the attempt's question snapshot + stored answers so a
+ * learner can revisit their performance at any time. Ownership is enforced (a learner
+ * may only review their own attempts; managers with assessments:write may review any).
+ */
+export async function reviewAttempt(id: string, userId: string, canManage = false) {
+  const attempt = await prisma.assessmentAttempt.findFirst({ where: { id, isDeleted: false } });
+  if (!attempt) throw AppError.notFound('Attempt not found');
+  if (!canManage && attempt.userId !== userId) throw AppError.forbidden('This attempt does not belong to you.');
+  if (!attempt.completedAt) throw AppError.badRequest('This attempt has not been completed yet.');
+
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } });
+  const questions = (attempt.questionsUsed as unknown as SnapshotQuestion[]) ?? [];
+  const answers = (attempt.answers as Record<string, unknown>) ?? {};
+  // A learner reviewing their OWN past attempt must NOT see the answer key or explanations
+  // — the assessment can be re-attempted, so revealing correct answers here would let them
+  // learn the answers between attempts. Only a manager reviewing SOMEONE ELSE's attempt
+  // (e.g. for coordinator review) sees the full breakdown.
+  const hideAnswerKey = attempt.userId === userId;
+  const allDetails: QuestionResult[] = [];
+  const incorrectDetails: QuestionResult[] = [];
+  let correctCount = 0;
+  for (const q of questions) {
+    const ua = answers[q.id];
+    const isCorrect = gradeQuestion(q, ua);
+    if (isCorrect) correctCount++;
+    const detail: QuestionResult = {
+      questionId: q.id,
+      questionText: q.questionText,
+      isCorrect,
+      userAnswer: humanizeAnswer(q, ua ?? null),
+      // Withheld for a learner's own review (see above); provided for manager review.
+      correctAnswer: hideAnswerKey ? null : humanizeAnswer(q, q.correctAnswer),
+      explanation: hideAnswerKey ? null : cleanText(q.explanation),
+    };
+    allDetails.push(detail);
+    if (!isCorrect) incorrectDetails.push(detail);
+  }
+  const total = questions.length;
+  const readingLogs = await prisma.materialViewLog.findMany({
+    where: { userId: attempt.userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
+    select: { elapsedSeconds: true },
+  });
+  const readingTimeSeconds = readingLogs.reduce((s, l) => s + (l.elapsedSeconds ?? 0), 0);
+
+  return {
+    attemptId: attempt.id,
+    topicTitle: topic?.title ?? null,
+    topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
+    score: attempt.score ?? 0,
+    totalQuestions: total,
+    correctCount,
+    incorrectCount: total - correctCount,
+    passingScorePercent: topic?.passingScorePercent ?? 0,
+    isPassed: !!attempt.isPassed,
+    attemptNumber: attempt.attemptNumber,
+    maxAttempts: topic?.maxAttempts ?? 0,
+    allDetails,
+    incorrectDetails,
+    timeSpentSeconds: Math.max(0, Math.round((attempt.completedAt.getTime() - attempt.startedAt.getTime()) / 1000)),
+    readingTimeSeconds,
+    submissionReason: attempt.submissionReason ?? null,
+    submissionReasonLabel: attempt.submissionReason ? failureReasonLabel(attempt.submissionReason as AssessmentFailureReason) : null,
+    completedAt: attempt.completedAt,
+  };
+}
+
 /** Unblock a blocked assignment — controlled action requiring an e-signature. */
 export async function unblockAssignment(assignmentId: string, req: Request) {
   const assignment = await prisma.trainingAssignment.findFirst({ where: { id: assignmentId, isDeleted: false } });

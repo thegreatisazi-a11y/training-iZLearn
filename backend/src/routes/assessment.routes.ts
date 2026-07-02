@@ -10,6 +10,9 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/mine', c.listMine);
+// Review a completed attempt (own attempt for any user; any attempt for a manager).
+// Ownership/authorization is enforced in the service, so no blanket permission gate.
+router.get('/:id/review', c.review);
 router.get('/', requirePermission('assessments', 'read'), c.list);
 // Taking an assessment is a PERSONAL action on the user's own assigned training —
 // any authenticated user may take training that has been assigned to them, regardless

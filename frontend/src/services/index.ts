@@ -168,6 +168,8 @@ export const svc = {
     listMine: (params?: ListParams) => data(api.get('/assessments/mine', { params })),
     list: (params?: ListParams) => data(api.get('/assessments', { params })),
     get: (id: string) => data(api.get(`/assessments/${id}`)),
+    /** Full question-by-question review of a COMPLETED attempt (same as the post-submit screen). */
+    review: (id: string) => data(api.get(`/assessments/${id}/review`)),
     unblock: (assignmentId: string, body: unknown) => data(api.post(`/assessments/assignments/${assignmentId}/unblock`, body)),
   },
 

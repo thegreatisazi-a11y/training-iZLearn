@@ -45,11 +45,15 @@ export function InlineFileViewer({
   fileName = 'material',
   fileType,
   heightClass = 'h-[80vh]',
+  onReady,
 }: {
   materialId: string;
   fileName?: string;
   fileType?: string;
   heightClass?: string;
+  /** Fired once the file has finished loading and is visible — used by the reading
+   *  gate so the read-time countdown only starts after the file is actually shown. */
+  onReady?: (materialId: string) => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [blob, setBlob] = useState<Blob | null>(null);
@@ -91,7 +95,14 @@ export function InlineFileViewer({
         setUrl(objectUrl);
       })
       .catch((e) => !cancelled && setError(apiError(e)))
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+        // Loading has settled and the viewer now shows the file (or a fallback panel) —
+        // signal readiness so consumers start their read-time timer only from this point,
+        // never counting load time, and never deadlocking if a file can't be previewed.
+        onReady?.(materialId);
+      });
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
