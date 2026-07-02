@@ -512,10 +512,10 @@ export default function JDPage() {
             <Select options={[{ value: '', label: 'None' }, ...functionalRoleOptions]} value={editForm.functionalRoleId} onChange={(e) => setEditForm({ ...editForm, functionalRoleId: e.target.value })} />
           </Field>
         </div>
-        <Field label="Title">
+        <Field label="Title" required>
           <Input value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
         </Field>
-        <Field label="Content">
+        <Field label="Content" required>
           <RichTextEditor value={editForm.content} onChange={(html) => setEditForm({ ...editForm, content: html })} minHeightClass="min-h-[220px]" />
         </Field>
       </Dialog>

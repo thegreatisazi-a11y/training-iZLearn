@@ -203,7 +203,7 @@ export default function MaterialLibraryPage() {
           <CardContent>
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[220px]">
-                <Field label="Upload to topic">
+                <Field label="Upload to topic" required>
                   <Select options={topicOptions} placeholder="Select a topic…" value={uploadTopicId} onChange={(e) => setUploadTopicId(e.target.value)} />
                 </Field>
               </div>

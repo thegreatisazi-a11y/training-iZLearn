@@ -53,22 +53,44 @@ export async function listSchedules(q: PaginationQuery, filter: ScheduleListFilt
     }),
     prisma.trainingSchedule.count({ where }),
   ]);
-  const data = await withTopicAndUserNames(rows, (r) => [r.topicId], (r) => [r.trainerId]);
+  const data = (await withTopicAndUserNames(rows, (r) => [r.topicId], (r) => [r.trainerId])).map((r) => ({
+    ...r,
+    // External trainer name (stored) takes precedence; otherwise resolve the internal trainer's name.
+    trainerName: r.trainerName ?? (r.trainerId ? r.userNames[r.trainerId] ?? null : null),
+  }));
   return { data, total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function getSchedule(id: string) {
   const schedule = await prisma.trainingSchedule.findFirst({ where: { id, isDeleted: false } });
   if (!schedule) throw AppError.notFound('Training schedule not found');
-  const trainees = await prisma.trainingAssignment.findMany({
+  const rawTrainees = await prisma.trainingAssignment.findMany({
     where: { scheduleId: id, isDeleted: false },
   });
-  return { ...schedule, trainees };
+  // Resolve trainee names/codes and the topic title so the UI shows names, not raw ids.
+  const userIds = Array.from(new Set(rawTrainees.map((t) => t.userId)));
+  const [users, topic] = await Promise.all([
+    userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } }) : [],
+    prisma.trainingTopic.findUnique({ where: { id: schedule.topicId }, select: { title: true, topicNumber: true, topicCode: true } }),
+  ]);
+  const uMap = new Map(users.map((u) => [u.id, u]));
+  const trainees = rawTrainees.map((t) => ({
+    ...t,
+    fullName: uMap.get(t.userId)?.fullName ?? null,
+    employeeId: uMap.get(t.userId)?.employeeId ?? null,
+  }));
+  return {
+    ...schedule,
+    topicTitle: topic?.title ?? null,
+    topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
+    trainees,
+  };
 }
 
 export async function createSchedule(input: CreateScheduleInput, createdBy: string) {
-  // CRITICAL (Module 6): the trainer can never be a trainee in the same schedule.
-  if (input.traineeIds.includes(input.trainerId)) {
+  // CRITICAL (Module 6): an INTERNAL trainer can never be a trainee in the same schedule.
+  // (An external trainer has no user id, so this check does not apply to them.)
+  if (input.trainerId && input.traineeIds.includes(input.trainerId)) {
     throw AppError.badRequest('The trainer cannot be a trainee in the same schedule.');
   }
 
@@ -77,7 +99,8 @@ export async function createSchedule(input: CreateScheduleInput, createdBy: stri
       data: {
         topicId: input.topicId,
         scheduledDate: input.scheduledDate,
-        trainerId: input.trainerId,
+        trainerId: input.trainerId ?? null,
+        trainerName: input.trainerName?.trim() || null, // external trainer name (when no user picked)
         trainingType: input.trainingType,
         methodology: input.methodology ?? null,
         venue: input.venue ?? null,
@@ -158,7 +181,8 @@ export async function createOjtRecord(input: OjtRecordInput, createdBy: string) 
       data: {
         topicId: input.topicId,
         userId: input.userId,
-        evaluatorId: input.evaluatorId,
+        evaluatorId: input.evaluatorId ?? null,
+        evaluatorName: input.evaluatorName?.trim() || null, // external evaluator name (when no user picked)
         evaluationDate: input.evaluationDate,
         evaluationScore: input.evaluationScore,
         content: input.content ?? null,
@@ -258,7 +282,9 @@ async function withTopicAndUserNames<T extends Record<string, unknown>>(
       topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
       userNames: names,
       userFullName: (r.userId ? uMap.get(r.userId as string) : null) ?? null,
-      evaluatorName: (r.evaluatorId ? uMap.get(r.evaluatorId as string) : null) ?? null,
+      // External evaluator name (stored) takes precedence; otherwise resolve the internal one.
+      evaluatorName:
+        (r.evaluatorName as string | null | undefined) ?? (r.evaluatorId ? uMap.get(r.evaluatorId as string) ?? null : null),
     };
   });
 }

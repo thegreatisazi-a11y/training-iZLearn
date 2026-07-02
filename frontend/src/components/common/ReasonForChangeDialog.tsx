@@ -60,7 +60,7 @@ export function ReasonForChangeDialog({
         </>
       }
     >
-      <Field label="Reason for change (required)">
+      <Field label="Reason for change" required>
         <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why this change is being made…" />
       </Field>
       {error && <p className="text-sm text-red-600">{error}</p>}

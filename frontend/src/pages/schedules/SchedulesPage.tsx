@@ -15,7 +15,7 @@ import { useAuthStore } from '@/store/authStore';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatDateTime } from '@/lib/format';
 
 interface ScheduleRow {
   id: string;
@@ -24,6 +24,7 @@ interface ScheduleRow {
   topicNumber?: string | null;
   scheduledDate: string;
   trainingType: string;
+  trainerName?: string | null;
   venue?: string | null;
   status: string;
 }
@@ -53,7 +54,10 @@ interface OfflineRow {
   traineeIds?: string[];
 }
 
-const TRAINING_TYPES = ['CLASSROOM', 'E_LEARNING', 'OJT', 'OFFLINE', 'INDUCTION', 'REFRESHER', 'WORKSHOP'].map((v) => ({ value: v, label: v }));
+const TRAINING_TYPES = ['CLASSROOM', 'E_LEARNING', 'OJT', 'OFFLINE', 'INDUCTION', 'REFRESHER', 'WORKSHOP'].map((v) => ({ value: v, label: v.replace(/_/g, ' ') }));
+
+/** Sentinel value used in a person dropdown to enter someone from OUTSIDE the org by name. */
+const OTHER_PERSON = '__other__';
 
 function useLookup(kind: 'topics' | 'users') {
   return useQuery({
@@ -71,10 +75,12 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
   const users = useLookup('users');
   const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
+  const trainerOptions = useMemo<Option[]>(() => [...userOpts, { value: OTHER_PERSON, label: 'Other (external trainer)…' }], [userOpts]);
 
   const [topicId, setTopicId] = useState('');
   const [scheduledDate, setScheduledDate] = useState('');
   const [trainerId, setTrainerId] = useState('');
+  const [trainerOther, setTrainerOther] = useState('');
   const [trainingType, setTrainingType] = useState('CLASSROOM');
   const [methodology, setMethodology] = useState('');
   const [venue, setVenue] = useState('');
@@ -82,10 +88,14 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
   const [traineeIds, setTraineeIds] = useState<string[]>([]);
   const [error, setError] = useState('');
 
+  const isExtTrainer = trainerId === OTHER_PERSON;
+  const trainerValid = isExtTrainer ? !!trainerOther.trim() : !!trainerId;
+
   function reset() {
     setTopicId('');
     setScheduledDate('');
     setTrainerId('');
+    setTrainerOther('');
     setTrainingType('CLASSROOM');
     setMethodology('');
     setVenue('');
@@ -99,7 +109,9 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
       svc.schedules.create({
         topicId,
         scheduledDate,
-        trainerId,
+        // Internal trainer → send the user id; external ("Other") → send a name instead.
+        trainerId: isExtTrainer ? undefined : trainerId,
+        trainerName: isExtTrainer ? trainerOther.trim() : undefined,
         trainingType,
         methodology: methodology || undefined,
         venue: venue || undefined,
@@ -128,21 +140,26 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !scheduledDate || !trainerId}>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !scheduledDate || !trainerValid}>
             {mutation.isPending ? 'Saving…' : 'Create'}
           </Button>
         </>
       }
     >
-      <Field label="Topic">
+      <Field label="Topic" required>
         <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
       </Field>
-      <Field label="Scheduled date & time">
+      <Field label="Scheduled date & time" required>
         <Input type="datetime-local" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
       </Field>
-      <Field label="Trainer">
-        <Select options={userOpts} value={trainerId} onChange={(e) => setTrainerId(e.target.value)} placeholder="Select a trainer…" />
+      <Field label="Trainer" required>
+        <Select options={trainerOptions} value={trainerId} onChange={(e) => setTrainerId(e.target.value)} placeholder="Select a trainer…" />
       </Field>
+      {isExtTrainer && (
+        <Field label="External trainer name" required>
+          <Input value={trainerOther} onChange={(e) => setTrainerOther(e.target.value)} placeholder="Enter the external trainer's name" />
+        </Field>
+      )}
       <Field label="Training type">
         <Select options={TRAINING_TYPES} value={trainingType} onChange={(e) => setTrainingType(e.target.value)} />
       </Field>
@@ -169,20 +186,35 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
   const users = useLookup('users');
   const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
+  const evaluatorOptions = useMemo<Option[]>(() => [...userOpts, { value: OTHER_PERSON, label: 'Other (external evaluator)…' }], [userOpts]);
   const today = new Date().toISOString().slice(0, 10);
 
   const [topicId, setTopicId] = useState('');
   const [userId, setUserId] = useState('');
   const [evaluatorId, setEvaluatorId] = useState('');
+  const [evaluatorOther, setEvaluatorOther] = useState('');
   const [evaluationDate, setEvaluationDate] = useState('');
   const [evaluationScore, setEvaluationScore] = useState('');
   const [content, setContent] = useState('');
   const [remarks, setRemarks] = useState('');
   const [error, setError] = useState('');
 
+  const isExtEvaluator = evaluatorId === OTHER_PERSON;
+  const evaluatorValid = isExtEvaluator ? !!evaluatorOther.trim() : !!evaluatorId;
+
   const mutation = useMutation({
     mutationFn: () =>
-      svc.schedules.createOjt({ topicId, userId, evaluatorId, evaluationDate, evaluationScore: Number(evaluationScore), content: content || undefined, remarks: remarks || undefined }),
+      svc.schedules.createOjt({
+        topicId,
+        userId,
+        // Internal evaluator → user id; external ("Other") → a name instead.
+        evaluatorId: isExtEvaluator ? undefined : evaluatorId,
+        evaluatorName: isExtEvaluator ? evaluatorOther.trim() : undefined,
+        evaluationDate,
+        evaluationScore: Number(evaluationScore),
+        content: content || undefined,
+        remarks: remarks || undefined,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ojt-records'] });
       qc.invalidateQueries({ queryKey: ['schedules'] });
@@ -204,25 +236,30 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !userId || !evaluatorId || !evaluationDate || !evaluationScore}>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !userId || !evaluatorValid || !evaluationDate || !evaluationScore}>
             {mutation.isPending ? 'Saving…' : 'Save'}
           </Button>
         </>
       }
     >
-      <Field label="Topic">
+      <Field label="Topic" required>
         <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
       </Field>
-      <Field label="Trainee">
+      <Field label="Trainee" required>
         <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="Select a trainee…" />
       </Field>
-      <Field label="Evaluator">
-        <Select options={userOpts} value={evaluatorId} onChange={(e) => setEvaluatorId(e.target.value)} placeholder="Select an evaluator…" />
+      <Field label="Evaluator" required>
+        <Select options={evaluatorOptions} value={evaluatorId} onChange={(e) => setEvaluatorId(e.target.value)} placeholder="Select an evaluator…" />
       </Field>
-      <Field label="Evaluation date">
+      {isExtEvaluator && (
+        <Field label="External evaluator name" required>
+          <Input value={evaluatorOther} onChange={(e) => setEvaluatorOther(e.target.value)} placeholder="Enter the external evaluator's name" />
+        </Field>
+      )}
+      <Field label="Evaluation date" required>
         <Input type="date" max={today} value={evaluationDate} onChange={(e) => setEvaluationDate(e.target.value)} />
       </Field>
-      <Field label="Evaluation score (0–100)">
+      <Field label="Evaluation score (0–100)" required>
         <Input type="number" min={0} max={100} value={evaluationScore} onChange={(e) => setEvaluationScore(e.target.value)} />
       </Field>
       <Field label="Content" hint="Optional — detailed information about the training.">
@@ -246,15 +283,25 @@ function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () 
 
   const [topicId, setTopicId] = useState('');
   const [venue, setVenue] = useState('');
-  const [trainerName, setTrainerName] = useState('');
+  // Trainer is picked from the org users, or "Other" to type an external trainer's name.
+  const [trainerSel, setTrainerSel] = useState('');
+  const [trainerOther, setTrainerOther] = useState('');
   const [durationMinutes, setDurationMinutes] = useState('');
   const [trainingDate, setTrainingDate] = useState('');
   const [traineeIds, setTraineeIds] = useState<string[]>([]);
   const [error, setError] = useState('');
 
+  const trainerOptions = useMemo<Option[]>(() => [...userOpts, { value: OTHER_PERSON, label: 'Other (external trainer)…' }], [userOpts]);
+  // Offline records store the trainer as a plain name, so a selected user resolves to their
+  // full name and "Other" uses the typed external name.
+  const resolvedTrainerName =
+    trainerSel === OTHER_PERSON
+      ? trainerOther.trim()
+      : String((users.data ?? []).find((u) => String(u.id) === trainerSel)?.fullName ?? '');
+
   const mutation = useMutation({
     mutationFn: () =>
-      svc.schedules.createOffline({ topicId, venue, trainerName, durationMinutes: Number(durationMinutes), trainingDate, traineeIds }),
+      svc.schedules.createOffline({ topicId, venue, trainerName: resolvedTrainerName, durationMinutes: Number(durationMinutes), trainingDate, traineeIds }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['offline-records'] });
       qc.invalidateQueries({ queryKey: ['schedules'] });
@@ -276,25 +323,30 @@ function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () 
           <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !venue || !trainerName || !durationMinutes || !trainingDate}>
+          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !topicId || !venue || !resolvedTrainerName || !durationMinutes || !trainingDate}>
             {mutation.isPending ? 'Saving…' : 'Save'}
           </Button>
         </>
       }
     >
-      <Field label="Topic">
+      <Field label="Topic" required>
         <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
       </Field>
-      <Field label="Venue">
+      <Field label="Venue" required>
         <Input value={venue} onChange={(e) => setVenue(e.target.value)} />
       </Field>
-      <Field label="Trainer name">
-        <Input value={trainerName} onChange={(e) => setTrainerName(e.target.value)} />
+      <Field label="Trainer" required>
+        <Select options={trainerOptions} value={trainerSel} onChange={(e) => setTrainerSel(e.target.value)} placeholder="Select a trainer…" />
       </Field>
-      <Field label="Duration (minutes)">
+      {trainerSel === OTHER_PERSON && (
+        <Field label="External trainer name" required>
+          <Input value={trainerOther} onChange={(e) => setTrainerOther(e.target.value)} placeholder="Enter the external trainer's name" />
+        </Field>
+      )}
+      <Field label="Duration (minutes)" required>
         <Input type="number" min={1} value={durationMinutes} onChange={(e) => setDurationMinutes(e.target.value)} />
       </Field>
-      <Field label="Training date">
+      <Field label="Training date" required>
         <Input type="date" max={today} value={trainingDate} onChange={(e) => setTrainingDate(e.target.value)} />
       </Field>
       <Field label="Trainees">
@@ -340,10 +392,11 @@ export default function SchedulesPage() {
 
   const columns: Column<ScheduleRow>[] = [
     { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—') },
-    { key: 'scheduledDate', header: 'Scheduled', render: (r) => formatDate(r.scheduledDate) },
-    { key: 'trainingType', header: 'Type' },
+    { key: 'trainer', header: 'Trainer', render: (r) => r.trainerName || '—' },
+    { key: 'scheduledDate', header: 'Scheduled', render: (r) => formatDateTime(r.scheduledDate) },
+    { key: 'trainingType', header: 'Type', render: (r) => (r.trainingType ? r.trainingType.replace(/_/g, ' ') : '—') },
     { key: 'venue', header: 'Venue', render: (r) => r.venue || '—' },
-    { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+    { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status.replace(/_/g, ' ')}</Badge> },
     {
       key: 'actions',
       header: '',

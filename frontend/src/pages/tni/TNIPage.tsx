@@ -422,14 +422,14 @@ export default function TNIPage() {
           </>
         }
       >
-        <Field label="User">
+        <Field label="User" required>
           <Select options={userOptions} placeholder="Select user…" value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} />
         </Field>
         {/* J2: multiple topics — one TNI row is created per selected topic. */}
-        <Field label="Topics">
+        <Field label="Topics" required>
           <MultiSelect options={topicOptions} value={form.topicIds} onChange={(topicIds) => setForm({ ...form, topicIds })} placeholder="Search topics…" />
         </Field>
-        <Field label="Justification">
+        <Field label="Justification" required>
           <Textarea value={form.justification} onChange={(e) => setForm({ ...form, justification: e.target.value })} placeholder="Why is this training required?" />
         </Field>
       </Dialog>
@@ -484,7 +484,7 @@ export default function TNIPage() {
           <div><div className="text-xs text-slate-500">Topic</div><div className="font-medium text-slate-800">{editTni?.topicTitle ?? '—'}</div></div>
           <div><div className="text-xs text-slate-500">Status</div><div><Badge tone={editTni?.status ?? 'default'}>{editTni?.status}</Badge></div></div>
         </div>
-        <Field label="Justification">
+        <Field label="Justification" required>
           <Textarea value={editJustification} onChange={(e) => setEditJustification(e.target.value)} />
         </Field>
       </Dialog>

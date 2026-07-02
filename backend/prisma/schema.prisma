@@ -331,7 +331,8 @@ model TrainingSchedule {
   id            String         @id @default(uuid()) @map("_id")
   topicId       String
   scheduledDate DateTime
-  trainerId     String // Must NOT be in traineeIds
+  trainerId     String? // internal trainer (userId); null when an external trainer is named. Must NOT be in traineeIds
+  trainerName   String? // external trainer name (used when trainerId is null)
   trainingType  TrainingType
   methodology   String?
   venue         String?
@@ -477,7 +478,8 @@ model OjtRecord {
   id              String   @id @default(uuid()) @map("_id")
   topicId         String
   userId          String
-  evaluatorId     String
+  evaluatorId     String? // internal evaluator (userId); null when an external evaluator is named
+  evaluatorName   String? // external evaluator name (used when evaluatorId is null)
   evaluationDate  DateTime
   evaluationScore Float
   content         String? // optional, multi-line details about the on-the-job training

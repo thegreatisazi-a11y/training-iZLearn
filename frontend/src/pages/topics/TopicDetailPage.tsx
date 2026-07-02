@@ -1081,7 +1081,7 @@ export default function TopicDetailPage() {
           </>
         }
       >
-        <Field label="Question text">
+        <Field label="Question text" required>
           <Textarea value={qForm.questionText} onChange={(e) => setQForm({ ...qForm, questionText: e.target.value })} />
         </Field>
         <Field label="Question type">
@@ -1480,7 +1480,7 @@ export default function TopicDetailPage() {
         </div>
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Max Attempts"><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
+          <Field label="Max Attempts" required><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
           <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
           <Field label="Effective Date"><Input type="date" value={editTopicForm.effectiveDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></Field>
         </div>

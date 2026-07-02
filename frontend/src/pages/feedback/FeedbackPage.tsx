@@ -114,10 +114,10 @@ function CreateFormDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </>
       }
     >
-      <Field label="Topic">
+      <Field label="Topic" required>
         <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
       </Field>
-      <Field label="Title">
+      <Field label="Title" required>
         <Input value={title} onChange={(e) => setTitle(e.target.value)} />
       </Field>
 

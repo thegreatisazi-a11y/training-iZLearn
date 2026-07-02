@@ -116,7 +116,7 @@ export default function AttendancePage() {
     { key: 'userFullName', header: 'Trainee', render: (r) => r.userFullName ?? r.userId },
     { key: 'employeeId', header: 'Employee ID', render: (r) => r.employeeId ?? '—' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status === 'PRESENT' ? 'COMPLETED' : 'REJECTED'}>{r.status}</Badge> },
-    { key: 'method', header: 'Method', render: (r) => r.method ?? '—' },
+    { key: 'method', header: 'Method', render: (r) => (r.method ? r.method.replace(/_/g, ' ') : '—') },
     { key: 'markedAt', header: 'Marked At', render: (r) => formatDateTime(r.markedAt) },
   ];
 

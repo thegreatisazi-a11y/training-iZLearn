@@ -114,7 +114,7 @@ function TemplateForm({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Template Name">
+        <Field label="Template Name" required>
           <Input value={form.templateName} onChange={(e) => set('templateName', e.target.value)} />
         </Field>
         <Field label="Certificate Type">

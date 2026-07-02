@@ -225,10 +225,10 @@ export default function AnnouncementsPage() {
           </>
         }
       >
-        <Field label="Title">
+        <Field label="Title" required>
           <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
         </Field>
-        <Field label="Content (HTML)">
+        <Field label="Content (HTML)" required>
           <Textarea
             className="min-h-[160px] font-mono text-xs"
             value={form.content}

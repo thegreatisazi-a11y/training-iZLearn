@@ -360,7 +360,7 @@ export default function TopicsPage() {
         }
       >
         <p className="mb-3 text-xs text-slate-500">The topic code is generated automatically and locked once created. Drafts are hidden from trainees until published.</p>
-        <Field label="Title">
+        <Field label="Title" required>
           <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         </Field>
         <Field label="SOP Number (optional)">
@@ -370,7 +370,7 @@ export default function TopicsPage() {
           <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Training Type(s)">
+          <Field label="Training Type(s)" required>
             <MultiSelect options={TRAINING_TYPE_OPTIONS} value={form.trainingTypes} onChange={(trainingTypes) => setForm({ ...form, trainingTypes })} placeholder="Select training type(s)…" heightClass="h-32" />
           </Field>
           <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
@@ -378,10 +378,10 @@ export default function TopicsPage() {
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Passing Score %">
+          <Field label="Passing Score %" required>
             <Input type="number" min={0} max={100} value={form.passingScorePercent} onChange={(e) => setForm({ ...form, passingScorePercent: e.target.value })} />
           </Field>
-          <Field label="Max Attempts">
+          <Field label="Max Attempts" required>
             <Input type="number" min={1} value={form.maxAttempts} onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })} />
           </Field>
           <Field label="Question Limit">

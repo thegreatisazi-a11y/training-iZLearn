@@ -48,13 +48,13 @@ export default function ChangePasswordPage() {
             Your password must be changed before continuing. It must contain upper- and lower-case letters, a digit and a special character.
           </p>
           <form onSubmit={submit}>
-            <Field label="Current Password">
+            <Field label="Current Password" required>
               <Input type="password" value={currentPassword} onChange={(e) => setCurrent(e.target.value)} autoComplete="off" />
             </Field>
-            <Field label="New Password">
+            <Field label="New Password" required>
               <Input type="password" value={newPassword} onChange={(e) => setNew(e.target.value)} autoComplete="off" />
             </Field>
-            <Field label="Confirm New Password">
+            <Field label="Confirm New Password" required>
               <Input type="password" value={confirmPassword} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" />
             </Field>
             {error && <p className="mb-2 text-sm text-red-600">{error}</p>}

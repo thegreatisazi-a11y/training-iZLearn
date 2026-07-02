@@ -4,7 +4,18 @@ import { recordEvent } from './auditTrail.service';
 import type { MarkAttendanceInput } from '@izlearn/shared';
 
 export async function listAttendance(scheduleId: string) {
-  return prisma.attendance.findMany({ where: { scheduleId, isDeleted: false }, orderBy: { markedAt: 'desc' } });
+  const rows = await prisma.attendance.findMany({ where: { scheduleId, isDeleted: false }, orderBy: { markedAt: 'desc' } });
+  // Resolve userId → name/employee code so the UI shows names, not raw ids.
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } })
+    : [];
+  const uMap = new Map(users.map((u) => [u.id, u]));
+  return rows.map((r) => ({
+    ...r,
+    userFullName: uMap.get(r.userId)?.fullName ?? null,
+    employeeId: uMap.get(r.userId)?.employeeId ?? null,
+  }));
 }
 
 async function upsertAttendance(

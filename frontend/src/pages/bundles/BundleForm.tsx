@@ -73,7 +73,7 @@ export function BundleForm({
 
   return (
     <>
-      <Field label="Name">
+      <Field label="Name" required>
         <Input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} />
       </Field>
       <Field label="Description">

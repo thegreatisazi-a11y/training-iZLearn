@@ -272,10 +272,10 @@ export default function ProfilePage() {
           <Card>
             <CardContent>
               <div className="grid gap-4 md:grid-cols-3">
-                <Field label="Document type">
+                <Field label="Document type" required>
                   <Input value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="e.g. CV, Degree" />
                 </Field>
-                <Field label="Title">
+                <Field label="Title" required>
                   <Input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} />
                 </Field>
                 <div className="flex items-end">
