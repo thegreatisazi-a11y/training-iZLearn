@@ -50,17 +50,12 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
   await storage.putFile(key, file.path, file.mimetype);
 
   const staged = isPublished(topic.status);
-  if (!staged) {
-    // Draft topic: a new upload becomes the current version; demote prior current ones.
-    await prisma.trainingMaterial.updateMany({
-      where: { topicId, isDeleted: false, isCurrentVersion: true },
-      data: { isCurrentVersion: false },
-    });
-    // BUG-02: do NOT bump the course version while still drafting — initial authoring
-    // (uploading/replacing several materials) would otherwise inflate the course to
-    // v2, v3, v4… before it is even published. A draft stays at its current version;
-    // the version only increments when published changes go live (publishDraftChanges).
-  }
+  // A topic legitimately holds MANY materials at once (e.g. a PDF + a video). Uploading
+  // a new file ADDS a material — it must NOT demote/supersede the topic's existing
+  // current files (that is what Replace/Update is for). So on a draft the new file simply
+  // becomes another current material; nothing else is touched.
+  // BUG-02: authoring never bumps the course version — that only advances when published
+  // changes go live (publishDraftChanges).
 
   // Use the highest existing version (not the count): materials are copied across
   // topic revisions carrying their version numbers, so a raw count can fall BELOW an
@@ -243,8 +238,9 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
  * 4.2: Attach an existing Material Library file to a topic. The source file is
  * copied on disk (independent lineage) and recorded as a new TrainingMaterial.
  *  - PUBLISHED topic: the attached file is STAGED (inert until revise).
- *  - DRAFT topic: it becomes the current version immediately; prior current files
- *    are superseded and a version-history snapshot is written.
+ *  - DRAFT topic: it is ADDED as another current file. Attaching adds a material —
+ *    it does not supersede the topic's existing current files (use Replace for that),
+ *    so multiple library files can be attached to a draft and all stay current.
  */
 export async function attachLibraryMaterial(sourceMaterialId: string, topicId: string, createdBy: string) {
   const source = await prisma.trainingMaterial.findFirst({ where: { id: sourceMaterialId, isDeleted: false } });
@@ -258,15 +254,9 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   await storage.copyObject(source.filePath, destKey);
 
   const staged = isPublished(topic.status);
-  if (!staged) {
-    // Draft topic: the attached file becomes current; demote prior current ones.
-    await prisma.trainingMaterial.updateMany({
-      where: { topicId, isDeleted: false, isCurrentVersion: true },
-      data: { isCurrentVersion: false, isObsolete: true },
-    });
-    // BUG-02: attaching a library file to a draft does NOT bump the course version
-    // (authoring shouldn't inflate versions); publishing changes bumps it instead.
-  }
+  // Attaching ADDS a material (see above): on a draft the file simply becomes another
+  // current material — prior current files are left untouched.
+  // BUG-02: authoring never bumps the course version; publishing changes bumps it instead.
 
   // Use the highest existing version (not the count): materials are copied across
   // topic revisions carrying their version numbers, so a raw count can fall BELOW an
@@ -294,16 +284,9 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
     newValue: { topicId, copiedFromMaterialId: source.id, originalFileName: source.originalFileName, staged },
   });
 
-  if (!staged) {
-    await snapshotVersion({
-      topicId,
-      version: topic.currentVersion,
-      changedBy: createdBy,
-      reason: auditContext.getStore()?.reasonForChange ?? null,
-      note: `Attached "${source.originalFileName}" from the Material Library`,
-    });
-  }
-
+  // Attaching to a draft is authoring (adding a file), not a controlled supersession —
+  // no version-history snapshot is written (mirrors a plain upload). A published topic's
+  // attach is staged and captured when the changes are published.
   return material;
 }
 

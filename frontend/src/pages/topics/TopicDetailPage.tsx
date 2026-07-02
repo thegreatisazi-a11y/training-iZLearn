@@ -223,6 +223,7 @@ export default function TopicDetailPage() {
   const [replaceChoice, setReplaceChoice] = useState<Material | null>(null);
   const [replaceLibraryFor, setReplaceLibraryFor] = useState<Material | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([]);
   const [statusChange, setStatusChange] = useState<'PUBLISHED' | 'ARCHIVED' | 'DRAFT' | null>(null);
   const [publishDraftOpen, setPublishDraftOpen] = useState(false);
   const [bundleDialogOpen, setBundleDialogOpen] = useState(false);
@@ -280,10 +281,17 @@ export default function TopicDetailPage() {
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
 
+  // Upload one or many files at once. Each becomes its own current material — a new
+  // upload no longer supersedes the topic's existing files.
   const uploadMut = useMutation({
-    mutationFn: (file: File) => svc.materials.upload(file, id),
-    onSuccess: () => {
-      toast.success('Material uploaded');
+    mutationFn: (files: File[]) => svc.materials.bulkUpload(files, id),
+    onSuccess: (r: { uploaded: number; failed: number; errors?: { fileName: string; error: string }[] }) => {
+      if (r.failed > 0) {
+        const first = r.errors?.[0];
+        toast.error(`${r.uploaded} uploaded, ${r.failed} failed${first ? ` — ${first.fileName}: ${first.error}` : ''}`);
+      } else {
+        toast.success(r.uploaded > 1 ? `${r.uploaded} materials uploaded` : 'Material uploaded');
+      }
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       // A material change can bump the course version — refresh the topic header.
       qc.invalidateQueries({ queryKey: ['topic', id] });
@@ -334,13 +342,19 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // Attach one or more library files at once. Each is added as its own current material
+  // (attaching does not supersede existing files), so several can be picked together.
   const attachMut = useMutation({
-    mutationFn: (materialId: string) => svc.materials.attachFromLibrary(materialId, id),
-    onSuccess: () => {
-      toast.success('Library material attached');
+    mutationFn: async (materialIds: string[]) => {
+      // Sequential so the per-material version numbering stays deterministic.
+      for (const mid of materialIds) await svc.materials.attachFromLibrary(mid, id);
+    },
+    onSuccess: (_r, materialIds) => {
+      toast.success(materialIds.length > 1 ? `${materialIds.length} library materials attached` : 'Library material attached');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
+      setSelectedLibraryIds([]);
       setLibraryOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
@@ -808,8 +822,13 @@ export default function TopicDetailPage() {
         <div className="mt-4 space-y-6">
           {canMaterialWrite && (
             <div className="flex flex-wrap items-center gap-3">
-              <FileUpload onSelect={(f) => uploadMut.mutate(f)} label={uploadMut.isPending ? 'Uploading…' : 'Upload material'} />
-              <Button variant="outline" onClick={() => setLibraryOpen(true)}>
+              <FileUpload
+                multiple
+                onSelect={(f) => uploadMut.mutate([f])}
+                onSelectMany={(files) => uploadMut.mutate(files)}
+                label={uploadMut.isPending ? 'Uploading…' : 'Upload material(s)'}
+              />
+              <Button variant="outline" onClick={() => { setSelectedLibraryIds([]); setLibraryOpen(true); }}>
                 <Library className="h-4 w-4" /> Choose from Material Library
               </Button>
             </div>
@@ -1263,25 +1282,42 @@ export default function TopicDetailPage() {
         requireReason
       />
 
-      {/* 4.2: choose from Material Library */}
+      {/* 4.2: choose one or more files from the Material Library and attach them together */}
       <Dialog
         open={libraryOpen}
-        onClose={() => setLibraryOpen(false)}
+        onClose={() => { setLibraryOpen(false); setSelectedLibraryIds([]); }}
         title="Choose from Material Library"
-        footer={<Button variant="outline" onClick={() => setLibraryOpen(false)}>Close</Button>}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => { setLibraryOpen(false); setSelectedLibraryIds([]); }}>Cancel</Button>
+            <Button
+              disabled={selectedLibraryIds.length === 0 || attachMut.isPending}
+              onClick={() => attachMut.mutate(selectedLibraryIds)}
+            >
+              {attachMut.isPending ? 'Attaching…' : `Attach selected${selectedLibraryIds.length ? ` (${selectedLibraryIds.length})` : ''}`}
+            </Button>
+          </>
+        }
       >
-        <p className="mb-3 text-xs text-slate-500">{isPublished ? 'Select a file to attach as a pending change — it goes live when you revise the topic.' : 'Select a file to attach to this topic as the current version.'}</p>
+        <p className="mb-3 text-xs text-slate-500">{isPublished ? 'Select one or more files to attach as pending changes — they go live when you revise the topic.' : 'Select one or more files to attach to this topic. Each is added as a current material.'}</p>
         <div className="max-h-80 space-y-2 overflow-y-auto">
-          {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id).map((m) => (
-            <div key={m.id} className="flex items-center justify-between rounded border border-slate-200 px-3 py-2">
-              <div className="text-sm text-slate-700">
-                {m.originalFileName} <span className="uppercase text-slate-400">· {m.fileType}</span>
-              </div>
-              <Button size="sm" variant="outline" disabled={attachMut.isPending} onClick={() => attachMut.mutate(m.id)}>
-                Attach
-              </Button>
-            </div>
-          ))}
+          {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id).map((m) => {
+            const checked = selectedLibraryIds.includes(m.id);
+            return (
+              <label key={m.id} className="flex cursor-pointer items-center gap-3 rounded border border-slate-200 px-3 py-2 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) =>
+                    setSelectedLibraryIds((ids) => (e.target.checked ? [...ids, m.id] : ids.filter((x) => x !== m.id)))
+                  }
+                />
+                <span className="text-sm text-slate-700">
+                  {m.originalFileName} <span className="uppercase text-slate-400">· {m.fileType}</span>
+                </span>
+              </label>
+            );
+          })}
           {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id).length === 0 && (
             <p className="text-sm text-slate-400">No library materials available.</p>
           )}

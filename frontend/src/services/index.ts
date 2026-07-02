@@ -81,6 +81,17 @@ export const svc = {
       fd.append('topicId', topicId);
       return api.post('/materials', fd).then((r) => r.data.data);
     },
+    /**
+     * Upload several files to a topic in one request. The server adds each as its own
+     * current material (no file supersedes another) and returns an
+     * { uploaded, failed, errors[] } summary; partial success is HTTP 200.
+     */
+    bulkUpload: (files: File[], topicId: string) => {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      fd.append('topicId', topicId);
+      return api.post('/materials/bulk', fd).then((r) => r.data.data);
+    },
     replace: (id: string, file: File, reasonForChange?: string) => {
       const fd = new FormData();
       fd.append('file', file);
