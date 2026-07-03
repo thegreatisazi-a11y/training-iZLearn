@@ -10,6 +10,8 @@ export interface AuthUser {
   fullName: string;
   employeeId: string;
   email?: string | null;
+  locationId?: string;
+  departmentId?: string;
   sessionId: string;
   roleIds: string[];
   roleNames: string[];

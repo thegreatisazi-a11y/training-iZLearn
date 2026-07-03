@@ -313,12 +313,30 @@ export async function decideRequest(
 
 // ---- Users ------------------------------------------------------------------
 
-export async function listUsers(q: PaginationQuery, locationId?: string) {
+/**
+ * Scoping for the Users list. Full admins (userManagement:approve) see everyone;
+ * everyone else sees only their OWN department, excluding themselves.
+ */
+export interface UserListScope {
+  all?: boolean;
+  departmentId?: string;
+  excludeUserId?: string;
+}
+
+function userScopeWhere(scope: UserListScope): Prisma.UserWhereInput {
+  if (scope.all) return {};
+  return {
+    ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
+    ...(scope.excludeUserId ? { id: { not: scope.excludeUserId } } : {}),
+  };
+}
+
+export async function listUsers(q: PaginationQuery, scope: UserListScope = {}) {
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
-    // UR-85: restrict to requester's location unless cross-location access granted
-    ...(locationId ? { locationId } : {}),
+    // Department-scoped (self excluded) unless the caller has org-wide access.
+    ...userScopeWhere(scope),
     ...(q.search
       ? {
           OR: [
@@ -347,11 +365,11 @@ export async function listUsers(q: PaginationQuery, locationId?: string) {
  * with department/location/role names — for the users-list export. `locationId`
  * mirrors the same location scoping applied to `listUsers`.
  */
-export async function listUsersForExport(q: PaginationQuery, locationId?: string) {
+export async function listUsersForExport(q: PaginationQuery, scope: UserListScope = {}) {
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
-    ...(locationId ? { locationId } : {}),
+    ...userScopeWhere(scope),
     ...(q.search
       ? {
           OR: [
@@ -478,6 +496,14 @@ export async function deactivateUser(id: string, req: Request) {
 export async function resetPassword(id: string, req: Request) {
   const user = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
+  // #5: an admin (userManagement write/reset_password) may reset anyone; a supervisor may
+  // reset ONLY their own DIRECT reports — never someone outside their direct team.
+  const um = (req.user!.permissions as unknown as Record<string, Record<string, boolean>>)['userManagement'] ?? {};
+  const isAdminReset = um.write === true || um.reset_password === true;
+  const isDirectSupervisor = user.supervisorId === req.user!.id;
+  if (!isAdminReset && !isDirectSupervisor) {
+    throw AppError.forbidden('You can only reset the password of your direct team members.');
+  }
   await signFromRequest(req, 'User', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
 
@@ -643,15 +669,15 @@ export async function getUserLifecycle(userId: string) {
 // ---- Team management (supervisor visibility) --------------------------------
 
 /**
- * Team overview for a supervisor: every user reporting to `supervisorId` (or ALL
- * users when `seeAll`), each with a training summary + JD/CV/TNI/certificate
- * status. Strictly scoped server-side — a supervisor only ever sees their own
- * reports, so this is safe for any authenticated caller.
+ * Team overview for a supervisor: ONLY the user's IMMEDIATE direct reports
+ * (supervisorId === the caller). Indirect subordinates (reports of reports) are
+ * intentionally excluded. Each row carries a training summary + JD/CV/TNI/certificate
+ * status. Strictly scoped server-side, so it is safe for any authenticated caller.
  */
-export async function listMyTeam(supervisorId: string, seeAll: boolean, q: PaginationQuery) {
+export async function listMyTeam(supervisorId: string, q: PaginationQuery) {
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
-    ...(seeAll ? {} : { supervisorId }),
+    supervisorId, // direct reportees only — never indirect subordinates
     ...(q.includeInactive ? {} : { isActive: true }),
     ...(q.search
       ? { OR: [{ fullName: { contains: q.search, mode: 'insensitive' } }, { employeeId: { contains: q.search, mode: 'insensitive' } }] }

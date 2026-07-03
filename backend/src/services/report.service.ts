@@ -708,7 +708,9 @@ export async function exportReport(
     return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows), rowCount: data.rows.length };
   }
   if (fmt === 'xls' || fmt === 'xlsx') {
-    const buf = await exportToExcel(data.columns, data.rows, data.title.slice(0, 28));
+    // Tab name is capped at 31 chars by the .xlsx format (sanitised); the FULL title is
+    // preserved as a title row inside the sheet.
+    const buf = await exportToExcel(data.columns, data.rows, data.title, data.title);
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `${type}.xlsx`,

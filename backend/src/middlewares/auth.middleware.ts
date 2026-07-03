@@ -29,6 +29,7 @@ export async function buildAuthUser(userId: string, sessionId: string): Promise<
     employeeId: user.employeeId,
     email: user.email,
     locationId: user.locationId,
+    departmentId: user.departmentId,
     sessionId,
     roleIds,
     roleNames: roles.map((r) => r.roleName),

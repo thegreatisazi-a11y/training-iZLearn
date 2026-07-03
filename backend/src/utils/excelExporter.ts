@@ -6,21 +6,52 @@ export interface ExcelColumn {
   width?: number;
 }
 
-/** Build an .xlsx Buffer from columns + rows (used by every report export). */
+/**
+ * Excel sheet/tab names are limited by the .xlsx format to 31 characters and may not
+ * contain \ / ? * [ ] : — sanitise and cap so any report title is a valid tab name.
+ */
+export function toSheetName(name: string): string {
+  const cleaned = (name || 'Report').replace(/[\\/?*[\]:]/g, ' ').trim();
+  return cleaned.slice(0, 31) || 'Report';
+}
+
+/**
+ * Build an .xlsx Buffer from columns + rows (used by every report export). When
+ * `titleRow` is supplied, the FULL title is written as a merged title row at the top of
+ * the sheet (no length limit — unlike the 31-char tab name), so a long report/course
+ * title is preserved in the exported content.
+ */
 export async function exportToExcel(
   columns: ExcelColumn[],
   rows: Array<Record<string, unknown>>,
   sheetName = 'Report',
+  titleRow?: string,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'izLearn';
   wb.created = new Date();
-  const ws = wb.addWorksheet(sheetName);
-  ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width ?? 22 }));
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(1).alignment = { vertical: 'middle' };
-  rows.forEach((r) => ws.addRow(r));
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: columns.length } };
+  const ws = wb.addWorksheet(toSheetName(sheetName));
+  // Column widths (no auto-header — the header row is written explicitly below so it can
+  // sit under an optional title row).
+  columns.forEach((c, i) => {
+    ws.getColumn(i + 1).width = c.width ?? 22;
+  });
+
+  if (titleRow && titleRow.trim()) {
+    const tr = ws.addRow([titleRow]);
+    if (columns.length > 1) ws.mergeCells(1, 1, 1, columns.length);
+    tr.font = { bold: true, size: 14 };
+    tr.alignment = { vertical: 'middle', wrapText: true };
+  }
+
+  const header = ws.addRow(columns.map((c) => c.header));
+  header.font = { bold: true };
+  header.alignment = { vertical: 'middle' };
+  const headerRowNumber = header.number;
+
+  rows.forEach((r) => ws.addRow(columns.map((c) => (r[c.key] ?? '') as ExcelJS.CellValue)));
+  ws.autoFilter = { from: { row: headerRowNumber, column: 1 }, to: { row: headerRowNumber, column: columns.length } };
+
   const buffer = await wb.xlsx.writeBuffer();
   return Buffer.from(buffer);
 }

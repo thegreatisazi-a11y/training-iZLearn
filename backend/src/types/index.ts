@@ -8,6 +8,7 @@ export interface AuthUser {
   employeeId: string;
   email?: string | null;
   locationId: string; // UR-85: used for location-scoped data access
+  departmentId: string; // used for department-scoped data access (Users list)
   sessionId: string;
   roleIds: string[];
   roleNames: string[];

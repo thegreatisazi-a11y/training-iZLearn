@@ -6,17 +6,18 @@ import { exportToExcel } from '../utils/excelExporter';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/user.service';
 
-/** UR-85: full-location visibility requires userManagement:approve; otherwise scope to own location. */
-function locationScope(req: Request): string | undefined {
+/**
+ * Users-list scope: full admins (userManagement:approve) see everyone org-wide; every
+ * other user sees only their OWN department, excluding themselves.
+ */
+function userScope(req: Request): svc.UserListScope {
   const canViewAll = req.user!.permissions['userManagement']?.approve === true;
-  return canViewAll ? undefined : req.user!.locationId;
+  return canViewAll ? { all: true } : { departmentId: req.user!.departmentId, excludeUserId: req.user!.id };
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  // UR-85: users with userManagement:approve can view all locations;
-  // those with only userManagement:read see only their own location.
-  const r = await svc.listUsers(q, locationScope(req));
+  const r = await svc.listUsers(q, userScope(req));
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 
@@ -35,7 +36,7 @@ const EXPORT_COLUMNS = [
 export const exportUsers = asyncHandler(async (req: Request, res: Response) => {
   const format = String(req.query.format || 'xlsx').toLowerCase();
   const q = paginationQuery.parse(req.query);
-  const users = await svc.listUsersForExport(q, locationScope(req));
+  const users = await svc.listUsersForExport(q, userScope(req));
   const rows = users.map((u) => ({
     employeeId: u.employeeId,
     fullName: u.fullName,
@@ -106,12 +107,11 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
 });
 
-// Team overview: a supervisor sees ONLY their own direct reports. Only SUPER_ADMIN
-// gets the org-wide view (other admins manage users via the Users page, not "My Team").
+// Team overview: every user sees ONLY their own IMMEDIATE direct reports (no indirect
+// subordinates, and no org-wide view — admins manage everyone via the Users page).
 export const team = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  const seeAll = req.user!.roleNames.includes('SUPER_ADMIN');
-  const r = await svc.listMyTeam(req.user!.id, seeAll, q);
+  const r = await svc.listMyTeam(req.user!.id, q);
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 

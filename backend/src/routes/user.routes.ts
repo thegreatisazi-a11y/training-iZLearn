@@ -79,9 +79,11 @@ router.post(
   requireReasonForChange,
   c.deactivate,
 );
+// Reset password — authorization is enforced in the service: an admin
+// (userManagement write/reset_password) may reset anyone; a supervisor may reset only
+// their own DIRECT reports. So no blanket permission guard here (only auth + reason).
 router.post(
   '/:id/reset-password',
-  requirePermission('userManagement', 'write'),
   requireReasonForChange,
   c.resetPassword,
 );
