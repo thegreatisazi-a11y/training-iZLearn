@@ -669,15 +669,17 @@ export async function getUserLifecycle(userId: string) {
 // ---- Team management (supervisor visibility) --------------------------------
 
 /**
- * Team overview for a supervisor: ONLY the user's IMMEDIATE direct reports
- * (supervisorId === the caller). Indirect subordinates (reports of reports) are
- * intentionally excluded. Each row carries a training summary + JD/CV/TNI/certificate
- * status. Strictly scoped server-side, so it is safe for any authenticated caller.
+ * Team overview: for a regular supervisor, ONLY their IMMEDIATE direct reports
+ * (supervisorId === the caller) — indirect subordinates (reports of reports) are
+ * intentionally excluded. A SUPER_ADMIN (`seeAll`) sees the whole organisation here.
+ * Each row carries a training summary + JD/CV/TNI/certificate status. Strictly scoped
+ * server-side, so it is safe for any authenticated caller.
  */
-export async function listMyTeam(supervisorId: string, q: PaginationQuery) {
+export async function listMyTeam(supervisorId: string, seeAll: boolean, q: PaginationQuery) {
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
-    supervisorId, // direct reportees only — never indirect subordinates
+    // Admins (seeAll) see everyone; everyone else sees only their direct reportees.
+    ...(seeAll ? {} : { supervisorId }),
     ...(q.includeInactive ? {} : { isActive: true }),
     ...(q.search
       ? { OR: [{ fullName: { contains: q.search, mode: 'insensitive' } }, { employeeId: { contains: q.search, mode: 'insensitive' } }] }
