@@ -24,7 +24,7 @@ export const NAV: NavItem[] = [
   // so this top-level item is hidden. Kept (commented) so it can be restored if needed.
   // { to: '/team-cvs', label: 'Team CVs', icon: Users, module: 'team', action: 'read' },
   { to: '/users', label: 'Users', icon: Users, module: 'userManagement', action: 'read' },
-  { to: '/users/requests', label: 'User Requests', icon: UserPlus, module: 'userManagement', action: 'read' },
+  { to: '/users/requests', label: 'User Requests', icon: UserPlus, module: 'userRequests', action: 'view' },
   { to: '/roles', label: 'Roles & Access Control', icon: Shield, module: 'roleManagement', action: 'read' },
   { to: '/masters', label: 'Master Setup', icon: MapPin, module: 'masterSetup', action: 'read' },
   { to: '/topics', label: 'Courses', icon: BookOpen, module: 'courseManagement', action: 'read' },
@@ -34,7 +34,7 @@ export const NAV: NavItem[] = [
   { to: '/schedules', label: 'Scheduling', icon: CalendarDays, module: 'scheduling', action: 'read' },
   { to: '/assessments', label: 'Assessments', icon: CheckSquare, module: 'assessments', action: 'read' },
   { to: '/certificates', label: 'Certificates', icon: Award, module: 'certificates', action: 'read' },
-  { to: '/admin/certificate-templates', label: 'Certificate Templates', icon: Stamp, module: 'certificates', action: 'write' },
+  { to: '/admin/certificate-templates', label: 'Certificate Templates', icon: Stamp, module: 'certificateTemplates', action: 'view' },
   { to: '/feedback', label: 'Feedback', icon: MessageSquare, module: 'feedback', action: 'read' },
   { to: '/announcements', label: 'Announcements', icon: Megaphone, module: 'announcements', action: 'read' },
   { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports', action: 'read' },

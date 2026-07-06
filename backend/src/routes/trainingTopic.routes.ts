@@ -20,11 +20,15 @@ import {
 const router = Router();
 router.use(authenticate);
 
-// Granular verbs (fall back to legacy read/write via hasPermission, so existing
-// roles keep working). /export must precede /:id so it is not captured as an id.
-router.get('/', requirePermission('courseManagement', 'view'), c.list);
+// Browsing published courses is a personal action a trainee needs (to see and start
+// their assigned training and populate the "Start Assessment" list), so the catalogue
+// list + single-topic read are open to any authenticated user. The controller scopes the
+// result: managers (courseManagement:write) see drafts/all statuses; everyone else sees
+// only PUBLISHED, current content. Export + version history stay manager-only.
+// (/export and /reading-style paths precede /:id so they aren't captured as an id.)
+router.get('/', c.list);
 router.get('/export', requirePermission('courseManagement', 'export'), c.exportCsv);
-router.get('/:id', requirePermission('courseManagement', 'view'), c.get);
+router.get('/:id', c.get);
 router.get('/:id/history', requirePermission('courseManagement', 'view'), c.history);
 router.post('/', requirePermission('courseManagement', 'create'), validate(createTopicSchema), c.create);
 // Publish/archive: 'edit' covers publish; archiving is additionally gated on the

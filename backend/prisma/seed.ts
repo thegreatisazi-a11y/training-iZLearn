@@ -76,6 +76,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
     permissions: buildMatrix({
       dashboard: ['view'],
       userManagement: ['view', 'create', 'edit', 'approve', 'assign', 'reset_password', 'print', 'export'],
+      userRequests: ['view', 'approve'],
       team: 'all',
       roleManagement: ['view'],
       masterSetup: ['view'],
@@ -214,6 +215,37 @@ async function main() {
     roleIdByName.set(def.roleName, role.id);
   }
   console.log(`   ✓ ${ROLE_DEFINITIONS.length} roles`);
+
+  // 2a. Back-fill split permissions so no CUSTOM role loses access when a module is split.
+  // "User Requests" was split from Users; "Certificate Templates" from Certificates. For
+  // any role missing the new module, mirror the parent module's flags. Idempotent — only
+  // fills a new module when it is entirely absent (never overrides an admin's choice).
+  {
+    const roles = await prisma.role.findMany();
+    let migrated = 0;
+    for (const role of roles) {
+      const p = (role.permissions ?? {}) as Record<string, Record<string, boolean>>;
+      let changed = false;
+      if (!p.userRequests && p.userManagement) {
+        const ur = { view: !!(p.userManagement.view || p.userManagement.read), approve: !!p.userManagement.approve };
+        p.userRequests = { ...ur, ...deriveLegacyFlags(ur) };
+        changed = true;
+      }
+      // The old "Certificate Templates" menu required certificates:write, so only roles
+      // that could MANAGE templates should get the new module (view-only cert roles never
+      // saw it). Preserves prior access exactly without over-granting.
+      if (!p.certificateTemplates && p.certificates && (p.certificates.edit || p.certificates.write)) {
+        const ct = { view: true, create: true, edit: true };
+        p.certificateTemplates = { ...ct, ...deriveLegacyFlags(ct) };
+        changed = true;
+      }
+      if (changed) {
+        await prisma.role.update({ where: { id: role.id }, data: { permissions: p as Prisma.InputJsonValue } });
+        migrated += 1;
+      }
+    }
+    if (migrated) console.log(`   ✓ back-filled split permissions for ${migrated} role(s)`);
+  }
 
   // 2b. Functional Roles (D-JD1) — stored in DesignationMaster ----------------
   for (const name of FUNCTIONAL_ROLES) {

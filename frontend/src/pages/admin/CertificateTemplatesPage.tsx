@@ -239,7 +239,8 @@ function TemplateForm({
 
 export default function CertificateTemplatesPage() {
   const qc = useQueryClient();
-  const canWrite = useAuthStore((s) => s.hasPermission)('certificates', 'write');
+  // Certificate Templates is its own permission module now (split from Certificates).
+  const canWrite = useAuthStore((s) => s.hasPermission)('certificateTemplates', 'edit');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CertificateTemplateInput>({ ...EMPTY_FORM });

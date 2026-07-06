@@ -14,18 +14,26 @@ import { uploadFile } from '../middlewares/upload.middleware';
 const router = Router();
 router.use(authenticate);
 
+// Material-library / management read (managers only — controls the menu + library page).
 router.get('/', requirePermission('materialManagement', 'read'), c.list);
-// Reading-gate: a user's per-material reading status for a topic, and start/complete.
-router.get('/reading-status', requirePermission('materialManagement', 'read'), c.readingStatus);
+
+// --- Personal training-reading endpoints (ANY authenticated user) ---
+// Reading/viewing material for one's OWN assigned training is a personal action (like
+// taking the assessment), NOT a material-management action. A basic trainee role does
+// not have materialManagement:read, so gating these on it wrongly hid all reading
+// material during training. Ownership + current-version-only (UR-16) + the no-download
+// lock are still enforced in the controllers.
+// NOTE: '/reading-status' must precede '/:id' so it isn't captured as an id param.
+router.get('/reading-status', c.readingStatus);
 router.get('/:id', requirePermission('materialManagement', 'read'), c.get);
-router.get('/:id/download', requirePermission('materialManagement', 'read'), c.download);
+router.get('/:id/download', c.download);
 // Locked, view-only PDF for the in-app viewer (native PDFs pass through; Office docs are
 // converted to PDF server-side and cached).
-router.get('/:id/view-pdf', requirePermission('materialManagement', 'read'), c.viewPdf);
-router.post('/:id/view/start', requirePermission('materialManagement', 'read'), c.startView);
-router.post('/:id/view/complete', requirePermission('materialManagement', 'read'), c.completeView);
+router.get('/:id/view-pdf', c.viewPdf);
+router.post('/:id/view/start', c.startView);
+router.post('/:id/view/complete', c.completeView);
 // A4: auto-save reading progress so a session can resume where the user left off.
-router.post('/:id/view/progress', requirePermission('materialManagement', 'read'), c.saveViewProgress);
+router.post('/:id/view/progress', c.saveViewProgress);
 // Set per-material required reading time (course managers / material managers).
 router.patch('/:id', requirePermission('materialManagement', 'write'), c.setViewTime);
 // topicId is supplied in the multipart body alongside the file.

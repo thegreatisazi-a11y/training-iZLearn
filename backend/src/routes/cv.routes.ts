@@ -14,8 +14,11 @@ import { upsertCvSchema } from '@izlearn/shared';
 const router = Router();
 router.use(authenticate);
 
-router.get('/mine', requirePermission('cv', 'view'), c.mine);
-router.post('/mine', requirePermission('cv', 'edit'), validate(upsertCvSchema), c.upsertMine);
+// A user's OWN CV is a personal record (the "My CV" menu item is ungated) and is also a
+// prerequisite gate for starting training — so viewing/editing it must NOT require the
+// cv management permission. Ownership is implicit (always the caller's own CV).
+router.get('/mine', c.mine);
+router.post('/mine', validate(upsertCvSchema), c.upsertMine);
 // Team CV views are gated on the team module ("View team CV"); ownership/supervisor
 // scope is still enforced in the service.
 router.get('/team', requirePermission('team', 'view'), c.team);

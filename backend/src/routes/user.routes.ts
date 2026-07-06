@@ -26,9 +26,12 @@ router.get('/export', requirePermission('userManagement', 'export'), c.exportUse
 router.get('/team', requirePermission('team', 'view'), c.team);
 router.get('/team/:userId/history', requirePermission('team', 'view'), c.teamHistory);
 
-// Creation requests (specific routes before '/:id')
-router.get('/requests', requirePermission('userManagement', 'read'), c.listRequests);
-router.get('/requests/:id', requirePermission('userManagement', 'read'), c.getRequest);
+// Creation requests (specific routes before '/:id'). The User Requests QUEUE (list +
+// approve/reject) is now its own permission module, split from Users. Raising a request
+// stays a Users capability (userManagement:write), since it is initiated from the Users /
+// My Team screens.
+router.get('/requests', requirePermission('userRequests', 'view'), c.listRequests);
+router.get('/requests/:id', requirePermission('userRequests', 'view'), c.getRequest);
 router.post(
   '/requests',
   requirePermission('userManagement', 'write'),
@@ -37,7 +40,7 @@ router.post(
 );
 router.post(
   '/requests/:id/decision',
-  requirePermission('userManagement', 'approve'),
+  requirePermission('userRequests', 'approve'),
   captureReasonIfPresent,
   c.decideRequest,
 );

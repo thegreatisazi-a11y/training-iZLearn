@@ -14,8 +14,10 @@ import { certificateTemplateSchema, updateCertificateTemplateSchema } from '@izl
 const router = Router();
 router.use(authenticate);
 
-const canRead = requirePermission('certificates', 'read');
-const canWrite = requirePermission('certificates', 'write');
+// Certificate Templates are their own permission module now (split from Certificates)
+// so the menu item / manager can be granted independently.
+const canRead = requirePermission('certificateTemplates', 'view');
+const canWrite = requirePermission('certificateTemplates', 'edit');
 
 router.get('/', canRead, c.list);
 router.post('/', canWrite, validate(certificateTemplateSchema), c.create);

@@ -27,7 +27,8 @@ type Decision = 'APPROVE' | 'REJECT';
 
 export default function UserRequestsPage() {
   const qc = useQueryClient();
-  const canApprove = useAuthStore((s) => s.hasPermission)('userManagement', 'approve');
+  // User Requests is its own permission module now (split from Users).
+  const canApprove = useAuthStore((s) => s.hasPermission)('userRequests', 'approve');
 
   const [page, setPage] = useState(1);
   const [decision, setDecision] = useState<{ open: boolean; kind: Decision; req?: RequestRow }>({ open: false, kind: 'APPROVE' });

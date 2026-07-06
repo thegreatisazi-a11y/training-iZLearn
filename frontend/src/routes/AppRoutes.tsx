@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import type { PermissionAction } from '@izlearn/shared';
 import { AppShell } from '@/components/layout/AppShell';
 import { ProtectedRoute } from './ProtectedRoute';
 import { PermissionRoute } from './PermissionRoute';
@@ -42,7 +43,7 @@ const SystemConfigPage = lazy(() => import('@/pages/system/SystemConfigPage'));
 const ProfilePage = lazy(() => import('@/pages/profile/ProfilePage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
-const gate = (module: string, action: 'read' | 'write', el: JSX.Element) => (
+const gate = (module: string, action: PermissionAction, el: JSX.Element) => (
   <PermissionRoute module={module} action={action}>
     {el}
   </PermissionRoute>
@@ -58,7 +59,7 @@ export function AppRoutes() {
           <Route element={<AppShell />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/users" element={gate('userManagement', 'read', <UsersPage />)} />
-            <Route path="/users/requests" element={gate('userManagement', 'read', <UserRequestsPage />)} />
+            <Route path="/users/requests" element={gate('userRequests', 'view', <UserRequestsPage />)} />
             <Route path="/users/bulk" element={gate('userManagement', 'write', <UserBulkUploadPage />)} />
             <Route path="/roles" element={gate('roleManagement', 'read', <RolesPage />)} />
             <Route path="/masters" element={gate('masterSetup', 'read', <MastersPage />)} />
@@ -85,7 +86,7 @@ export function AppRoutes() {
                 can take training assigned to them (ownership enforced server-side). */}
             <Route path="/assessments/take/:topicId" element={<TakeAssessmentPage />} />
             <Route path="/certificates" element={gate('certificates', 'read', <CertificatesPage />)} />
-            <Route path="/admin/certificate-templates" element={gate('certificates', 'write', <CertificateTemplatesPage />)} />
+            <Route path="/admin/certificate-templates" element={gate('certificateTemplates', 'view', <CertificateTemplatesPage />)} />
             <Route path="/feedback" element={gate('feedback', 'read', <FeedbackPage />)} />
             <Route path="/announcements" element={gate('announcements', 'read', <AnnouncementsPage />)} />
             <Route path="/reports" element={gate('reports', 'read', <ReportsPage />)} />

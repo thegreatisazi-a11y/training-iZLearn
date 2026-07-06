@@ -69,6 +69,17 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     ],
   },
   {
+    // Split out from Users so the "User Requests" queue has its own permission. Raising a
+    // request stays a Users capability (userManagement:create); this controls the queue.
+    module: 'userRequests',
+    label: 'User Requests',
+    category: 'userAccess',
+    actions: [
+      A('view', 'View User Requests'),
+      A('approve', 'Approve / Reject User Request'),
+    ],
+  },
+  {
     module: 'team',
     label: 'Team (Reporting Manager)',
     category: 'userAccess',
@@ -266,14 +277,24 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
   },
   {
     module: 'certificates',
-    label: 'Certificates & Templates',
+    label: 'Certificates',
     category: 'assessmentCert',
     actions: [
       A('view', 'View Certificates'),
       A('create', 'Generate Certificate'),
-      A('edit', 'Manage Certificate Templates'),
       A('print', 'Print Certificate'),
       A('export', 'Export Certificate'),
+    ],
+  },
+  {
+    // Split out from Certificates so the "Certificate Templates" menu item has its own permission.
+    module: 'certificateTemplates',
+    label: 'Certificate Templates',
+    category: 'assessmentCert',
+    actions: [
+      A('view', 'View Templates'),
+      A('create', 'Create Template'),
+      A('edit', 'Edit Template'),
     ],
   },
 
