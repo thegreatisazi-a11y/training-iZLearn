@@ -86,6 +86,11 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.getUser(req.params.id));
 });
 
+// Item F: the logged-in user's own full profile (self-scoped — no management permission).
+export const myProfile = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.getMyProfile(req.user!.id));
+});
+
 export const update = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.updateUser(req.params.id, req.body, req), 'User updated');
 });

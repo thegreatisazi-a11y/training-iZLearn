@@ -392,6 +392,39 @@ export async function getUser(id: string) {
   return { ...withName, roleIds: roles.map((r) => r.roleId) };
 }
 
+/**
+ * Item F: the logged-in user's own full profile — every detail captured at creation,
+ * with ids resolved to names (department, location, functional roles, supervisor,
+ * roles). Sensitive fields (password/signature hashes) are stripped. Self-scoped: no
+ * management permission needed.
+ */
+export async function getMyProfile(userId: string) {
+  const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
+  if (!user) throw AppError.notFound('User not found');
+  const [withName] = await withNames([user]);
+  const [roleLinks, supervisor] = await Promise.all([
+    prisma.userRole.findMany({ where: { userId, isActive: true } }),
+    user.supervisorId
+      ? prisma.user.findUnique({ where: { id: user.supervisorId }, select: { fullName: true, employeeId: true } })
+      : Promise.resolve(null),
+  ]);
+  const roles = roleLinks.length
+    ? await prisma.role.findMany({ where: { id: { in: roleLinks.map((r) => r.roleId) } }, select: { roleName: true } })
+    : [];
+  // Never expose credential hashes to the client.
+  const { passwordHash: _p, signaturePasswordHash, ...safe } = withName as typeof withName & {
+    passwordHash?: string;
+    signaturePasswordHash?: string | null;
+  };
+  return {
+    ...safe,
+    supervisorName: supervisor?.fullName ?? null,
+    supervisorEmployeeId: supervisor?.employeeId ?? null,
+    roleNames: roles.map((r) => r.roleName),
+    hasSignaturePassword: !!signaturePasswordHash,
+  };
+}
+
 export async function updateUser(id: string, input: UpdateUserInput, req: Request) {
   const existing = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!existing) throw AppError.notFound('User not found');

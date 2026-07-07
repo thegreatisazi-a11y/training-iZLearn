@@ -14,6 +14,8 @@ router.get('/', requirePermission('jobDescription', 'read'), c.list);
 router.get('/mine', c.mine);
 // B1: the full list of the user's own (non-obsolete) assigned JDs.
 router.get('/mine/list', c.mineList);
+// Item A: the user's own JD version history (all versions, incl. obsolete). Self-scoped.
+router.get('/mine/history', c.mineHistory);
 router.post('/assign-functional-role', requirePermission('jobDescription', 'assign'), validate(assignFunctionalRoleSchema), c.assignFunctionalRole);
 // I4/I5: assign a JD to a user from a template (editable copy), approved on create.
 router.post('/assign-from-template', requirePermission('jobDescription', 'assign'), validate(assignJDFromTemplateSchema), c.assignFromTemplate);

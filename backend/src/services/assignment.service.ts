@@ -4,6 +4,7 @@ import { AppError } from '../utils/response';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
+import { hasCompletedRequiredReading } from './materialView.service';
 import { startOfDay } from '../utils/dateUtils';
 import type { Request } from 'express';
 import type {
@@ -138,7 +139,7 @@ export async function listMyTrainings(userId: string) {
     topicIds.length
       ? prisma.trainingTopic.findMany({
           where: { id: { in: topicIds } },
-          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, durationMinutes: true, materialViewSeconds: true, supersededByTopicId: true },
+          select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, durationMinutes: true, materialViewSeconds: true, requiresAssessment: true, supersededByTopicId: true },
         })
       : Promise.resolve([]),
     prisma.assessmentAttempt.findMany({ where: { userId, isDeleted: false }, orderBy: { attemptNumber: 'desc' } }),
@@ -152,14 +153,31 @@ export async function listMyTrainings(userId: string) {
     if (at.score !== null && (cur.score === null || at.score > cur.score)) cur.score = at.score;
     bestByTopic.set(at.topicId, cur);
   }
-  return assignments
-    // A revised course shows ONLY the current version: hide assignments whose topic
-    // has been superseded by a newer version (the user gets a fresh assignment to it).
-    .filter((a) => {
+  // A revised course shows ONLY the current version: hide assignments whose topic has
+  // been superseded by a newer version (the user gets a fresh assignment to it).
+  const visible = assignments.filter((a) => {
+    const topic = topicMap.get(a.topicId);
+    return !topic || !topic.supersededByTopicId;
+  });
+
+  // Item B: compute reading completion for ACTIONABLE assignments so the Assessments page
+  // can offer only courses whose materials are fully read and only the assessment remains.
+  // (Skipped for non-actionable states — passed / no-assessment / not started — to avoid
+  // unnecessary per-assignment reading-log lookups.)
+  const readingByAssignment = new Map<string, boolean>();
+  await Promise.all(
+    visible.map(async (a) => {
       const topic = topicMap.get(a.topicId);
-      return !topic || !topic.supersededByTopicId;
-    })
-    .map((a) => {
+      const passed = bestByTopic.get(a.topicId)?.isPassed;
+      const actionable = (a.status === 'PENDING' || a.status === 'IN_PROGRESS') && !passed && topic?.requiresAssessment !== false;
+      readingByAssignment.set(
+        a.id,
+        actionable && topic ? await hasCompletedRequiredReading(userId, a.topicId, topic.currentVersion ?? 1) : false,
+      );
+    }),
+  );
+
+  return visible.map((a) => {
     const topic = topicMap.get(a.topicId) ?? null;
     return {
       id: a.id,
@@ -175,6 +193,10 @@ export async function listMyTrainings(userId: string) {
       topicTitle: topic?.title ?? null,
       topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
       topicVersion: topic?.currentVersion ?? null,
+      requiresAssessment: topic?.requiresAssessment ?? true,
+      // Item B: only assessments with reading complete + assessment still pending appear
+      // in the "Start Assessment" dropdown.
+      readingComplete: readingByAssignment.get(a.id) ?? false,
       result: bestByTopic.get(a.topicId) ?? null,
     };
   });

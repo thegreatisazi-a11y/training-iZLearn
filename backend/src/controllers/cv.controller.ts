@@ -4,6 +4,8 @@ import { paginationQuery } from '@izlearn/shared';
 import * as svc from '../services/cv.service';
 
 export const mine = asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await svc.getMyCV(req.user!.id)));
+// Item A: the user's own CV version history (reconstructed from the audit trail).
+export const mineHistory = asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await svc.getMyCvHistory(req.user!.id)));
 
 export const upsertMine = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.upsertMyCV(req.user!.id, req.body), 'CV saved'),

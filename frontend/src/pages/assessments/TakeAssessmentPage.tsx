@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ArrowLeft, Clock, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -221,7 +221,6 @@ function QuestionCard({ index, question, answer, onChange }: { index: number; qu
 
 export default function TakeAssessmentPage() {
   const { topicId = '' } = useParams();
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
   const [result, setResult] = useState<SubmitResult | null>(null);
@@ -651,7 +650,6 @@ export default function TakeAssessmentPage() {
             <div className="truncate text-lg font-semibold text-slate-800">{topicLabel ?? 'Training Material'}</div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="ghost" onClick={() => navigate('/my-trainings')}>Cancel</Button>
             <Button disabled={!instructionAck} onClick={proceed}>Continue</Button>
           </div>
         </div>
@@ -705,8 +703,6 @@ export default function TakeAssessmentPage() {
             <div className="text-sm text-slate-600">
               Progress: <strong>{doneCount}/{totalChapters}</strong> · {progressPct}%
             </div>
-            {/* BUG-11: Cancel returns cleanly to My Trainings (no error). */}
-            <Button variant="ghost" onClick={() => navigate('/my-trainings')}>Cancel</Button>
             {requiresAssessment && (
               <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
                 {start.isPending ? 'Starting…' : 'Continue to Assessment'}

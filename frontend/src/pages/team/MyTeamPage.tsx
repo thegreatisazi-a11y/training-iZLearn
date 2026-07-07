@@ -71,7 +71,9 @@ function AddTeamMemberDialog({ open, onClose, supervisorId }: { open: boolean; o
 
   const mutation = useMutation({
     mutationFn: () =>
-      svc.users.createRequest({
+      // Item D: My Team's add uses its own endpoint (gated on team:create), independent
+      // of the Users module's create permission.
+      svc.users.createTeamMember({
         userType: form.userType,
         fullName: form.fullName,
         employeeId: form.employeeId,
@@ -152,8 +154,11 @@ export default function MyTeamPage() {
   const can = useAuthStore((s) => s.hasPermission);
   const me = useAuthStore((s) => s.user);
   const canPrint = can('team', 'print');
-  // #4: adding a member maps to the existing userManagement "create" permission.
-  const canAddMember = can('userManagement', 'create');
+  // Item D: "Add Team Member" has its OWN permission (team:create), independent of the
+  // Users module. Read EXACTLY from the matrix so the derived `write`/legacy fallback
+  // doesn't implicitly re-enable it.
+  const teamPerms = (useAuthStore((s) => s.user?.permissions) as Record<string, Record<string, boolean>> | undefined)?.team ?? {};
+  const canAddMember = teamPerms.create === true;
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   // #5: reset a direct report's password (e-signed); shows the temporary password once.

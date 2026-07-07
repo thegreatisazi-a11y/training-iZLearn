@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Printer } from 'lucide-react';
+import { Plus, Trash2, Printer, History } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Field } from '@/components/ui/input';
 import { PageLoader } from '@/components/ui/spinner';
+import { Dialog } from '@/components/ui/dialog';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
+import { formatDateTime } from '@/lib/format';
 import { printHtml, printTable } from '@/lib/print';
 
 interface Qualification { year?: string; degree?: string; specialization?: string; institute?: string }
@@ -80,10 +82,69 @@ function seedForm(cv: CvData | null | undefined): FormState {
   };
 }
 
+/** Build the printable CV body from a CV snapshot — shared by the live print and the
+ *  version-history "View / Print" so every version renders identically. */
+function cvPrintBody(header: CvHeader, cv: CvData): string {
+  const langs = (cv.languages ?? []).filter((l) => l.language);
+  const languagesBlock = langs.length
+    ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
+    : `<p>${cv.languagesKnown || '—'}</p>`;
+  return (
+    `<h1>Curriculum Vitae</h1>` +
+    `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''} · v${cv.version ?? 1}</div>` +
+    `<div class="section">Languages Known</div>${languagesBlock}` +
+    `<div class="section">Educational Qualifications</div>` +
+    printTable(['Year', 'Degree', 'Specialization', 'Institute'], (cv.qualifications ?? []).map((q) => [q.year, q.degree, q.specialization, q.institute])) +
+    `<div class="section">Current Role</div><p>${cv.currentRole || '—'} (${cv.currentTenureFrom || '?'} → ${cv.currentTenureTo || 'present'})</p><p>${cv.currentResponsibilities || ''}</p>` +
+    `<div class="section">Previous Positions</div>` +
+    printTable(['Organisation', 'Role', 'From', 'To', 'Responsibilities'], (cv.experience ?? []).map((e) => [e.organisation, e.role, e.tenureFrom, e.tenureTo, e.responsibilities])) +
+    `<div class="section">Trainings / Seminars / Workshops</div>` +
+    printTable(['#', 'Detail'], (cv.trainings ?? []).map((t, i) => [t.srNo ?? i + 1, t.detail])) +
+    `<div class="section">Publications / Memberships</div>` +
+    printTable(['#', 'Detail'], (cv.publications ?? []).map((p, i) => [p.srNo ?? i + 1, p.detail]))
+  );
+}
+
+/** Item A: CV version history — every saved version (reconstructed from the audit trail);
+ *  open/print any older version in the same format as the current one. */
+function CvHistoryDialog({ open, onClose, header }: { open: boolean; onClose: () => void; header?: CvHeader }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['my-cv-history'],
+    queryFn: () => svc.cv.mineHistory() as unknown as Promise<{ header: CvHeader; versions: { version: number | null; updatedAt: string; cv: CvData }[] }>,
+    enabled: open,
+  });
+  const versions = data?.versions ?? [];
+  const hdr = header ?? data?.header;
+  return (
+    <Dialog open={open} onClose={onClose} title="Curriculum Vitae — Version History" footer={<Button variant="outline" onClick={onClose}>Close</Button>}>
+      {isLoading ? (
+        <PageLoader />
+      ) : versions.length === 0 ? (
+        <p className="text-sm text-slate-500">No versions found.</p>
+      ) : (
+        <div className="space-y-2">
+          {versions.map((v, i) => (
+            <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2">
+              <div className="text-sm">
+                <span className="font-medium text-slate-800">v{v.version ?? '—'}</span>
+                <span className="ml-2 text-xs text-slate-400">{formatDateTime(v.updatedAt)}</span>
+              </div>
+              <Button size="sm" variant="outline" disabled={!hdr} onClick={() => hdr && printHtml('Curriculum Vitae', cvPrintBody(hdr, v.cv))}>
+                <Printer className="h-4 w-4" /> View / Print
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 export default function MyCVPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(emptyForm());
   const [editing, setEditing] = useState(false); // C1: read-only until Edit is clicked
+  const [histOpen, setHistOpen] = useState(false);
   const { data, isLoading } = useQuery({
     queryKey: ['my-cv'],
     queryFn: () => svc.cv.mine() as unknown as Promise<{ header: CvHeader; cv: CvData | null }>,
@@ -121,25 +182,8 @@ export default function MyCVPage() {
 
   function handlePrint() {
     if (!header) return;
-    // #4: prefer the structured array; fall back to the legacy free-text string.
-    const langs = form.languages.filter((l) => l.language);
-    const languagesBlock = langs.length
-      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
-      : `<p>${form.languagesKnown || '—'}</p>`;
-    const body =
-      `<h1>Curriculum Vitae</h1>` +
-      `<div class="meta">${header.employeeName} (${header.employeeCode}) · ${header.functionalRole ?? ''} · ${header.departmentName ?? ''} · v${data?.cv?.version ?? 1}</div>` +
-      `<div class="section">Languages Known</div>${languagesBlock}` +
-      `<div class="section">Educational Qualifications</div>` +
-      printTable(['Year', 'Degree', 'Specialization', 'Institute'], form.qualifications.map((q) => [q.year, q.degree, q.specialization, q.institute])) +
-      `<div class="section">Current Role</div><p>${form.currentRole || '—'} (${form.currentTenureFrom || '?'} → ${form.currentTenureTo || 'present'})</p><p>${form.currentResponsibilities || ''}</p>` +
-      `<div class="section">Previous Positions</div>` +
-      printTable(['Organisation', 'Role', 'From', 'To', 'Responsibilities'], form.experience.map((e) => [e.organisation, e.role, e.tenureFrom, e.tenureTo, e.responsibilities])) +
-      `<div class="section">Trainings / Seminars / Workshops</div>` +
-      printTable(['#', 'Detail'], form.trainings.map((t, i) => [t.srNo ?? i + 1, t.detail])) +
-      `<div class="section">Publications / Memberships</div>` +
-      printTable(['#', 'Detail'], form.publications.map((p, i) => [p.srNo ?? i + 1, p.detail]));
-    printHtml('Curriculum Vitae', body);
+    // Print the CURRENT (possibly just-edited) form using the shared body builder.
+    printHtml('Curriculum Vitae', cvPrintBody(header, { ...form, version: data?.cv?.version }));
   }
 
   const upd = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -151,6 +195,9 @@ export default function MyCVPage() {
         description="Your curriculum vitae. The header is pulled from your employee record."
         actions={
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setHistOpen(true)}>
+              <History className="h-4 w-4" /> Version History
+            </Button>
             <Button variant="outline" onClick={handlePrint}>
               <Printer className="h-4 w-4" /> Print / PDF
             </Button>
@@ -169,6 +216,7 @@ export default function MyCVPage() {
           </div>
         }
       />
+      <CvHistoryDialog open={histOpen} onClose={() => setHistOpen(false)} header={header} />
 
       <Card className="mb-4">
         <CardContent>

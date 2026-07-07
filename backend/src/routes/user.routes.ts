@@ -20,6 +20,9 @@ router.use(authenticate);
 router.get('/', requirePermission('userManagement', 'read'), c.list);
 // CR-12: export the (filtered) users list. Must precede '/:id' so it is not captured as an id.
 router.get('/export', requirePermission('userManagement', 'export'), c.exportUsers);
+// Item F: the user's OWN full profile — self-scoped (any authenticated user). Must
+// precede '/:id' so 'me' is not captured as a user id.
+router.get('/me', c.myProfile);
 
 // Team overview — gated on the team module (CR: per-action team RBAC) and still
 // supervisor-scoped server-side (a supervisor sees only their own reports; admin sees all).
@@ -36,6 +39,15 @@ router.get('/requests/:id', requirePermission('userRequests', 'view'), c.getRequ
 router.post(
   '/requests',
   requireExactPermission('userManagement', 'create'),
+  validate(createUserSchema),
+  c.createRequest,
+);
+// Item D: raising a request from "My Team" (Add Team Member) is gated on its OWN
+// permission (team:create), independent of the Users module's create. Same underlying
+// request flow — the supervisorId is supplied in the body so the new user is linked.
+router.post(
+  '/team-member',
+  requireExactPermission('team', 'create'),
   validate(createUserSchema),
   c.createRequest,
 );

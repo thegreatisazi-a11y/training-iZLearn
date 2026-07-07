@@ -85,6 +85,9 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'userAccess',
     actions: [
       A('view', 'View Assigned Team'),
+      // Independent from the Users module's "Create / New User Request" so "Add Team
+      // Member" can be granted/restricted separately for My Team.
+      A('create', 'Add Team Member'),
       A('approve', 'Approve / Verify Team Training'),
       A('print', 'Print Team Records'),
       A('export', 'Export Team Records'),

@@ -79,6 +79,16 @@ interface BlockedAssignment {
   topicNumber?: string | null;
   status: string;
 }
+/** Item B: an assignment row from the my-trainings endpoint (drives the Start dropdown). */
+interface MyTraining {
+  topicId: string;
+  topicTitle?: string | null;
+  topicNumber?: string | null;
+  status: string;
+  requiresAssessment?: boolean;
+  readingComplete?: boolean;
+  result?: { isPassed?: boolean } | null;
+}
 /** Item 3: a completed attempt of another user the requester may view/download. */
 interface ManagedAttempt extends Attempt {
   userId: string;
@@ -219,10 +229,9 @@ export default function AssessmentsPage() {
   const canManage = useAuthStore((s) => s.hasPermission)('assessments', 'write');
 
   const mine = useQuery({ queryKey: ['assessments', 'mine'], queryFn: () => svc.assessments.listMine() as unknown as Promise<Attempt[]> });
-  const topics = useQuery({
-    queryKey: ['topics', 'lookup'],
-    queryFn: async () => (await svc.topics.list({ pageSize: 200 })).data as Array<Record<string, unknown>>,
-  });
+  // Item B: the "Start Assessment" dropdown is built from the user's ASSIGNMENTS so it can
+  // show only genuinely-remaining assessments (reading done, assessment still pending).
+  const myTrainings = useQuery({ queryKey: ['my-trainings'], queryFn: () => svc.assignments.mine() as unknown as Promise<MyTraining[]> });
   const blocked = useQuery({
     queryKey: ['assignments', 'blocked'],
     queryFn: () => svc.assignments.list({ status: 'BLOCKED', pageSize: 200 }),
@@ -238,13 +247,24 @@ export default function AssessmentsPage() {
 
   // BUG-08: topics the user has already passed must not be startable again.
   const passedTopicIds = useMemo(() => new Set((mine.data ?? []).filter((a) => a.isPassed).map((a) => a.topicId)), [mine.data]);
-  const topicOpts = useMemo(
-    () =>
-      (topics.data ?? [])
-        .filter((t) => !passedTopicIds.has(String(t.id)))
-        .map((t) => ({ value: String(t.id), label: topicLabel(String(t.topicNumber ?? t.topicCode ?? ''), String(t.title ?? ''), String(t.id)) })),
-    [topics.data, passedTopicIds],
-  );
+  // Item B: only genuinely-remaining assessments. Include an assignment when it is
+  // actionable (PENDING/IN_PROGRESS — this excludes OVERDUE, COMPLETED/WAIVED, and BLOCKED
+  // which covers a pending retake request), its materials are fully read, the topic still
+  // requires an assessment, and it has not already been passed. De-duplicated by topic.
+  const topicOpts = useMemo(() => {
+    const seen = new Set<string>();
+    return (myTrainings.data ?? [])
+      .filter(
+        (a) =>
+          (a.status === 'PENDING' || a.status === 'IN_PROGRESS') &&
+          a.requiresAssessment !== false &&
+          a.readingComplete === true &&
+          a.result?.isPassed !== true &&
+          !passedTopicIds.has(a.topicId),
+      )
+      .filter((a) => (seen.has(a.topicId) ? false : (seen.add(a.topicId), true)))
+      .map((a) => ({ value: a.topicId, label: topicLabel(a.topicNumber ?? undefined, a.topicTitle ?? undefined, a.topicId) }));
+  }, [myTrainings.data, passedTopicIds]);
   const [selectedTopic, setSelectedTopic] = useState('');
   const selectedPassed = passedTopicIds.has(selectedTopic);
 

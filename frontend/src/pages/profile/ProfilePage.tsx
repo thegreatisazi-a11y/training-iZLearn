@@ -41,6 +41,23 @@ interface PersonalDoc {
   uploadedAt?: string;
   createdAt?: string;
 }
+/** Item F: the full self-profile (all details captured at user creation, names resolved). */
+interface FullProfile {
+  fullName: string;
+  employeeId: string;
+  windowsUsername: string;
+  email?: string | null;
+  userType?: string;
+  departmentName?: string | null;
+  locationName?: string | null;
+  functionalRoleNames?: string[];
+  supervisorName?: string | null;
+  supervisorEmployeeId?: string | null;
+  roleNames?: string[];
+  releaseStage?: string;
+  lastLoginAt?: string | null;
+  createdAt?: string | null;
+}
 
 function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [loginPassword, setLoginPassword] = useState('');
@@ -127,12 +144,90 @@ function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: ()
   );
 }
 
+/** A single label/value pair in the profile details grid (shows '—' when empty). */
+function Detail({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-slate-800">{value && String(value).trim() ? value : '—'}</dd>
+    </div>
+  );
+}
+
+/** Change the user's own LOGIN password (current + new), distinct from admin reset. */
+function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const reset = () => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setError('');
+  };
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  const mutation = useMutation({
+    mutationFn: () => svc.auth.changePassword({ currentPassword, newPassword }),
+    onSuccess: () => {
+      toast.success('Password changed.');
+      reset();
+      onClose();
+    },
+    onError: (e) => setError(apiError(e)),
+  });
+
+  const submit = () => {
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirm password must match.');
+      return;
+    }
+    setError('');
+    mutation.mutate();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Change Password"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>Cancel</Button>
+          <Button onClick={submit} disabled={mutation.isPending || !currentPassword || !newPassword || !confirmPassword || mismatch}>
+            {mutation.isPending ? 'Saving…' : 'Change Password'}
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-sm text-slate-600">Change your login password. You'll need your current password to confirm.</p>
+      <Field label="Current password" required>
+        <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      <Field label="New password" required>
+        <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      <Field label="Confirm new password" required error={mismatch ? 'New password and confirm password must match.' : undefined}>
+        <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} />
+      </Field>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </Dialog>
+  );
+}
+
 export default function ProfilePage() {
   const me = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [tab, setTab] = useState<'training' | 'certificates' | 'documents'>('training');
   const [sigOpen, setSigOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
+
+  // Item F: full profile (all details captured at creation, with ids resolved to names).
+  const profileQ = useQuery({ queryKey: ['my-profile'], queryFn: () => svc.users.myProfile() as unknown as Promise<FullProfile> });
+  const profile = profileQ.data;
 
   // Use the enriched "my trainings" endpoint so topic name/number resolve (the raw
   // assignments list returns ids only — which showed "—" in the Topic column).
@@ -221,28 +316,33 @@ export default function ProfilePage() {
       <PageHeader
         title="My Profile"
         description={me ? `${me.fullName} · ${me.employeeId}` : undefined}
-        actions={<Button variant="outline" onClick={() => setSigOpen(true)}>Set Signature Password</Button>}
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setPwOpen(true)}>Change Password</Button>
+            <Button variant="outline" onClick={() => setSigOpen(true)}>Set Signature Password</Button>
+          </>
+        }
       />
 
+      {/* Item F: all details captured at user creation, in one place. */}
       <Card className="mb-6">
         <CardContent>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-3">
-            <div>
-              <dt className="text-slate-500">Username</dt>
-              <dd className="text-slate-800">{me?.windowsUsername}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">Employee ID</dt>
-              <dd className="text-slate-800">{me?.employeeId}</dd>
-            </div>
-            <div>
-              <dt className="text-slate-500">Email</dt>
-              <dd className="text-slate-800">{me?.email ?? '—'}</dd>
-            </div>
-            <div className="col-span-2 md:col-span-3">
-              <dt className="text-slate-500">Roles</dt>
-              <dd className="text-slate-800">{me?.roleNames?.join(', ')}</dd>
-            </div>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm md:grid-cols-3">
+            <Detail label="Full Name" value={profile?.fullName ?? me?.fullName} />
+            <Detail label="Employee Code" value={profile?.employeeId ?? me?.employeeId} />
+            <Detail label="Username" value={profile?.windowsUsername ?? me?.windowsUsername} />
+            <Detail label="Email" value={profile?.email ?? me?.email} />
+            <Detail label="User Type" value={profile?.userType} />
+            <Detail label="Department" value={profile?.departmentName} />
+            <Detail label="Location" value={profile?.locationName} />
+            <Detail label="Functional Role(s)" value={profile?.functionalRoleNames?.join(', ')} />
+            <Detail
+              label="Reporting Manager"
+              value={profile?.supervisorName ? `${profile.supervisorName}${profile.supervisorEmployeeId ? ` (${profile.supervisorEmployeeId})` : ''}` : undefined}
+            />
+            <Detail label="Access Roles" value={(profile?.roleNames ?? me?.roleNames)?.join(', ')} />
+            <Detail label="Last Login" value={profile?.lastLoginAt ? formatDate(profile.lastLoginAt) : undefined} />
+            <Detail label="Member Since" value={profile?.createdAt ? formatDate(profile.createdAt) : undefined} />
           </dl>
         </CardContent>
       </Card>
@@ -292,6 +392,7 @@ export default function ProfilePage() {
       )}
 
       <SignaturePasswordDialog open={sigOpen} onClose={() => setSigOpen(false)} />
+      <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
     </div>
   );
 }

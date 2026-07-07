@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileText, Printer, ChevronLeft } from 'lucide-react';
+import { CheckCircle2, FileText, Printer, ChevronLeft, History } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { printJobDescription } from '@/lib/jdPrint';
 import { useAuthStore } from '@/store/authStore';
@@ -13,11 +13,69 @@ import { Field, Textarea } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
+import { Dialog } from '@/components/ui/dialog';
 import { ESignatureModal } from '@/components/common/ESignatureModal';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 import { formatDateTime } from '@/lib/format';
+
+/** Item A: JD version history — lists every version (incl. obsolete) and lets the user
+ *  open/read or print any older version. */
+interface HistJD {
+  id: string;
+  title: string;
+  content: string;
+  version: number;
+  status: string;
+  assignedAt?: string | null;
+  acknowledgedAt?: string | null;
+}
+function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['my-jd-history'],
+    queryFn: () => svc.jds.mineHistory() as unknown as Promise<HistJD[]>,
+    enabled: open,
+  });
+  const [viewing, setViewing] = useState<HistJD | null>(null);
+  const rows = data ?? [];
+  const print = (j: HistJD) =>
+    printJobDescription({ title: j.title, version: j.version, status: j.status, acknowledgedAt: j.acknowledgedAt ?? null, content: j.content });
+  return (
+    <Dialog open={open} onClose={() => { setViewing(null); onClose(); }} className="max-w-2xl" title="Job Description — Version History" footer={<Button variant="outline" onClick={() => { setViewing(null); onClose(); }}>Close</Button>}>
+      {isLoading ? (
+        <PageLoader />
+      ) : viewing ? (
+        <div>
+          <button className="mb-2 inline-flex items-center gap-1 text-sm text-primary hover:underline" onClick={() => setViewing(null)}>
+            <ChevronLeft className="h-4 w-4" /> Back to versions
+          </button>
+          <div className="mb-1 text-sm font-semibold text-slate-800">{viewing.title} · v{viewing.version} · {viewing.status.replace(/_/g, ' ')}</div>
+          <div className="prose-sm max-h-[60vh] overflow-auto text-sm text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.content ?? '') }} />
+        </div>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-slate-500">No versions found.</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((j) => (
+            <div key={j.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 px-3 py-2">
+              <div className="min-w-0 text-sm">
+                <span className="font-medium text-slate-800">{j.title}</span>{' '}
+                <span className="tabular-nums text-slate-500">v{j.version}</span>{' '}
+                <Badge tone={j.status}>{j.status.replace(/_/g, ' ')}</Badge>
+                {j.assignedAt && <span className="ml-2 text-xs text-slate-400">{formatDateTime(j.assignedAt)}</span>}
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button size="sm" variant="outline" onClick={() => setViewing(j)}>View</Button>
+                <Button size="sm" variant="outline" onClick={() => print(j)}><Printer className="h-4 w-4" /> Print</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Dialog>
+  );
+}
 
 interface MyJD {
   id: string;
@@ -52,6 +110,7 @@ export default function MyJobDescriptionPage() {
   const [signOpen, setSignOpen] = useState(false);
   // B1: when the user holds more than one JD, this is the one they opened from the list.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [histOpen, setHistOpen] = useState(false);
   const userName = useAuthStore((s) => s.user?.fullName);
 
   const printMyJD = (j: MyJD) =>
@@ -151,8 +210,13 @@ export default function MyJobDescriptionPage() {
     ];
     return (
       <div>
-        <PageHeader title="My Job Descriptions" description={`${jds.length} assigned`} />
+        <PageHeader
+          title="My Job Descriptions"
+          description={`${jds.length} assigned`}
+          actions={<Button variant="outline" onClick={() => setHistOpen(true)}><History className="h-4 w-4" /> Version History</Button>}
+        />
         <DataTable columns={columns} rows={jds} emptyText="No job descriptions." />
+        <JdHistoryDialog open={histOpen} onClose={() => setHistOpen(false)} />
       </div>
     );
   }
@@ -175,12 +239,16 @@ export default function MyJobDescriptionPage() {
                 <ChevronLeft className="h-4 w-4" /> Back to list
               </Button>
             )}
+            <Button variant="outline" onClick={() => setHistOpen(true)}>
+              <History className="h-4 w-4" /> Version History
+            </Button>
             <Button variant="outline" onClick={() => printMyJD(jd)}>
               <Printer className="h-4 w-4" /> Print
             </Button>
           </div>
         }
       />
+      <JdHistoryDialog open={histOpen} onClose={() => setHistOpen(false)} />
 
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-center justify-between gap-3">

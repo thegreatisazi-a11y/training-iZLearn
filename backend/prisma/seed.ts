@@ -273,6 +273,13 @@ async function main() {
         p.userManagement.bulk_upload = true;
         changed = true;
       }
+      // "Add Team Member" (team:create) split from the Users create permission. Roles that
+      // could already add a member (had userManagement create/write) keep the ability so
+      // the new gate doesn't silently remove it; it can then be toggled independently.
+      if (p.team && p.team.create === undefined && (p.userManagement?.create || p.userManagement?.write)) {
+        p.team.create = true;
+        changed = true;
+      }
       // The old "Certificate Templates" menu required certificates:write, so only roles
       // that could MANAGE templates should get the new module (view-only cert roles never
       // saw it). Preserves prior access exactly without over-granting.

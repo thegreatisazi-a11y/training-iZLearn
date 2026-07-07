@@ -43,6 +43,39 @@ export async function getMyCV(userId: string) {
   return { header: await cvHeader(userId), cv };
 }
 
+/**
+ * Item A: full CV version history. The CV is a single live row (version bumped on save)
+ * whose past states are preserved in the audit trail — each mutation stores a FULL CV
+ * snapshot in newValue. Reconstruct one entry per version, newest first, so any older
+ * version can be opened/viewed. The current live CV is always included.
+ */
+export async function getMyCvHistory(userId: string) {
+  const header = await cvHeader(userId);
+  const cv = await prisma.curriculumVitae.findFirst({ where: { userId } });
+  if (!cv) return { header, versions: [] as { version: number | null; updatedAt: Date; cv: unknown }[] };
+
+  const rows = await prisma.auditTrail.findMany({
+    where: { entityType: 'CurriculumVitae', entityId: cv.id },
+    orderBy: { timestamp: 'desc' },
+  });
+  const versions: { version: number | null; updatedAt: Date; cv: unknown }[] = [];
+  const seen = new Set<number>();
+  for (const r of rows) {
+    const snap = (r.newValue ?? null) as Record<string, unknown> | null;
+    if (!snap) continue; // skip deletes / snapshot-less rows
+    const v = typeof snap.version === 'number' ? snap.version : -1;
+    if (seen.has(v)) continue; // keep the newest audit row per version
+    seen.add(v);
+    versions.push({ version: typeof snap.version === 'number' ? snap.version : null, updatedAt: r.timestamp, cv: snap });
+  }
+  // Guarantee the current live version is present even if its save predates auditing.
+  const currentV = cv.version ?? 1;
+  if (!versions.some((x) => x.version === currentV)) {
+    versions.unshift({ version: currentV, updatedAt: cv.updatedAt, cv });
+  }
+  return { header, versions };
+}
+
 export async function upsertMyCV(userId: string, input: UpsertCvInput) {
   const data = {
     languagesKnown: input.languagesKnown ?? null,

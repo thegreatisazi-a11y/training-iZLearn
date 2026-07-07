@@ -40,9 +40,13 @@ export const svc = {
 
   users: {
     ...createCrud('/users'),
+    /** The logged-in user's own full profile (all details captured at creation). */
+    myProfile: () => data(api.get('/users/me')),
     listRequests: (params?: ListParams) => api.get('/users/requests', { params }).then((r) => r.data),
     getRequest: (id: string) => data(api.get(`/users/requests/${id}`)),
     createRequest: (body: unknown) => data(api.post('/users/requests', body)),
+    /** Item D: raise a new-user request from My Team (gated on team:create). */
+    createTeamMember: (body: unknown) => data(api.post('/users/team-member', body)),
     decideRequest: (id: string, body: unknown) => data(api.post(`/users/requests/${id}/decision`, body)),
     activate: (id: string, body: unknown) => data(api.post(`/users/${id}/activate`, body)),
     deactivate: (id: string, body: unknown) => data(api.post(`/users/${id}/deactivate`, body)),
@@ -206,6 +210,8 @@ export const svc = {
     fromTemplate: (body: unknown) => data(api.post('/job-descriptions/from-template', body)),
     mine: () => data(api.get('/job-descriptions/mine')),
     mineList: () => data(api.get('/job-descriptions/mine/list')),
+    /** Item A: the user's own JD version history (all versions, incl. obsolete). */
+    mineHistory: () => data(api.get('/job-descriptions/mine/history')),
     acknowledge: (id: string, body: unknown) => data(api.post(`/job-descriptions/${id}/acknowledge`, body)),
     assignFunctionalRole: (body: unknown) => data(api.post('/job-descriptions/assign-functional-role', body)),
     assignFromTemplate: (body: unknown) => data(api.post('/job-descriptions/assign-from-template', body)),
@@ -213,6 +219,8 @@ export const svc = {
 
   cv: {
     mine: () => data(api.get('/cv/mine')),
+    /** Item A: the user's own CV version history (reconstructed from the audit trail). */
+    mineHistory: () => data(api.get('/cv/mine/history')),
     save: (body: unknown) => data(api.post('/cv/mine', body)),
     // cv/team is sent via sendSuccess ({success,data:payload}) — unlike other list
     // endpoints that use sendPaginated — so unwrap the extra level to the paginated
