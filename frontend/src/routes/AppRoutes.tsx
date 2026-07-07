@@ -60,7 +60,7 @@ export function AppRoutes() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/users" element={gate('userManagement', 'read', <UsersPage />)} />
             <Route path="/users/requests" element={gate('userRequests', 'view', <UserRequestsPage />)} />
-            <Route path="/users/bulk" element={gate('userManagement', 'write', <UserBulkUploadPage />)} />
+            <Route path="/users/bulk" element={gate('userManagement', 'bulk_upload' as PermissionAction, <UserBulkUploadPage />)} />
             <Route path="/roles" element={gate('roleManagement', 'read', <RolesPage />)} />
             <Route path="/masters" element={gate('masterSetup', 'read', <MastersPage />)} />
             <Route path="/topics" element={gate('courseManagement', 'read', <TopicsPage />)} />

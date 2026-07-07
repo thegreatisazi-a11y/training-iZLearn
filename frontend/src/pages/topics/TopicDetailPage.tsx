@@ -345,12 +345,28 @@ export default function TopicDetailPage() {
   // Attach one or more library files at once. Each is added as its own current material
   // (attaching does not supersede existing files), so several can be picked together.
   const attachMut = useMutation({
+    // Attach each selected library file INDEPENDENTLY: a failure on one (e.g. a duplicate
+    // name already in this course) must not prevent the others from attaching. Sequential
+    // so per-material version numbering stays deterministic.
     mutationFn: async (materialIds: string[]) => {
-      // Sequential so the per-material version numbering stays deterministic.
-      for (const mid of materialIds) await svc.materials.attachFromLibrary(mid, id);
+      let attached = 0;
+      const errors: string[] = [];
+      for (const mid of materialIds) {
+        try {
+          await svc.materials.attachFromLibrary(mid, id);
+          attached += 1;
+        } catch (e) {
+          errors.push(apiError(e));
+        }
+      }
+      return { attached, errors };
     },
-    onSuccess: (_r, materialIds) => {
-      toast.success(materialIds.length > 1 ? `${materialIds.length} library materials attached` : 'Library material attached');
+    onSuccess: ({ attached, errors }) => {
+      if (errors.length) {
+        toast.error(`${attached} attached, ${errors.length} skipped — ${errors[0]}`);
+      } else {
+        toast.success(attached > 1 ? `${attached} library materials attached` : 'Library material attached');
+      }
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
       qc.invalidateQueries({ queryKey: ['topic-history', id] });
       qc.invalidateQueries({ queryKey: ['topic', id] });
@@ -1413,23 +1429,32 @@ export default function TopicDetailPage() {
         }
       >
         <p className="mb-2 text-xs text-slate-500">Topic code is system-owned and locked. Passing score is changed via its own e-signed action.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Title" required><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>
-          <Field label="SOP Number"><Input value={editTopicForm.topicNumber} onChange={(e) => setEditTopicForm((f) => ({ ...f, topicNumber: e.target.value }))} /></Field>
-        </div>
-        <Field label="Training Type(s)" hint="Select one or more.">
-          <MultiSelect
-            options={trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))}
-            value={editTopicForm.trainingTypes}
-            onChange={(trainingTypes) => setEditTopicForm((f) => ({ ...f, trainingTypes }))}
-            placeholder="Search training types…"
-            heightClass="h-32"
-          />
-        </Field>
+        {/* Field order MUST mirror the create form (TopicsPage) exactly so a course shows
+            the same inputs in the same order on edit as on creation. */}
+        <Field label="Title" required><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>
+        <Field label="SOP Number (optional)"><Input value={editTopicForm.topicNumber} onChange={(e) => setEditTopicForm((f) => ({ ...f, topicNumber: e.target.value }))} placeholder="e.g. QA-SOP-014" /></Field>
         <Field label="Description"><Textarea value={editTopicForm.description} onChange={(e) => setEditTopicForm((f) => ({ ...f, description: e.target.value }))} /></Field>
-        <Field label="Functional Role(s)" hint="Assignment is via Functional Role / TNI / JD.">
-          <MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Training Type(s)" required>
+            <MultiSelect
+              options={trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))}
+              value={editTopicForm.trainingTypes}
+              onChange={(trainingTypes) => setEditTopicForm((f) => ({ ...f, trainingTypes }))}
+              placeholder="Select training type(s)…"
+              heightClass="h-32"
+            />
+          </Field>
+          <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
+            <MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Passing Score %" required>
+            <Input type="number" min={0} max={100} value={editTopicForm.passingScorePercent} onChange={(e) => setEditTopicForm((f) => ({ ...f, passingScorePercent: e.target.value }))} />
+          </Field>
+          <Field label="Max Attempts" required><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
+          <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)</label>
           <Field label="Assessment time limit (min)" hint="Blank = no timer."><Input type="number" min={1} value={editTopicForm.assessmentTimeMinutes} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, assessmentTimeMinutes: e.target.value }))} /></Field>
@@ -1470,18 +1495,11 @@ export default function TopicDetailPage() {
         {/* The edit form mirrors the create form's fields so a course shows the same
             inputs (pre-filled) on edit as on creation. On a published course, saving stages
             all of these (including Passing Score) until "Publish changes" is e-signed. */}
+        <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Passing Score %">
-            <Input type="number" min={0} max={100} value={editTopicForm.passingScorePercent} onChange={(e) => setEditTopicForm((f) => ({ ...f, passingScorePercent: e.target.value }))} />
-          </Field>
           <Field label="Duration (minutes)" hint="Optional. Auto-recalculated from material reading time once set.">
             <Input type="number" min={0} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} placeholder="e.g. 30" />
           </Field>
-        </div>
-        <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Max Attempts" required><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
-          <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
           <Field label="Effective Date"><Input type="date" value={editTopicForm.effectiveDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></Field>
         </div>
         <div className="space-y-1.5 rounded border border-slate-200 p-3">

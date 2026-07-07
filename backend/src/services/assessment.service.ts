@@ -632,16 +632,93 @@ export async function getAttempt(id: string) {
 }
 
 /**
+ * Item 3: who may view/download WHOSE completed tests.
+ *   - SUPER_ADMIN or anyone with assessments:write (Training Coordinator / Admin) → everyone.
+ *   - a supervisor → only their direct reports.
+ *   - everyone else → only their own (empty team list).
+ */
+export async function attemptViewerScope(requester: {
+  id: string;
+  roleNames: string[];
+  permissions?: Record<string, Record<string, boolean>>;
+}): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
+  const canSeeAll =
+    requester.roleNames.includes('SUPER_ADMIN') ||
+    !!(requester.permissions?.assessments && (requester.permissions.assessments.write || requester.permissions.assessments.create || requester.permissions.assessments.edit));
+  if (canSeeAll) return { canSeeAll: true, teamUserIds: [] };
+  const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
+  return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
+}
+
+/**
+ * Item 3: completed attempts the requester is allowed to view/download of OTHER users —
+ * their whole org (admin/coordinator) or just their direct reports (supervisor). The
+ * requester's own attempts live in listAttempts()/the "mine" table, so they're excluded.
+ */
+export async function listManagedAttempts(
+  requester: { id: string; roleNames: string[]; permissions?: Record<string, Record<string, boolean>> },
+  filters: { userId?: string; topicId?: string },
+) {
+  const scope = await attemptViewerScope(requester);
+  const where: Record<string, unknown> = {
+    isDeleted: false,
+    completedAt: { not: null },
+    userId: { not: requester.id },
+    ...(filters.topicId ? { topicId: filters.topicId } : {}),
+  };
+  if (!scope.canSeeAll) {
+    const allowed = scope.teamUserIds.filter((uid) => uid !== requester.id);
+    where.userId = { in: allowed.length ? allowed : ['__no_match__'] };
+  } else if (filters.userId) {
+    where.userId = filters.userId;
+  }
+  const rows = await prisma.assessmentAttempt.findMany({ where, orderBy: { completedAt: 'desc' } });
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const [topics, people] = await Promise.all([
+    topicIds.length
+      ? prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })
+      : Promise.resolve([]),
+    userIds.length
+      ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } })
+      : Promise.resolve([]),
+  ]);
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  const uMap = new Map(people.map((u) => [u.id, u]));
+  return rows.map((r) => {
+    const t = tMap.get(r.topicId);
+    const u = uMap.get(r.userId);
+    return {
+      ...r,
+      topicTitle: t?.title ?? null,
+      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+      userFullName: u?.fullName ?? null,
+      employeeId: u?.employeeId ?? null,
+      timeSpentSeconds: r.completedAt ? Math.max(0, Math.round((r.completedAt.getTime() - r.startedAt.getTime()) / 1000)) : null,
+      submissionReasonLabel: r.submissionReason ? failureReasonLabel(r.submissionReason as AssessmentFailureReason) : null,
+    };
+  });
+}
+
+/**
  * View a COMPLETED attempt's full question-by-question review — the same breakdown
  * (score, per-question user answer / correct answer / explanation) shown immediately
  * after submission, rebuilt from the attempt's question snapshot + stored answers so a
  * learner can revisit their performance at any time. Ownership is enforced (a learner
  * may only review their own attempts; managers with assessments:write may review any).
  */
-export async function reviewAttempt(id: string, userId: string, canManage = false) {
+export async function reviewAttempt(
+  id: string,
+  userId: string,
+  access: { canSeeAll?: boolean; teamUserIds?: string[] } = {},
+) {
   const attempt = await prisma.assessmentAttempt.findFirst({ where: { id, isDeleted: false } });
   if (!attempt) throw AppError.notFound('Attempt not found');
-  if (!canManage && attempt.userId !== userId) throw AppError.forbidden('This attempt does not belong to you.');
+  const isOwn = attempt.userId === userId;
+  // Item 3: own attempt, an admin/coordinator (canSeeAll), or a supervisor viewing a
+  // direct report's attempt (teamUserIds) may review; anyone else is forbidden.
+  const allowed = isOwn || !!access.canSeeAll || !!access.teamUserIds?.includes(attempt.userId);
+  if (!allowed) throw AppError.forbidden('You are not allowed to view this attempt.');
   if (!attempt.completedAt) throw AppError.badRequest('This attempt has not been completed yet.');
 
   const topic = await prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } });

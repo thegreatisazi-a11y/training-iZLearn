@@ -10,6 +10,9 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/mine', c.listMine);
+// Item 3: completed attempts of others the requester may view/download (team for a
+// supervisor, org-wide for admin/coordinator). Data is scoped in the service.
+router.get('/managed', requirePermission('assessments', 'read'), c.listManaged);
 // Review a completed attempt (own attempt for any user; any attempt for a manager).
 // Ownership/authorization is enforced in the service, so no blanket permission gate.
 router.get('/:id/review', c.review);

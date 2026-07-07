@@ -65,6 +65,9 @@ const emptyForm = {
   materialViewSeconds: '',
   effectiveDate: '',
   reviewDate: '',
+  // Mirror the edit form so create/edit expose the same fields (item 2).
+  requiresAssessment: true, // CR-41: false = SOP, completes via read + T&C
+  assessmentTimeMinutes: '', // CR-38: countdown limit (blank = no timer)
   sequenceIndex: '', // CR-29
   signatories: [] as { userId: string; role: string; date: string }[], // CR-T9
   randomizeQuestions: true,
@@ -121,6 +124,8 @@ export default function TopicsPage() {
         showExplanations: form.showExplanations,
         blockAfterMaxAttempts: form.blockAfterMaxAttempts,
         refresherIntervalMonths: form.refresherIntervalMonths ? Number(form.refresherIntervalMonths) : undefined,
+        requiresAssessment: form.requiresAssessment,
+        assessmentTimeMinutes: form.requiresAssessment && form.assessmentTimeMinutes ? Number(form.assessmentTimeMinutes) : undefined,
         materialViewSeconds: form.materialViewSeconds ? Number(form.materialViewSeconds) : undefined,
         effectiveDate: form.effectiveDate || undefined,
         reviewDate: form.reviewDate || undefined,
@@ -386,6 +391,14 @@ export default function TopicsPage() {
           </Field>
           <Field label="Question Limit">
             <Input type="number" min={1} value={form.questionLimit} onChange={(e) => setForm({ ...form, questionLimit: e.target.value })} placeholder="default" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={form.requiresAssessment} onChange={(e) => setForm({ ...form, requiresAssessment: e.target.checked })} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)
+          </label>
+          <Field label="Assessment time limit (min)" hint="Blank = no timer.">
+            <Input type="number" min={1} value={form.assessmentTimeMinutes} disabled={!form.requiresAssessment} onChange={(e) => setForm({ ...form, assessmentTimeMinutes: e.target.value })} />
           </Field>
         </div>
         {/* CR-T9: structured signatories (User · Prepared/Reviewed/Approved · Date) — auto-completed on publish, they don't take the course. */}

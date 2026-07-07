@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendPaginated, AppError } from '../utils/response';
 import { queryAuditTrail, recordEvent } from '../services/auditTrail.service';
-import { signFromRequest } from '../services/eSignature.service';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
 import { renderPdfFromHtml } from '../utils/pdfGenerator';
@@ -65,10 +64,10 @@ function buildChangeSummary(action: string, oldVal: unknown, newVal: unknown): s
   return '';
 }
 
-/** Export the audit trail (PDF/CSV/XLS). Exporting is e-signed and itself audited. */
+/** Export the audit trail (PDF/CSV/XLS). No e-signature required (item 6); the export
+ *  itself is still recorded in the audit trail below. */
 export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
   const format = String(req.body.format || req.query.format || 'csv').toLowerCase();
-  await signFromRequest(req, 'AuditTrail', 'export', 'Reviewed');
 
   const filters = parseFilters({ ...(req.query as Record<string, unknown>), ...(req.body || {}) });
   const r = await queryAuditTrail({ ...filters, page: 1, pageSize: 100000 });

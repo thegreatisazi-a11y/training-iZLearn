@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { Button } from '../ui/button';
 
@@ -14,7 +14,6 @@ interface FileUploadProps {
 
 export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, onSelectMany }: FileUploadProps) {
   const ref = useRef<HTMLInputElement>(null);
-  const [name, setName] = useState('');
   return (
     <div className="flex items-center gap-2">
       <input
@@ -26,17 +25,19 @@ export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, 
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           if (files.length === 0) return;
-          setName(files.length > 1 ? `${files.length} files selected` : files[0].name);
           if (multiple && onSelectMany) onSelectMany(files);
           else files.forEach(onSelect);
-          // Reset so selecting the same file(s) again re-triggers onChange.
+          // Reset the input so the same file can be re-selected. We intentionally do NOT
+          // keep the chosen file name displayed beside the button: the upload may still
+          // fail (e.g. a duplicate), and a lingering name reads as though the file was
+          // attached. The real outcome is shown by the parent — a toast on failure and
+          // the material list on success — while the button label reflects progress.
           e.target.value = '';
         }}
       />
       <Button type="button" variant="outline" onClick={() => ref.current?.click()}>
         <Upload className="h-4 w-4" /> {label}
       </Button>
-      {name && <span className="text-sm text-slate-600">{name}</span>}
     </div>
   );
 }

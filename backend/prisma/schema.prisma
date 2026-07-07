@@ -235,6 +235,10 @@ model TrainingMaterial {
   fileType            String // pdf, docx, pptx, mp4, etc.
   fileSize            Int // bytes
   requiredViewSeconds Int? // per-material minimum reading/viewing time before the assessment unlocks
+  // A single library-level material (topicId = "") may be flagged as the global "training
+  // instruction" shown to every trainee before the reading step. At most one is active;
+  // it is versioned via replaceInstruction (old archived) and cleared when deleted.
+  isInstruction       Boolean  @default(false)
   version             Int      @default(1)
   isCurrentVersion    Boolean  @default(true)
   isObsolete          Boolean  @default(false)

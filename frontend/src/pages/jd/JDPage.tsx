@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Eye, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { printHtml, printTable, escapeHtml } from '@/lib/print';
+import { printJobDescription } from '@/lib/jdPrint';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
@@ -199,27 +199,22 @@ export default function JDPage() {
   const jdDepartment = (jd: JD) => (jd.departmentId ? deptName.get(jd.departmentId) ?? '—' : '—');
   const jdRole = (jd: JD) => (jd.functionalRoleId ? frName.get(jd.functionalRoleId) ?? '—' : '—');
 
-  const printJD = (jd: JD) => {
-    const body = `
-      <h1>Job Description</h1>
-      <div class="sub">${escapeHtml(jd.title)} · v${jd.version} · ${escapeHtml(jd.status.replace(/_/g, ' '))}</div>
-      ${printTable(
-        ['Field', 'Value'],
-        [
-          ['Employee Name', jdEmployeeName(jd)],
-          ['Employee Code', jdEmployeeCode(jd)],
-          ['Department', jdDepartment(jd)],
-          ['Functional Role', jdRole(jd)],
-          ['JD Version', `v${jd.version}`],
-          ['Approved By', jd.approvedByName ?? '—'],
-          ['Acknowledged', jd.acknowledgedAt ? `Yes · ${formatDate(jd.acknowledgedAt)}` : 'Pending'],
-        ],
-      )}
-      <div class="section">Job Description Details</div>
-      <div>${DOMPurify.sanitize(jd.content ?? '')}</div>
-    `;
-    printHtml(`Job Description — ${jd.title}`, body, { printedBy: currentUserName });
-  };
+  const printJD = (jd: JD) =>
+    printJobDescription(
+      {
+        title: jd.title,
+        version: jd.version,
+        status: jd.status,
+        employeeName: jdEmployeeName(jd),
+        employeeCode: jdEmployeeCode(jd),
+        department: jdDepartment(jd),
+        functionalRole: jdRole(jd),
+        approvedByName: jd.approvedByName ?? null,
+        acknowledgedAt: jd.acknowledgedAt ?? null,
+        content: jd.content,
+      },
+      { printedBy: currentUserName },
+    );
 
   // A JD is "active" once it is approved/under review and not obsoleted.
   const isJdActive = (r: JD) => r.status === 'APPROVED' || r.status === 'UNDER_REVIEW';

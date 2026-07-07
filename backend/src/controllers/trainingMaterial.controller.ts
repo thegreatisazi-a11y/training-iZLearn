@@ -69,6 +69,31 @@ export const bulkUpload = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, result, `${result.uploaded} file(s) uploaded${result.failed ? `, ${result.failed} failed` : ''}`);
 });
 
+// --- Global "training instruction" file (shown before reading on Start Training) ---
+
+/** The current instruction (or null). Available to any authenticated user. */
+export const instruction = asyncHandler(async (_req: Request, res: Response) => {
+  sendSuccess(res, await svc.getCurrentInstruction());
+});
+
+/** Flag/unflag a library material as the training instruction (managers). */
+export const setInstruction = asyncHandler(async (req: Request, res: Response) => {
+  const on = req.body?.on !== false; // default: set as instruction
+  const updated = await svc.setInstruction(req.params.id, on, req.user!.id);
+  sendSuccess(res, updated, on ? 'Set as training instruction' : 'Instruction cleared');
+});
+
+/** Update the instruction with a new uploaded file (versioned; managers). */
+export const replaceInstruction = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) throw AppError.badRequest('A file is required.');
+  sendCreated(res, await svc.replaceInstruction(req.file, req.user!.id), 'Instruction updated');
+});
+
+/** Record that a trainee acknowledged the instruction before starting. */
+export const acknowledgeInstruction = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.acknowledgeInstruction(req.user!.id, req.params.id));
+});
+
 export const download = asyncHandler(async (req: Request, res: Response) => {
   // BUG-10: this endpoint serves BOTH the inline locked viewer (no flag) and explicit
   // file downloads (?download=1). View-only users may render inline but must not save

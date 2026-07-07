@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileText, Printer, ChevronLeft } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { printHtml, escapeHtml } from '@/lib/print';
+import { printJobDescription } from '@/lib/jdPrint';
 import { useAuthStore } from '@/store/authStore';
 import { JD_ACK_SENTENCE } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -33,6 +33,12 @@ interface MyJD {
   acknowledgedAt?: string | null;
   acknowledgementText?: string | null;
   acknowledgementComment?: string | null;
+  // Enriched by the API so the printout matches the Job Description module exactly.
+  employeeName?: string | null;
+  employeeCode?: string | null;
+  departmentName?: string | null;
+  functionalRoleName?: string | null;
+  approvedByName?: string | null;
 }
 
 type Decision = 'APPROVE' | 'REJECT';
@@ -48,13 +54,22 @@ export default function MyJobDescriptionPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const userName = useAuthStore((s) => s.user?.fullName);
 
-  const printMyJD = (j: MyJD) => {
-    printHtml(
-      j.title,
-      `<h1>${escapeHtml(j.title)}</h1><div class="sub">Status: ${escapeHtml(j.status)} · Version v${j.version}${j.acknowledgedAt ? ` · Acknowledged ${escapeHtml(formatDateTime(j.acknowledgedAt))}` : ''}</div><div>${DOMPurify.sanitize(j.content)}</div>`,
+  const printMyJD = (j: MyJD) =>
+    printJobDescription(
+      {
+        title: j.title,
+        version: j.version,
+        status: j.status,
+        employeeName: j.employeeName ?? userName ?? null,
+        employeeCode: j.employeeCode ?? null,
+        department: j.departmentName ?? null,
+        functionalRole: j.functionalRoleName ?? null,
+        approvedByName: j.approvedByName ?? null,
+        acknowledgedAt: j.acknowledgedAt ?? null,
+        content: j.content,
+      },
       { printedBy: userName },
     );
-  };
 
   const { data, isLoading } = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<MyJD[]> });
   const jds = (data ?? []) as MyJD[];

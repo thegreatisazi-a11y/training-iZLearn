@@ -38,9 +38,37 @@ function isPublished(status: string): boolean {
   return status === 'PUBLISHED';
 }
 
+/**
+ * Item 1: block duplicate file names. Within a course (`topicId`) or the Material
+ * Library (`library`), a file whose name already matches an active (non-deleted,
+ * non-obsolete) material is rejected — so the same file can't be uploaded/attached
+ * twice. Case-insensitive; superseded prior versions never count (Replace still works).
+ */
+async function assertNoDuplicateName(originalName: string, scope: { topicId: string } | { library: true }) {
+  const where: Prisma.TrainingMaterialWhereInput = {
+    isDeleted: false,
+    isObsolete: false,
+    originalFileName: { equals: originalName, mode: 'insensitive' },
+    ...('library' in scope ? { topicId: '' } : { topicId: scope.topicId }),
+  };
+  const existing = await prisma.trainingMaterial.findFirst({ where });
+  if (existing) {
+    throw AppError.badRequest(
+      'library' in scope
+        ? `A file named "${originalName}" already exists in the Material Library.`
+        : `A file named "${originalName}" is already attached to this course.`,
+    );
+  }
+}
+
 export async function uploadMaterial(topicId: string, file: Express.Multer.File, createdBy: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
+
+  // Item 1: reject a duplicate file name in the same course so the same file can't be
+  // uploaded twice. Case-insensitive; ignores superseded (obsolete) prior versions and
+  // soft-deleted rows so Replace/Update still works.
+  await assertNoDuplicateName(file.originalname, { topicId });
 
   const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
@@ -99,6 +127,8 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
  * limit once.
  */
 async function persistLibraryMaterial(file: Express.Multer.File, createdBy: string, maxBytes: number) {
+  // Item 1: reject a duplicate file name already in the Material Library.
+  await assertNoDuplicateName(file.originalname, { library: true });
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
@@ -248,6 +278,9 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   if (!source) throw AppError.notFound('Source material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
+
+  // Item 1: don't attach a library file whose name is already present in the course.
+  await assertNoDuplicateName(source.originalFileName, { topicId });
 
   const storedFileName = generateStoredName(source.originalFileName);
   const destKey = materialKey(storedFileName);
@@ -512,4 +545,104 @@ export async function discardStagedMaterial(id: string, actorId: string) {
     newValue: { discardedStaged: true, originalFileName: material.originalFileName, actorId },
   });
   return updated;
+}
+
+// ============================================================================
+// Global "training instruction" file (shown to every trainee before reading).
+// Exactly one library-level material is flagged isInstruction at a time. It is
+// versioned via replaceInstruction (the previous file is archived) and cleared when
+// the material is deleted. getCurrentInstruction drives the Start-Training gate.
+// ============================================================================
+
+/** The current global instruction material (or null if none is set). */
+export async function getCurrentInstruction() {
+  return prisma.trainingMaterial.findFirst({
+    where: { isInstruction: true, isDeleted: false },
+    orderBy: { version: 'desc' },
+    select: { id: true, originalFileName: true, fileType: true, version: true },
+  });
+}
+
+/**
+ * Flag an existing LIBRARY material as the global instruction (or unset it). At most
+ * one material is ever flagged — setting a new one clears the previous.
+ */
+export async function setInstruction(materialId: string, on: boolean, actorId: string) {
+  const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
+  if (!material) throw AppError.notFound('Training material not found');
+  if (on && material.topicId) {
+    throw AppError.badRequest('Only a Material Library file (not one attached to a course) can be set as the training instruction.');
+  }
+  if (on) {
+    // Clear any other current instruction first so exactly one stays active.
+    await prisma.trainingMaterial.updateMany({ where: { isInstruction: true, id: { not: materialId } }, data: { isInstruction: false } });
+  }
+  const updated = await prisma.trainingMaterial.update({ where: { id: materialId }, data: { isInstruction: on } });
+  await recordEvent({
+    action: 'UPDATE',
+    entityType: 'TrainingMaterial',
+    entityId: materialId,
+    newValue: { isInstruction: on, originalFileName: material.originalFileName, actorId },
+  });
+  return updated;
+}
+
+/**
+ * Update the instruction with a NEW uploaded file: the new file becomes the current
+ * instruction (version + 1) and the previous instruction file is archived (kept for
+ * history). "The latest is reflected" — every trainee then sees the new file.
+ */
+export async function replaceInstruction(file: Express.Multer.File, createdBy: string) {
+  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
+  await scanFileForVirus(file.path);
+
+  const key = materialKey(file.filename);
+  await storage.putFile(key, file.path, file.mimetype);
+
+  const current = await prisma.trainingMaterial.findFirst({ where: { isInstruction: true, isDeleted: false }, orderBy: { version: 'desc' } });
+  // Archive the previous instruction (retain history), clearing its instruction flag.
+  if (current) {
+    await prisma.trainingMaterial.update({
+      where: { id: current.id },
+      data: { isInstruction: false, isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy },
+    });
+  }
+  const material = await prisma.trainingMaterial.create({
+    data: {
+      topicId: '',
+      originalFileName: file.originalname,
+      storedFileName: file.filename,
+      filePath: key,
+      fileType: getExtension(file.originalname),
+      fileSize: file.size,
+      version: (current?.version ?? 0) + 1,
+      isCurrentVersion: true,
+      isInstruction: true,
+      replacesMaterialId: current?.id ?? null,
+      createdBy,
+    },
+  });
+  await recordEvent({
+    action: 'FILE_UPLOAD',
+    entityType: 'TrainingMaterial',
+    entityId: material.id,
+    newValue: { instruction: true, replacedMaterialId: current?.id ?? null, originalFileName: file.originalname, version: material.version },
+  });
+  return material;
+}
+
+/** Record that a trainee acknowledged the instruction before starting training. */
+export async function acknowledgeInstruction(userId: string, materialId: string) {
+  const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false }, select: { id: true, version: true, originalFileName: true } });
+  if (!material) throw AppError.notFound('Instruction not found');
+  await recordEvent({
+    action: 'ACKNOWLEDGE',
+    entityType: 'TrainingMaterial',
+    entityId: materialId,
+    // The acting user (the trainee) is taken from the request's audit context; also
+    // recorded explicitly here for a self-contained record.
+    newValue: { instructionAcknowledged: true, version: material.version, originalFileName: material.originalFileName, byUserId: userId },
+  });
+  return { acknowledged: true };
 }

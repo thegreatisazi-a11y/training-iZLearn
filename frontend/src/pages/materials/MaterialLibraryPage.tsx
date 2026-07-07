@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, Trash2, Eye, Upload } from 'lucide-react';
+import { Download, Trash2, Eye, Upload, Bookmark, RefreshCw, X } from 'lucide-react';
 import { ALLOWED_MATERIAL_EXTENSIONS } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
@@ -26,6 +26,8 @@ interface Material {
   version: number;
   isCurrentVersion: boolean;
   isObsolete: boolean;
+  isInstruction?: boolean;
+  topicId?: string;
 }
 
 const FILE_TYPE_OPTIONS = ALLOWED_MATERIAL_EXTENSIONS.map((e) => ({ value: e, label: e.toUpperCase() }));
@@ -77,6 +79,16 @@ export default function MaterialLibraryPage() {
       }),
   });
 
+  // The current global training instruction (drives the banner; independent of paging).
+  const { data: instruction } = useQuery({
+    queryKey: ['training-instruction'],
+    queryFn: () => svc.materials.instruction() as unknown as Promise<Material | null>,
+  });
+  const refreshInstruction = () => {
+    qc.invalidateQueries({ queryKey: ['materials'] });
+    qc.invalidateQueries({ queryKey: ['training-instruction'] });
+  };
+
   const uploadMut = useMutation({
     mutationFn: (file: File) => svc.materials.upload(file, uploadTopicId),
     onSuccess: () => {
@@ -108,11 +120,32 @@ export default function MaterialLibraryPage() {
     e.target.value = ''; // allow re-selecting the same files
   };
 
+  // Set/clear a library file as the global training instruction shown before reading.
+  const setInstructionMut = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) => svc.materials.setInstruction(id, on),
+    onSuccess: (_r, { on }) => {
+      toast.success(on ? 'Set as training instruction' : 'Instruction removed');
+      refreshInstruction();
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // Update the instruction with a new file — versioned (previous is archived), latest reflected.
+  const instrInputRef = useRef<HTMLInputElement>(null);
+  const replaceInstructionMut = useMutation({
+    mutationFn: (file: File) => svc.materials.replaceInstruction(file),
+    onSuccess: () => {
+      toast.success('Instruction updated — trainees now see the latest version.');
+      refreshInstruction();
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
   const deleteMut = useMutation({
     mutationFn: (reason: string) => svc.materials.remove(deleting!.id, reason),
     onSuccess: () => {
       toast.success('Material deleted');
-      qc.invalidateQueries({ queryKey: ['materials'] });
+      refreshInstruction();
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -136,7 +169,16 @@ export default function MaterialLibraryPage() {
   });
 
   const columns: Column<Material>[] = [
-    { key: 'originalFileName', header: 'File', render: (r) => <span className="font-medium text-slate-800">{r.originalFileName}</span> },
+    {
+      key: 'originalFileName',
+      header: 'File',
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="font-medium text-slate-800">{r.originalFileName}</span>
+          {r.isInstruction && <Badge tone="APPROVED">Instruction</Badge>}
+        </span>
+      ),
+    },
     { key: 'fileType', header: 'Type', render: (r) => <span className="uppercase">{r.fileType}</span> },
     { key: 'version', header: 'Version', render: (r) => `v${r.version}` },
     { key: 'isCurrentVersion', header: 'Current', render: (r) => (r.isCurrentVersion ? <Badge tone="APPROVED">Current</Badge> : <Badge tone="WAIVED">No</Badge>) },
@@ -147,6 +189,20 @@ export default function MaterialLibraryPage() {
       className: 'text-right',
       render: (r) => (
         <div className="flex justify-end gap-2">
+          {/* Compact icon: mark a library file (no owning topic) as the global instruction.
+              Managing the current instruction (update/remove) lives in the banner above. */}
+          {canWrite && !r.isInstruction && !r.isObsolete && r.isCurrentVersion && !r.topicId && (
+            <button
+              type="button"
+              title="Set as training instruction"
+              aria-label="Set as training instruction"
+              onClick={() => setInstructionMut.mutate({ id: r.id, on: true })}
+              disabled={setInstructionMut.isPending}
+              className="text-slate-500 hover:text-primary"
+            >
+              <Bookmark className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setViewing(r)}
@@ -197,6 +253,51 @@ export default function MaterialLibraryPage() {
           ) : undefined
         }
       />
+
+      {/* Hidden picker for updating the training-instruction file (versioned replace). */}
+      <input
+        ref={instrInputRef}
+        type="file"
+        className="hidden"
+        accept={ALLOWED_MATERIAL_EXTENSIONS.map((e) => `.${e}`).join(',')}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) replaceInstructionMut.mutate(file);
+          e.target.value = '';
+        }}
+      />
+
+      {/* Global training-instruction manager — one compact banner instead of widening
+          every table row. Update/Remove live here; "Set as instruction" is a small icon
+          on eligible library rows below. */}
+      {canWrite && (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2 text-sm">
+            <Bookmark className="h-4 w-4 shrink-0 text-primary" />
+            {instruction ? (
+              <span className="truncate text-slate-700">
+                Training instruction: <strong>{instruction.originalFileName}</strong>{' '}
+                <span className="text-slate-400">v{instruction.version} · shown to every trainee before reading</span>
+              </span>
+            ) : (
+              <span className="text-slate-500">No training instruction set — use the bookmark icon on a library file to show it before every training.</span>
+            )}
+          </div>
+          {instruction && (
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setViewing(instruction)}>
+                <Eye className="h-4 w-4" /> View
+              </Button>
+              <Button size="sm" variant="outline" disabled={replaceInstructionMut.isPending} onClick={() => instrInputRef.current?.click()}>
+                <RefreshCw className="h-4 w-4" /> {replaceInstructionMut.isPending ? 'Updating…' : 'Update file'}
+              </Button>
+              <Button size="sm" variant="outline" disabled={setInstructionMut.isPending} onClick={() => setInstructionMut.mutate({ id: instruction.id, on: false })}>
+                <X className="h-4 w-4" /> Remove
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {canWrite && (
         <Card className="mb-5">

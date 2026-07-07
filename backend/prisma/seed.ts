@@ -200,21 +200,55 @@ async function main() {
   console.log(`   ✓ ${Object.keys(DEFAULT_SYSTEM_CONFIG).length} system config keys`);
 
   // 2. Roles -----------------------------------------------------------------
+  // Match existing roles CASE-INSENSITIVELY so a role renamed via the UI (e.g.
+  // 'SUPERVISOR' → 'Supervisor') is never duplicated on re-seed. Previously the seed
+  // upserted by exact roleName, so after such a rename each seed run re-created the
+  // UPPERCASE role — leaving two 'Trainee'/'Supervisor' entries. A live role's
+  // permissions are PRESERVED (never clobbered); defaults are only applied on create.
   const roleIdByName = new Map<string, string>();
+  const allRoles = await prisma.role.findMany();
+  const activeLinks = (roleId: string) => prisma.userRole.count({ where: { roleId, isActive: true } });
+
   for (const def of ROLE_DEFINITIONS) {
-    const role = await prisma.role.upsert({
-      where: { roleName: def.roleName },
-      update: { description: def.description, permissions: def.permissions as Prisma.InputJsonValue },
-      create: {
-        roleName: def.roleName,
-        description: def.description,
-        permissions: def.permissions as Prisma.InputJsonValue,
-        createdBy: SYSTEM,
-      },
-    });
-    roleIdByName.set(def.roleName, role.id);
+    const matches = allRoles.filter((r) => r.roleName.trim().toLowerCase() === def.roleName.toLowerCase());
+    if (matches.length === 0) {
+      const created = await prisma.role.create({
+        data: {
+          roleName: def.roleName,
+          description: def.description,
+          permissions: def.permissions as Prisma.InputJsonValue,
+          createdBy: SYSTEM,
+        },
+      });
+      roleIdByName.set(def.roleName, created.id);
+      continue;
+    }
+    // Canonical = the surviving role: prefer non-deleted, then most active user links,
+    // so the live role that actually carries users always wins the merge.
+    const ranked: { r: (typeof matches)[number]; links: number }[] = [];
+    for (const r of matches) ranked.push({ r, links: await activeLinks(r.id) });
+    // Non-deleted first, then the one with the most active user links.
+    ranked.sort((a, b) => Number(!b.r.isDeleted) - Number(!a.r.isDeleted) || b.links - a.links);
+    const canonical = ranked[0].r;
+    roleIdByName.set(def.roleName, canonical.id);
+
+    // Merge & retire duplicate case-variants: reassign their users to the canonical
+    // role (skipping any the user already has), then soft-delete the duplicate. No
+    // permissions or user assignments are lost.
+    for (const { r: dupRole } of ranked.slice(1)) {
+      const links = await prisma.userRole.findMany({ where: { roleId: dupRole.id } });
+      for (const link of links) {
+        const already = await prisma.userRole.findFirst({ where: { userId: link.userId, roleId: canonical.id } });
+        if (already) await prisma.userRole.delete({ where: { id: link.id } });
+        else await prisma.userRole.update({ where: { id: link.id }, data: { roleId: canonical.id } });
+      }
+      if (!dupRole.isDeleted) {
+        await prisma.role.update({ where: { id: dupRole.id }, data: { isDeleted: true, isActive: false } });
+        console.log(`   ✓ merged duplicate role '${dupRole.roleName}' → '${canonical.roleName}'`);
+      }
+    }
   }
-  console.log(`   ✓ ${ROLE_DEFINITIONS.length} roles`);
+  console.log(`   ✓ ${ROLE_DEFINITIONS.length} roles ensured`);
 
   // 2a. Back-fill split permissions so no CUSTOM role loses access when a module is split.
   // "User Requests" was split from Users; "Certificate Templates" from Certificates. For
@@ -229,6 +263,14 @@ async function main() {
       if (!p.userRequests && p.userManagement) {
         const ur = { view: !!(p.userManagement.view || p.userManagement.read), approve: !!p.userManagement.approve };
         p.userRequests = { ...ur, ...deriveLegacyFlags(ur) };
+        changed = true;
+      }
+      // "Bulk Upload" is now its own granular action + route guard. Roles that could
+      // already bulk-upload (had userManagement write/create) keep the ability so the
+      // new gate doesn't silently remove it; the toggle then meaningfully controls it.
+      // Only fills when the flag is entirely absent — never overrides an admin's choice.
+      if (p.userManagement && p.userManagement.bulk_upload === undefined && (p.userManagement.write || p.userManagement.create)) {
+        p.userManagement.bulk_upload = true;
         changed = true;
       }
       // The old "Certificate Templates" menu required certificates:write, so only roles

@@ -32,12 +32,34 @@ import type {
 
 // ---- Job descriptions -------------------------------------------------------
 
-export async function listJDs(q: PaginationQuery & { userId?: string }) {
+export async function listJDs(
+  q: PaginationQuery & { userId?: string },
+  requester?: { id: string; roleNames: string[] },
+) {
   const where: Prisma.JobDescriptionWhereInput = {
     isDeleted: false,
-    ...(q.userId ? { userId: q.userId } : {}),
     ...(q.search ? { title: { contains: q.search, mode: 'insensitive' } } : {}),
   };
+  // Item 9: a Supervisor (who is not also a SUPER_ADMIN) may only see the JDs of their
+  // own direct reports. Admins / Training Coordinators / everyone else keep org-wide
+  // visibility. Keyed on the role NAME because a live 'Supervisor' role can actually
+  // carry broader granular permissions than a coordinator, so permissions can't tell
+  // them apart. Case-insensitive to match both 'Supervisor' and legacy 'SUPERVISOR'.
+  const isSuperAdmin = !!requester?.roleNames.includes('SUPER_ADMIN');
+  const isSupervisor = !isSuperAdmin && !!requester?.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
+  if (isSupervisor && requester) {
+    const reports = await prisma.user.findMany({
+      where: { supervisorId: requester.id, isDeleted: false },
+      select: { id: true },
+    });
+    let allowed = reports.map((r) => r.id);
+    // Honour an explicit ?userId filter only when it targets a direct report.
+    if (q.userId) allowed = allowed.includes(q.userId) ? [q.userId] : [];
+    // No reports (or a disallowed filter) must yield NO rows, never the whole org.
+    where.userId = { in: allowed.length ? allowed : ['__no_match__'] };
+  } else if (q.userId) {
+    where.userId = q.userId;
+  }
   const [data, total] = await Promise.all([
     prisma.jobDescription.findMany({
       where,
@@ -105,14 +127,39 @@ export async function listMyJDs(userId: string) {
   // so JDs that became APPROVED via the review flow (assignedBy unset) still show a name.
   const assignerOf = (j: { assignedBy: string | null; approvedBy: string | null; createdBy: string }) =>
     j.assignedBy ?? j.approvedBy ?? j.createdBy ?? null;
-  const ids = Array.from(new Set(jds.map(assignerOf).filter(Boolean) as string[]));
-  const people = ids.length
-    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, fullName: true } })
-    : [];
-  const nameById = new Map(people.map((u) => [u.id, u.fullName]));
+  // Resolve every referenced person (owner, assigner, approver) + department + functional
+  // role so the printout can mirror the Job Description module's format exactly (item 8).
+  const personIds = Array.from(
+    new Set([userId, ...jds.map(assignerOf), ...jds.map((j) => j.approvedBy)].filter(Boolean) as string[]),
+  );
+  const deptIds = Array.from(new Set(jds.map((j) => j.departmentId).filter(Boolean) as string[]));
+  const roleIds = Array.from(new Set(jds.map((j) => j.functionalRoleId).filter(Boolean) as string[]));
+  const [people, depts, roles] = await Promise.all([
+    personIds.length
+      ? prisma.user.findMany({ where: { id: { in: personIds } }, select: { id: true, fullName: true, employeeId: true } })
+      : Promise.resolve([]),
+    deptIds.length
+      ? prisma.department.findMany({ where: { id: { in: deptIds } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+    roleIds.length
+      ? prisma.designationMaster.findMany({ where: { id: { in: roleIds } }, select: { id: true, displayName: true } })
+      : Promise.resolve([]),
+  ]);
+  const personById = new Map(people.map((u) => [u.id, u]));
+  const deptById = new Map(depts.map((d) => [d.id, d.name]));
+  const roleById = new Map(roles.map((r) => [r.id, r.displayName]));
+  const owner = personById.get(userId);
   return jds.map((j) => {
     const aid = assignerOf(j);
-    return { ...j, assignedByName: aid ? nameById.get(aid) ?? null : null };
+    return {
+      ...j,
+      assignedByName: aid ? personById.get(aid)?.fullName ?? null : null,
+      approvedByName: j.approvedBy ? personById.get(j.approvedBy)?.fullName ?? null : null,
+      employeeName: owner?.fullName ?? null,
+      employeeCode: owner?.employeeId ?? null,
+      departmentName: j.departmentId ? deptById.get(j.departmentId) ?? null : null,
+      functionalRoleName: j.functionalRoleId ? roleById.get(j.functionalRoleId) ?? null : null,
+    };
   });
 }
 

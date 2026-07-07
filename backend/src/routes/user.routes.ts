@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as c from '../controllers/user.controller';
 import { authenticate } from '../middlewares/auth.middleware';
-import { requirePermission } from '../middlewares/rbac.middleware';
+import { requirePermission, requireExactPermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
 import { uploadExcel } from '../middlewares/upload.middleware';
@@ -28,13 +28,14 @@ router.get('/team/:userId/history', requirePermission('team', 'view'), c.teamHis
 
 // Creation requests (specific routes before '/:id'). The User Requests QUEUE (list +
 // approve/reject) is now its own permission module, split from Users. Raising a request
-// stays a Users capability (userManagement:write), since it is initiated from the Users /
-// My Team screens.
+// is gated on the EXACT userManagement:create flag so the "Create / New User Request"
+// toggle in Roles & Access Control controls it independently (using the derived `write`
+// would let edit/assign/etc. implicitly re-enable it).
 router.get('/requests', requirePermission('userRequests', 'view'), c.listRequests);
 router.get('/requests/:id', requirePermission('userRequests', 'view'), c.getRequest);
 router.post(
   '/requests',
-  requirePermission('userManagement', 'write'),
+  requireExactPermission('userManagement', 'create'),
   validate(createUserSchema),
   c.createRequest,
 );
@@ -45,14 +46,16 @@ router.post(
   c.decideRequest,
 );
 
-// Bulk upload
+// Bulk upload — gated on the dedicated 'bulk_upload' action so the Roles & Access
+// Control toggle actually controls it (seed back-fills it for roles that previously
+// could bulk-upload via write, so no one loses existing access).
 router.post(
   '/bulk/preview',
-  requirePermission('userManagement', 'write'),
+  requireExactPermission('userManagement', 'bulk_upload'),
   uploadExcel.single('file'),
   c.bulkPreview,
 );
-router.post('/bulk/commit', requirePermission('userManagement', 'write'), c.bulkCommit);
+router.post('/bulk/commit', requireExactPermission('userManagement', 'bulk_upload'), c.bulkCommit);
 
 // Single user
 router.get('/:id', requirePermission('userManagement', 'read'), c.get);

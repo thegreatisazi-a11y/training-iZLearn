@@ -3,7 +3,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
-import { ESignatureModal } from '@/components/common/ESignatureModal';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input, Field } from '@/components/ui/input';
@@ -159,7 +158,6 @@ const ACTIONS = [
 export default function AuditTrailPage() {
   const canExport = useAuthStore((s) => s.hasPermission)('auditTrail', 'export');
   const [page, setPage] = useState(1);
-  const [signOpen, setSignOpen] = useState(false);
 
   // Resolve user IDs in change details to names (e.g. "Approved By: … → System Administrator").
   const usersForNames = useQuery({ queryKey: ['users', 'audit-names'], queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }) });
@@ -222,7 +220,8 @@ export default function AuditTrailPage() {
   });
 
   const exportMutation = useMutation({
-    mutationFn: async (sig: { windowsUsername: string; signaturePassword: string; meaning: string }) => {
+    // Item 6: audit-trail export no longer requires an e-signature.
+    mutationFn: async () => {
       const res = await svc.audit.export(format, {
         from: filters.from || undefined,
         to: filters.to || undefined,
@@ -230,7 +229,6 @@ export default function AuditTrailPage() {
         action: filters.action || undefined,
         entityType: filters.entityType || undefined,
         entityId: filters.entityId || undefined,
-        signature: sig,
       });
       return res.data as Blob;
     },
@@ -306,7 +304,7 @@ export default function AuditTrailPage() {
                   { value: 'pdf', label: 'PDF' },
                 ]}
               />
-              <Button variant="outline" onClick={() => setSignOpen(true)}>
+              <Button variant="outline" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
                 <Download className="h-4 w-4" /> Export
               </Button>
             </div>
@@ -351,15 +349,6 @@ export default function AuditTrailPage() {
         emptyText="No audit records match the filters."
       />
 
-      <ESignatureModal
-        open={signOpen}
-        onClose={() => setSignOpen(false)}
-        title="Sign to Export Audit Trail"
-        defaultMeaning="Reviewed"
-        onConfirm={async (sig) => {
-          await exportMutation.mutateAsync(sig);
-        }}
-      />
     </div>
   );
 }

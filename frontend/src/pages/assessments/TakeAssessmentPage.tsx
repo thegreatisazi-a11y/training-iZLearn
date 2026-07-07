@@ -225,9 +225,11 @@ export default function TakeAssessmentPage() {
   const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, Answer>>({});
   const [result, setResult] = useState<SubmitResult | null>(null);
-  // Phase 6 / reading-gate: questions are gated behind per-material timed reading,
-  // and the attempt is only STARTED once the server confirms reading is complete.
-  const [phase, setPhase] = useState<'material' | 'assessment'>('material');
+  // Phase 6 / reading-gate: an optional instruction step (shown first if a global
+  // training instruction is configured), then per-material timed reading, then the
+  // assessment (only STARTED once the server confirms reading is complete).
+  const [phase, setPhase] = useState<'instruction' | 'material' | 'assessment'>('instruction');
+  const [instructionAck, setInstructionAck] = useState(false);
   // CR-38: one question at a time + countdown.
   const [current, setCurrent] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -310,6 +312,16 @@ export default function TakeAssessmentPage() {
 
   const topicQ = useQuery({ queryKey: ['topic-meta', topicId], queryFn: () => svc.topics.get(topicId), enabled: !!topicId });
   const readingQ = useQuery({ queryKey: ['reading-status', topicId], queryFn: () => svc.materials.readingStatus(topicId) as unknown as Promise<ReadingItem[]>, enabled: !!topicId });
+  // Global training instruction shown before reading (null when none is configured).
+  const instructionQ = useQuery({
+    queryKey: ['training-instruction'],
+    queryFn: () => svc.materials.instruction() as unknown as Promise<{ id: string; originalFileName: string; fileType: string; version: number } | null>,
+  });
+  const instruction = instructionQ.data ?? null;
+  // Skip the instruction step entirely when none is configured (unchanged flow).
+  useEffect(() => {
+    if (phase === 'instruction' && instructionQ.isSuccess && !instruction) setPhase('material');
+  }, [phase, instructionQ.isSuccess, instruction]);
   const topicTitle = (topicQ.data as { title?: string } | undefined)?.title;
   // BUG-04: show the topic number alongside the title wherever the topic is named.
   const topicMeta0 = topicQ.data as { topicNumber?: string; topicCode?: string } | undefined;
@@ -617,6 +629,48 @@ export default function TakeAssessmentPage() {
             <ArrowLeft className="h-4 w-4" /> Back to Assessments
           </Button>
         </Link>
+      </div>
+    );
+  }
+
+  // Instruction step — shown FIRST whenever a global training instruction is configured.
+  // The trainee reads it in the locked viewer and must acknowledge before continuing to
+  // the reading step. When no instruction exists, an effect advances straight to reading.
+  if (phase === 'instruction') {
+    if (instructionQ.isLoading || !instruction) return <PageLoader />;
+    const proceed = () => {
+      // Record the acknowledgement (best-effort — never block starting training on it).
+      svc.materials.acknowledgeInstruction(instruction.id).catch(() => undefined);
+      setPhase('material');
+    };
+    return (
+      <div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wide text-slate-400">Start Training · Instructions</div>
+            <div className="truncate text-lg font-semibold text-slate-800">{topicLabel ?? 'Training Material'}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="ghost" onClick={() => navigate('/my-trainings')}>Cancel</Button>
+            <Button disabled={!instructionAck} onClick={proceed}>Continue</Button>
+          </div>
+        </div>
+        <Card>
+          <CardContent>
+            <div className="mb-2 text-sm font-medium text-slate-700">Please read the instructions below before starting your training.</div>
+            <InlineFileViewer materialId={instruction.id} fileName={instruction.originalFileName} fileType={instruction.fileType} heightClass="h-[72vh]" />
+          </CardContent>
+        </Card>
+        {/* Checkbox AND a Continue button together at the bottom, so on small screens the
+            acknowledgement and the action to proceed are always visible together (the top
+            bar's Continue can scroll out of view under a tall document). */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={instructionAck} onChange={(e) => setInstructionAck(e.target.checked)} />
+            I have read and understood the instructions.
+          </label>
+          <Button disabled={!instructionAck} onClick={proceed}>Continue</Button>
+        </div>
       </div>
     );
   }

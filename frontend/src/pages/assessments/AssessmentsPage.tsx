@@ -17,6 +17,7 @@ import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 import { formatDateTime } from '@/lib/format';
+import { printHtml, escapeHtml } from '@/lib/print';
 
 interface ReviewDetail {
   questionId: string;
@@ -78,6 +79,12 @@ interface BlockedAssignment {
   topicNumber?: string | null;
   status: string;
 }
+/** Item 3: a completed attempt of another user the requester may view/download. */
+interface ManagedAttempt extends Attempt {
+  userId: string;
+  userFullName?: string | null;
+  employeeId?: string | null;
+}
 
 /** BUG-04: "TT-001 – Title" (falls back gracefully when either part is missing). */
 function topicLabel(number?: string | null, title?: string | null, id?: string): string {
@@ -89,6 +96,38 @@ function fmtDuration(s?: number | null): string {
   if (s === null || s === undefined) return '—';
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}m ${s % 60}s` : `${s % 60}s`;
+}
+
+/** Item 3: build & open a printable ("Save as PDF") document for a completed attempt —
+ *  the same summary + per-question breakdown shown on screen. Used by the Download
+ *  action on both a learner's own test and (for managers) a team member's test. */
+function printAttemptReview(data: AttemptReview, who?: string | null): void {
+  const heading = `${data.topicNumber ? `${data.topicNumber} – ` : ''}${data.topicTitle ?? 'Assessment'}`;
+  const summary =
+    `<table>` +
+    (who ? `<tr><th>Employee</th><td>${escapeHtml(who)}</td></tr>` : '') +
+    `<tr><th>Result</th><td>${data.isPassed ? 'Passed' : 'Failed'}</td></tr>` +
+    `<tr><th>Score</th><td>${data.score}%</td></tr>` +
+    `<tr><th>Passing score</th><td>${data.passingScorePercent}%</td></tr>` +
+    `<tr><th>Correct</th><td>${data.correctCount}</td></tr>` +
+    `<tr><th>Incorrect</th><td>${data.incorrectCount}</td></tr>` +
+    `<tr><th>Attempt</th><td>${data.attemptNumber} of ${data.maxAttempts}</td></tr>` +
+    `<tr><th>Time on assessment</th><td>${fmtDuration(data.timeSpentSeconds)}</td></tr>` +
+    `<tr><th>Time on reading</th><td>${fmtDuration(data.readingTimeSeconds)}</td></tr>` +
+    `</table>`;
+  const review = data.allDetails?.length ? data.allDetails : data.incorrectDetails ?? [];
+  const questions = review
+    .map(
+      (d, i) =>
+        `<div style="margin:10px 0;padding:8px 0;border-top:1px solid #ddd;">` +
+        `<div><strong>${i + 1}. ${escapeHtml(d.questionText)}</strong>${d.isCorrect === true ? ' ✓' : d.isCorrect === false ? ' ✗' : ''}</div>` +
+        `<div>Your answer: ${escapeHtml(formatCorrect(d.userAnswer) || '—')}</div>` +
+        `${d.correctAnswer != null && d.correctAnswer !== '' ? `<div>Correct answer: ${escapeHtml(formatCorrect(d.correctAnswer))}</div>` : ''}` +
+        `${d.explanation ? `<div>Explanation: ${escapeHtml(String(d.explanation))}</div>` : ''}` +
+        `</div>`,
+    )
+    .join('');
+  printHtml('Assessment Result', `<h2>${escapeHtml(heading)}</h2>${summary}${questions ? `<h3>Questions</h3>${questions}` : ''}`);
 }
 
 /**
@@ -214,6 +253,25 @@ export default function AssessmentsPage() {
   const [signature, setSignature] = useState<ESignaturePayload | null>(null);
   // View a completed attempt's questions & answers.
   const [reviewId, setReviewId] = useState<string | null>(null);
+  // Item 3: attempts of others the requester may view/download (team for a supervisor,
+  // org-wide for admin/coordinator). Empty for a plain learner → the table stays hidden.
+  const managed = useQuery({ queryKey: ['assessments', 'managed'], queryFn: () => svc.assessments.listManaged() as unknown as Promise<ManagedAttempt[]> });
+  const managedRows = managed.data ?? [];
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  // Item 3: "Download" fetches the attempt's full review then opens a printable
+  // ("Save as PDF") document. Own tests hide the answer key; managers get the full key.
+  const downloadReview = async (attemptId: string, who?: string | null) => {
+    setDownloadingId(attemptId);
+    try {
+      const data = (await svc.assessments.review(attemptId)) as unknown as AttemptReview;
+      printAttemptReview(data, who);
+    } catch (e) {
+      toast.error(apiError(e));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const unblockMutation = useMutation({
     mutationFn: ({ assignmentId, reasonForChange, sig }: { assignmentId: string; reasonForChange: string; sig: ESignaturePayload }) =>
@@ -239,13 +297,43 @@ export default function AssessmentsPage() {
       key: 'actions',
       header: '',
       className: 'text-right',
-      // Once completed (passed or failed), let the user review the questions & answers.
+      // Once completed (passed or failed), let the user review AND download the test.
       render: (r) =>
         r.completedAt ? (
-          <Button size="sm" variant="outline" onClick={() => setReviewId(r.id)}>
-            View
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button size="sm" variant="outline" onClick={() => setReviewId(r.id)}>
+              View Test
+            </Button>
+            <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id)}>
+              Download
+            </Button>
+          </div>
         ) : null,
+    },
+  ];
+
+  // Item 3: managed (team / org-wide) completed attempts — View + Download of others' tests.
+  const managedColumns: Column<ManagedAttempt>[] = [
+    { key: 'user', header: 'Employee', render: (r) => (r.userFullName ? `${r.userFullName}${r.employeeId ? ` (${r.employeeId})` : ''}` : r.userId) },
+    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
+    { key: 'attemptNumber', header: 'Attempt', render: (r) => `#${r.attemptNumber}` },
+    { key: 'score', header: 'Score', render: (r) => (r.score == null ? '—' : `${r.score}%`) },
+    { key: 'isPassed', header: 'Result', render: (r) => <Badge tone={r.isPassed ? 'COMPLETED' : 'REJECTED'}>{r.isPassed ? 'Passed' : 'Failed'}</Badge> },
+    { key: 'completedAt', header: 'Completed', render: (r) => formatDateTime(r.completedAt) },
+    {
+      key: 'actions',
+      header: '',
+      className: 'text-right',
+      render: (r) => (
+        <div className="flex justify-end gap-1">
+          <Button size="sm" variant="outline" onClick={() => setReviewId(r.id)}>
+            View Test
+          </Button>
+          <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id, r.userFullName)}>
+            Download
+          </Button>
+        </div>
+      ),
     },
   ];
 
@@ -294,6 +382,15 @@ export default function AssessmentsPage() {
         <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">My Assessments</h2>
         <DataTable columns={mineColumns} rows={mine.data ?? []} loading={mine.isLoading} emptyText="You have not attempted any assessments yet." />
       </div>
+
+      {/* Item 3: team members' (supervisor) or everyone's (admin/coordinator) completed
+          tests — view & download. Hidden when there are none the requester may access. */}
+      {managedRows.length > 0 && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Team Assessments</h2>
+          <DataTable columns={managedColumns} rows={managedRows} loading={managed.isLoading} emptyText="No completed assessments." />
+        </div>
+      )}
 
       {canManage && (
         <div>

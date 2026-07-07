@@ -186,6 +186,15 @@ export default function UsersPage() {
   const canApprove = hasPermission('userManagement', 'approve');
   const canPrint = hasPermission('userManagement', 'print');
   const canExport = hasPermission('userManagement', 'export');
+  // Each header action is gated on its OWN granular permission so a toggle in Roles &
+  // Access Control affects exactly that action. These are read EXACTLY from the stored
+  // matrix (no legacy read/write fallback): 'create' would otherwise be implied by the
+  // derived `write` flag (set by edit/assign/etc.), making the "Request New User" toggle
+  // have no effect; 'bulk_upload' has no fallback but is read the same way for clarity.
+  const rawUM = (useAuthStore((s) => s.user?.permissions) as Record<string, Record<string, boolean>> | undefined)?.userManagement ?? {};
+  const canBulkUpload = rawUM.bulk_upload === true;
+  const canCreateRequest = rawUM.create === true;
+  const canViewRequests = hasPermission('userRequests', 'view');
   const canAct = canWrite || canApprove;
 
   const [page, setPage] = useState(1);
@@ -447,16 +456,20 @@ export default function UsersPage() {
         description="Manage user accounts, requests and bulk onboarding."
         actions={
           <>
-            <Link to="/users/requests">
-              <Button variant="outline">
-                <ClipboardList className="h-4 w-4" /> Requests
-              </Button>
-            </Link>
-            <Link to="/users/bulk">
-              <Button variant="outline">
-                <Upload className="h-4 w-4" /> Bulk Upload
-              </Button>
-            </Link>
+            {canViewRequests && (
+              <Link to="/users/requests">
+                <Button variant="outline">
+                  <ClipboardList className="h-4 w-4" /> Requests
+                </Button>
+              </Link>
+            )}
+            {canBulkUpload && (
+              <Link to="/users/bulk">
+                <Button variant="outline">
+                  <Upload className="h-4 w-4" /> Bulk Upload
+                </Button>
+              </Link>
+            )}
             {canPrint && (
               <Button variant="outline" onClick={handlePrint}>
                 <Printer className="h-4 w-4" /> Print
@@ -472,7 +485,7 @@ export default function UsersPage() {
                 </Button>
               </>
             )}
-            {canWrite && (
+            {canCreateRequest && (
               <Button onClick={() => setCreateOpen(true)}>
                 <UserPlus className="h-4 w-4" /> New User Request
               </Button>

@@ -25,6 +25,16 @@ router.get('/', requirePermission('materialManagement', 'read'), c.list);
 // lock are still enforced in the controllers.
 // NOTE: '/reading-status' must precede '/:id' so it isn't captured as an id param.
 router.get('/reading-status', c.readingStatus);
+// Global training instruction shown before reading on Start Training. GET is available
+// to any authenticated user (they must see it before training). These literal paths MUST
+// precede '/:id' and '/:id/replace' so they aren't captured as an id param.
+router.get('/instruction', c.instruction);
+router.post(
+  '/instruction/replace',
+  requirePermission('materialManagement', 'write'),
+  uploadFile.single('file'),
+  c.replaceInstruction,
+);
 router.get('/:id', requirePermission('materialManagement', 'read'), c.get);
 router.get('/:id/download', c.download);
 // Locked, view-only PDF for the in-app viewer (native PDFs pass through; Office docs are
@@ -36,6 +46,10 @@ router.post('/:id/view/complete', c.completeView);
 router.post('/:id/view/progress', c.saveViewProgress);
 // Set per-material required reading time (course managers / material managers).
 router.patch('/:id', requirePermission('materialManagement', 'write'), c.setViewTime);
+// Flag/unflag a library material as the global training instruction (managers).
+router.patch('/:id/set-instruction', requirePermission('materialManagement', 'write'), c.setInstruction);
+// Trainee acknowledges the instruction before starting (personal action, any user).
+router.post('/:id/acknowledge-instruction', c.acknowledgeInstruction);
 // topicId is supplied in the multipart body alongside the file.
 router.post('/', requirePermission('materialManagement', 'write'), uploadFile.single('file'), c.upload);
 // CR-MAT2: bulk-upload multiple files (library-level when no topicId supplied).

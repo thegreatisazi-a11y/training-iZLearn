@@ -100,6 +100,15 @@ export const svc = {
     },
     attachFromLibrary: (materialId: string, topicId: string, reasonForChange?: string) =>
       data(api.post('/materials/attach', { materialId, topicId, reasonForChange })),
+    // Global "training instruction" file shown before reading on Start Training.
+    instruction: () => data(api.get('/materials/instruction')),
+    setInstruction: (id: string, on: boolean) => data(api.patch(`/materials/${id}/set-instruction`, { on })),
+    replaceInstruction: (file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return api.post('/materials/instruction/replace', fd).then((r) => r.data.data);
+    },
+    acknowledgeInstruction: (id: string) => data(api.post(`/materials/${id}/acknowledge-instruction`)),
     /** Replace a specific material with an existing Material Library file. */
     replaceFromLibrary: (id: string, sourceMaterialId: string, reasonForChange?: string) =>
       data(api.post(`/materials/${id}/replace-from-library`, { sourceMaterialId, reasonForChange })),
@@ -168,6 +177,8 @@ export const svc = {
     acknowledgeRead: (body: unknown) => data(api.post('/assessments/acknowledge-read', body)),
     listMine: (params?: ListParams) => data(api.get('/assessments/mine', { params })),
     list: (params?: ListParams) => data(api.get('/assessments', { params })),
+    /** Item 3: completed attempts of others the requester may view/download (team/all). */
+    listManaged: (params?: ListParams) => data(api.get('/assessments/managed', { params })),
     get: (id: string) => data(api.get(`/assessments/${id}`)),
     /** Full question-by-question review of a COMPLETED attempt (same as the post-submit screen). */
     review: (id: string) => data(api.get(`/assessments/${id}/review`)),

@@ -6,17 +6,28 @@ const MY_STATUSES = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE', 'BLOCKED'
 
 /** Role-aware dashboard payload — the frontend renders only the sections the user has. */
 export async function getDashboard(user: AuthUser) {
-  // Personal training summary (every user has this).
+  // A revised course supersedes its old version; the trainee gets a FRESH assignment to
+  // the new version and the old assignment is hidden everywhere in the app (see
+  // listMyTrainings). The dashboard must exclude those superseded-topic assignments too,
+  // otherwise its counts are higher than what the user actually sees on My Trainings.
+  // (Computed in JS — `supersededByTopicId` is optional and unreliable to filter on in Mongo.)
+  const allTopics = await prisma.trainingTopic.findMany({ where: { isDeleted: false }, select: { id: true, supersededByTopicId: true } });
+  const supersededTopicIds = allTopics.filter((t) => !!t.supersededByTopicId).map((t) => t.id);
+  const currentOnly = supersededTopicIds.length ? { topicId: { notIn: supersededTopicIds } } : {};
+
+  // Personal training summary (every user has this). OVERDUE is authoritative on the
+  // stored status (maintained by the daily due-reminder job); dueDate is optional and
+  // null for most assignments, so it can't be used to derive overdue here.
   const myCounts: Record<string, number> = {};
   await Promise.all(
     MY_STATUSES.map(async (s) => {
-      myCounts[s] = await prisma.trainingAssignment.count({ where: { userId: user.id, status: s, isDeleted: false } });
+      myCounts[s] = await prisma.trainingAssignment.count({ where: { userId: user.id, status: s, isDeleted: false, ...currentOnly } });
     }),
   );
   // CR-42: a refresher is "due" once its date has arrived on the COMPLETED assignment
   // (the new pending assignment is only created by the refresher job at that point).
   const refresherDue = await prisma.trainingAssignment.count({
-    where: { userId: user.id, isDeleted: false, status: 'COMPLETED', refresherDueDate: { not: null, lte: new Date() } },
+    where: { userId: user.id, isDeleted: false, status: 'COMPLETED', refresherDueDate: { not: null, lte: new Date() }, ...currentOnly },
   });
   const myCertificates = await prisma.certificate.count({ where: { userId: user.id, isDeleted: false } });
 
@@ -45,13 +56,13 @@ export async function getDashboard(user: AuthUser) {
     if (reportIds.length) {
       const [teamPending, teamOverdue, teamBlocked] = await Promise.all([
         prisma.trainingAssignment.count({
-          where: { userId: { in: reportIds }, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+          where: { userId: { in: reportIds }, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] }, ...currentOnly },
         }),
         prisma.trainingAssignment.count({
-          where: { userId: { in: reportIds }, isDeleted: false, status: 'OVERDUE' },
+          where: { userId: { in: reportIds }, isDeleted: false, status: 'OVERDUE', ...currentOnly },
         }),
         prisma.trainingAssignment.count({
-          where: { userId: { in: reportIds }, isDeleted: false, status: 'BLOCKED' },
+          where: { userId: { in: reportIds }, isDeleted: false, status: 'BLOCKED', ...currentOnly },
         }),
       ]);
       payload.team = {
@@ -82,17 +93,17 @@ export async function getDashboard(user: AuthUser) {
       prisma.trainingTopic.count({ where: { isDeleted: false, isActive: true } }),
       prisma.userCreationRequest.count({ where: { status: 'PENDING_APPROVAL', isDeleted: false } }),
       prisma.tNI.count({ where: { status: 'PENDING', isDeleted: false } }),
-      prisma.trainingAssignment.count({ where: { status: 'OVERDUE', isDeleted: false } }),
+      prisma.trainingAssignment.count({ where: { status: 'OVERDUE', isDeleted: false, ...currentOnly } }),
       prisma.jobDescription.count({ where: { status: 'UNDER_REVIEW', isDeleted: false } }),
-      prisma.trainingAssignment.count({ where: { status: 'BLOCKED', isDeleted: false } }),
+      prisma.trainingAssignment.count({ where: { status: 'BLOCKED', isDeleted: false, ...currentOnly } }),
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'DRAFT' } }),
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'UNDER_REVIEW' } }),
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'PUBLISHED' } }),
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'ARCHIVED' } }),
       prisma.topicBundle.count({ where: { isDeleted: false } }),
-      prisma.trainingAssignment.count({ where: { isDeleted: false } }),
-      prisma.trainingAssignment.count({ where: { isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] } } }),
-      prisma.trainingAssignment.count({ where: { isDeleted: false, status: 'COMPLETED' } }),
+      prisma.trainingAssignment.count({ where: { isDeleted: false, ...currentOnly } }),
+      prisma.trainingAssignment.count({ where: { isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] }, ...currentOnly } }),
+      prisma.trainingAssignment.count({ where: { isDeleted: false, status: 'COMPLETED', ...currentOnly } }),
     ]);
     payload.org = {
       totalUsers,

@@ -5,7 +5,7 @@ import * as svc from '../services/jobDescription.service';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = { ...paginationQuery.parse(req.query), userId: req.query.userId as string | undefined };
-  const r = await svc.listJDs(q);
+  const r = await svc.listJDs(q, { id: req.user!.id, roleNames: req.user!.roleNames });
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 
