@@ -224,8 +224,13 @@ export default function UsersPage() {
   const [editOrigRoleIds, setEditOrigRoleIds] = useState<string[]>([]);
   const [editEsignOpen, setEditEsignOpen] = useState(false);
 
+  // S4: department filter (dropdown). Applies for every viewer, including org-wide ones.
+  const [departmentId, setDepartmentId] = useState('');
+  const deptsQ = useQuery({ queryKey: ['users', 'departments'], queryFn: () => svc.departments.list({ pageSize: 500 }) });
+  const deptOpts = (((deptsQ.data as { data?: Array<{ id: string; name: string }> } | undefined)?.data) ?? []).map((d) => ({ value: d.id, label: d.name }));
+
   const includeInactive = statusFilter !== 'active';
-  const params = { page, pageSize: 50, search: search || undefined, includeInactive };
+  const params = { page, pageSize: 50, search: search || undefined, includeInactive, departmentId: departmentId || undefined };
   const { data, isLoading } = useQuery({ queryKey: ['users', params], queryFn: () => svc.users.list(params) });
 
   // CR-12: the "Inactive only" view is the inactive subset of an includeInactive query.
@@ -516,6 +521,17 @@ export default function UsersPage() {
             { value: 'inactive', label: 'Inactive' },
             { value: 'all', label: 'All' },
           ]}
+        />
+        {/* S4: department-wise filter. */}
+        <Select
+          className="w-56"
+          value={departmentId}
+          onChange={(e) => {
+            setDepartmentId(e.target.value);
+            setPage(1);
+          }}
+          options={deptOpts}
+          placeholder="All departments"
         />
       </div>
 

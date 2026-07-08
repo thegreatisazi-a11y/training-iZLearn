@@ -47,6 +47,9 @@ export const svc = {
     createRequest: (body: unknown) => data(api.post('/users/requests', body)),
     /** Item D: raise a new-user request from My Team (gated on team:create). */
     createTeamMember: (body: unknown) => data(api.post('/users/team-member', body)),
+    /** S5: edit / deactivate a team member from My Team (hierarchy-scoped server-side). */
+    updateTeamMember: (id: string, body: unknown) => data(api.patch(`/users/team-member/${id}`, body)),
+    deactivateTeamMember: (id: string, body: unknown) => data(api.post(`/users/team-member/${id}/deactivate`, body)),
     decideRequest: (id: string, body: unknown) => data(api.post(`/users/requests/${id}/decision`, body)),
     activate: (id: string, body: unknown) => data(api.post(`/users/${id}/activate`, body)),
     deactivate: (id: string, body: unknown) => data(api.post(`/users/${id}/deactivate`, body)),

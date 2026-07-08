@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, UserPlus, KeyRound } from 'lucide-react';
+import { ChevronRight, UserPlus, KeyRound, Pencil, UserX } from 'lucide-react';
 import { userType as userTypeEnum } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -144,6 +144,86 @@ function AddTeamMemberDialog({ open, onClose, supervisorId }: { open: boolean; o
 }
 
 /**
+ * S5: edit a team member from My Team. Fields pre-fill from the user's record; saving is
+ * a controlled change — an e-signature (+ reason) is collected and the server enforces
+ * the hierarchy (supervisors may only edit their direct reports).
+ */
+function EditTeamMemberDialog({ member, onClose }: { member: TeamMember | null; onClose: () => void }) {
+  const qc = useQueryClient();
+  const open = !!member;
+  const [form, setForm] = useState({ fullName: '', email: '', departmentId: '', locationId: '', designationIds: [] as string[], userType: 'INTERNAL' });
+  const [signOpen, setSignOpen] = useState(false);
+
+  const detail = useQuery({ queryKey: ['user-detail', member?.id], queryFn: () => svc.users.get(member!.id), enabled: open });
+  const departments = useQuery({ queryKey: ['departments', 'all'], queryFn: () => svc.departments.list({ pageSize: 200 }), enabled: open });
+  const locations = useQuery({ queryKey: ['locations', 'all'], queryFn: () => svc.locations.list({ pageSize: 200 }), enabled: open });
+  const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: open });
+  const deptOpts = ((departments.data?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
+  const locOpts = ((locations.data?.data ?? []) as { id: string; name: string }[]).map((l) => ({ value: l.id, label: l.name }));
+  const desigOpts = ((designations.data?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
+
+  useEffect(() => {
+    const u = detail.data as Record<string, unknown> | undefined;
+    if (!u) return;
+    setForm({
+      fullName: String(u.fullName ?? ''),
+      email: String(u.email ?? ''),
+      departmentId: String(u.departmentId ?? ''),
+      locationId: String(u.locationId ?? ''),
+      designationIds: Array.isArray(u.designationIds) ? (u.designationIds as string[]) : u.designationId ? [String(u.designationId)] : [],
+      userType: String(u.userType ?? 'INTERNAL'),
+    });
+  }, [detail.data]);
+
+  const mutation = useMutation({
+    mutationFn: (sig: ESignaturePayload) => {
+      const { reason, ...signature } = sig;
+      return svc.users.updateTeamMember(member!.id, { ...form, reasonForChange: (reason ?? '').trim() || 'Team member updated', signature });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['my-team'] });
+      toast.success('Team member updated.');
+      setSignOpen(false);
+      onClose();
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const valid = !!form.fullName && !!form.email && !!form.departmentId && !!form.locationId;
+  return (
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title={`Edit — ${member?.fullName ?? ''}`}
+        className="max-w-xl"
+        footer={
+          <>
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button disabled={!valid} onClick={() => setSignOpen(true)}>Save changes…</Button>
+          </>
+        }
+      >
+        <p className="mb-3 text-xs text-slate-500">Editing is a controlled change — you'll sign with your signature password to confirm.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Full Name" required><Input value={form.fullName} onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))} /></Field>
+          <Field label="User Type" required><Select options={USER_TYPE_OPTIONS} value={form.userType} onChange={(e) => setForm((f) => ({ ...f, userType: e.target.value }))} /></Field>
+        </div>
+        <Field label="Email" required><Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Department" required><Select options={deptOpts} placeholder="Select department…" value={form.departmentId} onChange={(e) => setForm((f) => ({ ...f, departmentId: e.target.value }))} /></Field>
+          <Field label="Location" required><Select options={locOpts} placeholder="Select location…" value={form.locationId} onChange={(e) => setForm((f) => ({ ...f, locationId: e.target.value }))} /></Field>
+        </div>
+        <Field label="Functional Role(s)">
+          <MultiSelect options={desigOpts} value={form.designationIds} onChange={(designationIds) => setForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" />
+        </Field>
+      </Dialog>
+      <ESignatureModal open={signOpen} onClose={() => setSignOpen(false)} title={`Sign to update ${member?.fullName ?? ''}`} onConfirm={async (sig) => { await mutation.mutateAsync(sig); }} />
+    </>
+  );
+}
+
+/**
  * Supervisor team view: the logged-in user's IMMEDIATE direct reports only. Click a
  * member to open their detail page. Supervisors can add a member (linked under them)
  * and reset a direct report's password.
@@ -159,8 +239,13 @@ export default function MyTeamPage() {
   // doesn't implicitly re-enable it.
   const teamPerms = (useAuthStore((s) => s.user?.permissions) as Record<string, Record<string, boolean>> | undefined)?.team ?? {};
   const canAddMember = teamPerms.create === true;
+  // S5: edit / deactivate a team member — each its own permission (hierarchy-enforced server-side).
+  const canEditMember = teamPerms.edit === true;
+  const canDeactivateMember = teamPerms.deactivate === true;
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<TeamMember | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<TeamMember | null>(null);
   // #5: reset a direct report's password (e-signed); shows the temporary password once.
   const [resetTarget, setResetTarget] = useState<TeamMember | null>(null);
   const [resetResult, setResetResult] = useState<{ username: string; tempPassword: string } | null>(null);
@@ -183,6 +268,20 @@ export default function MyTeamPage() {
     onSuccess: (r) => {
       setResetResult({ username: r.windowsUsername ?? resetTarget?.employeeId ?? '', tempPassword: r.tempPassword ?? '' });
       setResetTarget(null);
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  // S5: deactivate a team member (e-signed; server enforces the hierarchy).
+  const deactivateMutation = useMutation({
+    mutationFn: (sig: ESignaturePayload) => {
+      const { reason, ...signature } = sig;
+      return svc.users.deactivateTeamMember(deactivateTarget!.id, { reasonForChange: (reason ?? '').trim() || 'Team member deactivated', signature });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['my-team'] });
+      toast.success('Team member deactivated.');
+      setDeactivateTarget(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -245,6 +344,17 @@ export default function MyTeamPage() {
           <Button size="sm" variant="ghost" onClick={() => navigate(`/team/${r.id}`)}>
             Details <ChevronRight className="h-4 w-4" />
           </Button>
+          {/* S5: edit / deactivate (gated on team:edit / team:deactivate). */}
+          {canEditMember && (
+            <Button size="sm" variant="outline" onClick={() => setEditTarget(r)}>
+              <Pencil className="h-4 w-4" /> Edit
+            </Button>
+          )}
+          {canDeactivateMember && r.isActive && (
+            <Button size="sm" variant="outline" onClick={() => setDeactivateTarget(r)}>
+              <UserX className="h-4 w-4" /> Deactivate
+            </Button>
+          )}
           {/* #5: reset a DIRECT report's password. */}
           <Button size="sm" variant="outline" onClick={() => setResetTarget(r)}>
             <KeyRound className="h-4 w-4" /> Reset Password
@@ -276,6 +386,15 @@ export default function MyTeamPage() {
       <DataTable columns={columns} rows={rows} loading={isLoading} emptyText="You have no direct reportees yet." />
 
       {me && <AddTeamMemberDialog open={addOpen} onClose={() => setAddOpen(false)} supervisorId={me.id} />}
+
+      {/* S5: edit / deactivate a team member. */}
+      <EditTeamMemberDialog member={editTarget} onClose={() => setEditTarget(null)} />
+      <ESignatureModal
+        open={!!deactivateTarget}
+        onClose={() => setDeactivateTarget(null)}
+        title={`Deactivate — ${deactivateTarget?.fullName ?? ''}`}
+        onConfirm={async (sig) => { await deactivateMutation.mutateAsync(sig); }}
+      />
 
       {/* #5: e-signature to reset the selected direct report's password. */}
       <ESignatureModal

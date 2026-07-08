@@ -5,14 +5,16 @@ import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import { captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
 import { startAssessmentSchema, submitAssessmentSchema } from '@izlearn/shared';
+import type { PermissionAction } from '@izlearn/shared';
 
 const router = Router();
 router.use(authenticate);
 
 router.get('/mine', c.listMine);
-// Item 3: completed attempts of others the requester may view/download (team for a
-// supervisor, org-wide for admin/coordinator). Data is scoped in the service.
-router.get('/managed', requirePermission('assessments', 'read'), c.listManaged);
+// S1/Item 3: attempts of OTHER users the requester may view/download (team for a
+// supervisor, org-wide for admin/coordinator). Gated on the dedicated view_others
+// action; the exact team-vs-all scope is enforced in the service.
+router.get('/managed', requirePermission('assessments', 'view_others' as PermissionAction), c.listManaged);
 // Review a completed attempt (own attempt for any user; any attempt for a manager).
 // Ownership/authorization is enforced in the service, so no blanket permission gate.
 router.get('/:id/review', c.review);

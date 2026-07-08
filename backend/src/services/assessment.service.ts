@@ -642,12 +642,22 @@ export async function attemptViewerScope(requester: {
   roleNames: string[];
   permissions?: Record<string, Record<string, boolean>>;
 }): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
-  const canSeeAll =
-    requester.roleNames.includes('SUPER_ADMIN') ||
-    !!(requester.permissions?.assessments && (requester.permissions.assessments.write || requester.permissions.assessments.create || requester.permissions.assessments.edit));
-  if (canSeeAll) return { canSeeAll: true, teamUserIds: [] };
-  const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
-  return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
+  // S1: assessment visibility.
+  //   - Trainee (no view_others permission) → own only.
+  //   - Supervisor → own + direct reports.
+  //   - Admin / Training Coordinator (view_others, not a supervisor) → everyone.
+  // Gating on the PERMISSION (not just role) is essential: this helper also authorises
+  // the review endpoint, which every user hits for their OWN attempt — without the
+  // permission gate a plain trainee would fall through to "see all".
+  const isSuperAdmin = requester.roleNames.includes('SUPER_ADMIN');
+  const hasViewOthers = requester.permissions?.assessments?.view_others === true;
+  if (!isSuperAdmin && !hasViewOthers) return { canSeeAll: false, teamUserIds: [] };
+  const isSupervisor = !isSuperAdmin && requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
+  if (isSupervisor) {
+    const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
+    return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
+  }
+  return { canSeeAll: true, teamUserIds: [] };
 }
 
 /**
@@ -749,14 +759,24 @@ export async function reviewAttempt(
     if (!isCorrect) incorrectDetails.push(detail);
   }
   const total = questions.length;
-  const readingLogs = await prisma.materialViewLog.findMany({
-    where: { userId: attempt.userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
-    select: { elapsedSeconds: true },
-  });
+  const [readingLogs, owner] = await Promise.all([
+    prisma.materialViewLog.findMany({
+      where: { userId: attempt.userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
+      select: { elapsedSeconds: true },
+    }),
+    prisma.user.findUnique({ where: { id: attempt.userId }, select: { fullName: true, employeeId: true, departmentId: true } }),
+  ]);
   const readingTimeSeconds = readingLogs.reduce((s, l) => s + (l.elapsedSeconds ?? 0), 0);
+  // S2: the assessed employee's details so the view/printout is identifiable.
+  const department = owner?.departmentId
+    ? (await prisma.department.findUnique({ where: { id: owner.departmentId }, select: { name: true } }))?.name ?? null
+    : null;
 
   return {
     attemptId: attempt.id,
+    employeeName: owner?.fullName ?? null,
+    employeeId: owner?.employeeId ?? null,
+    department,
     topicTitle: topic?.title ?? null,
     topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
     score: attempt.score ?? 0,

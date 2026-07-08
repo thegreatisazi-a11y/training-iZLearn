@@ -33,6 +33,9 @@ interface CvData {
   experience?: Experience[];
   trainings?: Numbered[];
   publications?: Numbered[];
+  experienceNotApplicable?: boolean;
+  trainingsNotApplicable?: boolean;
+  publicationsNotApplicable?: boolean;
 }
 
 interface FormState {
@@ -46,6 +49,9 @@ interface FormState {
   experience: Experience[];
   trainings: Numbered[];
   publications: Numbered[];
+  experienceNotApplicable: boolean;
+  trainingsNotApplicable: boolean;
+  publicationsNotApplicable: boolean;
 }
 
 function emptyForm(): FormState {
@@ -60,6 +66,9 @@ function emptyForm(): FormState {
     experience: [{}],
     trainings: [{}],
     publications: [{}],
+    experienceNotApplicable: false,
+    trainingsNotApplicable: false,
+    publicationsNotApplicable: false,
   };
 }
 
@@ -82,6 +91,9 @@ function seedForm(cv: CvData | null | undefined): FormState {
     experience: cv.experience?.length ? cv.experience : [{}],
     trainings: cv.trainings?.length ? cv.trainings : [{}],
     publications: cv.publications?.length ? cv.publications : [{}],
+    experienceNotApplicable: !!cv.experienceNotApplicable,
+    trainingsNotApplicable: !!cv.trainingsNotApplicable,
+    publicationsNotApplicable: !!cv.publicationsNotApplicable,
   };
 }
 
@@ -100,11 +112,13 @@ function cvPrintBody(header: CvHeader, cv: CvData): string {
     printTable(['Year', 'Degree', 'Specialization', 'Institute'], (cv.qualifications ?? []).map((q) => [q.year, q.degree, q.specialization, q.institute])) +
     `<div class="section">Current Role</div><p>${cv.currentRole || '—'} (${cv.currentTenureFrom || '?'} → ${cv.currentTenureTo || 'present'})</p><p>${cv.currentResponsibilities || ''}</p>` +
     `<div class="section">Previous Positions</div>` +
-    printTable(['Organisation', 'Role', 'From', 'To', 'Responsibilities'], (cv.experience ?? []).map((e) => [e.organisation, e.role, e.tenureFrom, e.tenureTo, e.responsibilities])) +
+    (cv.experienceNotApplicable
+      ? `<p>Not Applicable</p>`
+      : printTable(['Organisation', 'Role', 'From', 'To', 'Responsibilities'], (cv.experience ?? []).map((e) => [e.organisation, e.role, e.tenureFrom, e.tenureTo, e.responsibilities]))) +
     `<div class="section">Trainings / Seminars / Workshops</div>` +
-    printTable(['#', 'Detail'], (cv.trainings ?? []).map((t, i) => [t.srNo ?? i + 1, t.detail])) +
+    (cv.trainingsNotApplicable ? `<p>Not Applicable</p>` : printTable(['#', 'Detail'], (cv.trainings ?? []).map((t, i) => [t.srNo ?? i + 1, t.detail]))) +
     `<div class="section">Publications / Memberships</div>` +
-    printTable(['#', 'Detail'], (cv.publications ?? []).map((p, i) => [p.srNo ?? i + 1, p.detail]))
+    (cv.publicationsNotApplicable ? `<p>Not Applicable</p>` : printTable(['#', 'Detail'], (cv.publications ?? []).map((p, i) => [p.srNo ?? i + 1, p.detail])))
   );
 }
 
@@ -157,19 +171,38 @@ export default function MyCVPage() {
     if (data?.cv) setForm(seedForm(data.cv));
   }, [data?.cv]);
 
+  // S3: every section is mandatory. The three optional-content sections are satisfied
+  // either by having ≥1 entry OR by being marked Not Applicable.
+  const filledLanguages = form.languages.filter((l) => l.language);
+  const filledQuals = form.qualifications.filter((q) => q.year || q.degree || q.specialization || q.institute);
+  const filledExperience = form.experience.filter((e) => e.organisation || e.role || e.responsibilities);
+  const filledTrainings = form.trainings.filter((t) => t.detail);
+  const filledPublications = form.publications.filter((p) => p.detail);
+  const missing: string[] = [];
+  if (filledLanguages.length === 0) missing.push('Language(s) Known');
+  if (filledQuals.length === 0) missing.push('Educational Qualifications');
+  if (!form.currentRole.trim()) missing.push('Current Role');
+  if (filledExperience.length === 0 && !form.experienceNotApplicable) missing.push('Previous Positions');
+  if (filledTrainings.length === 0 && !form.trainingsNotApplicable) missing.push('Trainings / Seminars / Workshops');
+  if (filledPublications.length === 0 && !form.publicationsNotApplicable) missing.push('Publications / Memberships');
+  const cvValid = missing.length === 0;
+
   const save = useMutation({
     mutationFn: () =>
       svc.cv.save({
         languagesKnown: form.languagesKnown || undefined,
-        languages: form.languages.filter((l) => l.language),
-        qualifications: form.qualifications.filter((q) => q.year || q.degree || q.specialization || q.institute),
+        languages: filledLanguages,
+        qualifications: filledQuals,
         currentRole: form.currentRole || undefined,
         currentTenureFrom: form.currentTenureFrom || undefined,
         currentTenureTo: form.currentTenureTo || undefined,
         currentResponsibilities: form.currentResponsibilities || undefined,
-        experience: form.experience.filter((e) => e.organisation || e.role || e.responsibilities),
-        trainings: form.trainings.filter((t) => t.detail),
-        publications: form.publications.filter((p) => p.detail),
+        experience: form.experienceNotApplicable ? [] : filledExperience,
+        trainings: form.trainingsNotApplicable ? [] : filledTrainings,
+        publications: form.publicationsNotApplicable ? [] : filledPublications,
+        experienceNotApplicable: form.experienceNotApplicable,
+        trainingsNotApplicable: form.trainingsNotApplicable,
+        publicationsNotApplicable: form.publicationsNotApplicable,
       }),
     onSuccess: () => {
       toast.success('CV saved.');
@@ -209,7 +242,11 @@ export default function MyCVPage() {
                 <Button variant="outline" onClick={() => { setForm(seedForm(data?.cv)); setEditing(false); }} disabled={save.isPending}>
                   Cancel
                 </Button>
-                <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                <Button
+                  disabled={save.isPending || !cvValid}
+                  title={cvValid ? undefined : `Complete all sections first: ${missing.join(', ')}`}
+                  onClick={() => save.mutate()}
+                >
                   {save.isPending ? 'Saving…' : 'Save CV'}
                 </Button>
               </>
@@ -220,6 +257,13 @@ export default function MyCVPage() {
         }
       />
       <CvHistoryDialog open={histOpen} onClose={() => setHistOpen(false)} header={header} />
+
+      {/* S3: all sections are mandatory — show what's still missing while editing. */}
+      {editing && !cvValid && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          All sections are required. Please complete (or mark “Not Applicable” where offered): <strong>{missing.join(', ')}</strong>.
+        </div>
+      )}
 
       <Card className="mb-4">
         <CardContent>
@@ -265,6 +309,7 @@ export default function MyCVPage() {
       {/* Qualifications */}
       <RepeatableSection
         title="Educational Qualifications"
+        required
         rows={form.qualifications}
         onChange={(rows) => upd('qualifications', rows)}
         blank={{}}
@@ -294,6 +339,9 @@ export default function MyCVPage() {
       {/* Previous positions */}
       <RepeatableSection
         title="Previous Positions"
+        required
+        notApplicable={form.experienceNotApplicable}
+        onNotApplicable={(v) => upd('experienceNotApplicable', v)}
         rows={form.experience}
         onChange={(rows) => upd('experience', rows)}
         blank={{}}
@@ -311,22 +359,28 @@ export default function MyCVPage() {
       {/* Trainings */}
       <RepeatableSection
         title="Trainings / Seminars / Workshops"
+        required
+        notApplicable={form.trainingsNotApplicable}
+        onNotApplicable={(v) => upd('trainingsNotApplicable', v)}
         rows={form.trainings}
         onChange={(rows) => upd('trainings', rows)}
         blank={{}}
         render={(row, set) => (
-          <Input placeholder="Detail (month-year, topic, location…) or 'Not Applicable'" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
+          <Input placeholder="Detail (month-year, topic, location…)" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
         )}
       />
 
       {/* Publications */}
       <RepeatableSection
         title="Publications / Memberships"
+        required
+        notApplicable={form.publicationsNotApplicable}
+        onNotApplicable={(v) => upd('publicationsNotApplicable', v)}
         rows={form.publications}
         onChange={(rows) => upd('publications', rows)}
         blank={{}}
         render={(row, set) => (
-          <Input placeholder="Detail or 'Not Applicable'" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
+          <Input placeholder="Detail" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
         )}
       />
       </fieldset>
@@ -340,34 +394,58 @@ function RepeatableSection<T>({
   onChange,
   blank,
   render,
+  required,
+  notApplicable,
+  onNotApplicable,
 }: {
   title: string;
   rows: T[];
   onChange: (rows: T[]) => void;
   blank: T;
   render: (row: T, set: (next: T) => void) => React.ReactNode;
+  /** S3: mark the section header with a required asterisk. */
+  required?: boolean;
+  /** S3: when provided, a "Not Applicable" checkbox is shown; checking it hides the rows. */
+  notApplicable?: boolean;
+  onNotApplicable?: (v: boolean) => void;
 }) {
   return (
     <Card className="mb-4">
       <CardContent>
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-sm font-semibold uppercase text-slate-500">{title}</div>
-          <Button size="sm" variant="outline" onClick={() => onChange([...rows, { ...blank }])}>
-            <Plus className="h-4 w-4" /> Add row
-          </Button>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-semibold uppercase text-slate-500">
+            {title}
+            {required && <span className="text-red-500"> *</span>}
+          </div>
+          <div className="flex items-center gap-3">
+            {onNotApplicable && (
+              <label className="flex items-center gap-1.5 text-sm text-slate-600">
+                <input type="checkbox" checked={!!notApplicable} onChange={(e) => onNotApplicable(e.target.checked)} /> Not Applicable
+              </label>
+            )}
+            {!notApplicable && (
+              <Button size="sm" variant="outline" onClick={() => onChange([...rows, { ...blank }])}>
+                <Plus className="h-4 w-4" /> Add row
+              </Button>
+            )}
+          </div>
         </div>
-        <div className="space-y-2">
-          {rows.map((row, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <div className="flex-1">{render(row, (next) => onChange(rows.map((r, j) => (j === i ? next : r))))}</div>
-              {rows.length > 1 && (
-                <button type="button" className="mt-2 text-red-600" aria-label="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+        {notApplicable ? (
+          <p className="text-sm text-slate-400">Marked <strong>Not Applicable</strong>.</p>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <div className="flex-1">{render(row, (next) => onChange(rows.map((r, j) => (j === i ? next : r))))}</div>
+                {rows.length > 1 && (
+                  <button type="button" className="mt-2 text-red-600" aria-label="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

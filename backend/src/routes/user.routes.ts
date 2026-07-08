@@ -51,6 +51,23 @@ router.post(
   validate(createUserSchema),
   c.createRequest,
 );
+// S5: edit / deactivate a team member from My Team. Gated on team:edit / team:deactivate;
+// the controller enforces the hierarchy (supervisor → direct reports only; admin/
+// coordinator → anyone). The underlying update/deactivate is still e-signed. These
+// literal '/team-member/...' paths never collide with '/:id' (single-segment).
+router.patch(
+  '/team-member/:id',
+  requireExactPermission('team', 'edit'),
+  requireReasonForChange,
+  validate(updateUserSchema),
+  c.updateTeamMember,
+);
+router.post(
+  '/team-member/:id/deactivate',
+  requireExactPermission('team', 'deactivate'),
+  requireReasonForChange,
+  c.deactivateTeamMember,
+);
 router.post(
   '/requests/:id/decision',
   requirePermission('userRequests', 'approve'),

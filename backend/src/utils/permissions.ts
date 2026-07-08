@@ -30,6 +30,12 @@ export function hasPermission(perms: PermissionMatrix | undefined, module: strin
   const m = (perms as Record<string, Record<string, boolean>>)[module];
   if (!m) return false;
   if (m[action] === true) return true;
+  // S6: an EXPLICIT false must restrict. Every role saved via Roles & Access Control (and
+  // every seeded role) stores each granular verb as true/false, so an explicit false means
+  // the admin turned it off — never silently fall back to the derived read/write flag (that
+  // was the "toggled off but still allowed" bug). Fall back ONLY when the verb is entirely
+  // ABSENT (a legacy role saved under the old 5-flag model that never had granular verbs).
+  if (m[action] === false) return false;
   const fallback = LEGACY_FALLBACK[action as PermissionVerb];
   return fallback ? m[fallback] === true : false;
 }

@@ -324,10 +324,11 @@ export interface UserListScope {
 }
 
 function userScopeWhere(scope: UserListScope): Prisma.UserWhereInput {
-  if (scope.all) return {};
+  // The department filter (S4) applies in every scope, including org-wide viewers; the
+  // self-exclusion only applies to the legacy department-restricted (non-'all') scope.
   return {
     ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
-    ...(scope.excludeUserId ? { id: { not: scope.excludeUserId } } : {}),
+    ...(!scope.all && scope.excludeUserId ? { id: { not: scope.excludeUserId } } : {}),
   };
 }
 
@@ -398,6 +399,21 @@ export async function getUser(id: string) {
  * roles). Sensitive fields (password/signature hashes) are stripped. Self-scoped: no
  * management permission needed.
  */
+/**
+ * S5: authorise a My-Team edit/deactivate. SUPER_ADMIN and admin/coordinator (any role
+ * that isn't a plain "supervisor" but was granted team:edit/deactivate) may act on
+ * anyone; a supervisor may act ONLY on their direct reports.
+ */
+export async function assertTeamManageAccess(requester: { id: string; roleNames: string[] }, targetUserId: string) {
+  if (requester.roleNames.includes('SUPER_ADMIN')) return;
+  const isSupervisor = requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
+  if (!isSupervisor) return; // admin / training coordinator (reached via the team perm gate)
+  const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
+  if (!target || target.supervisorId !== requester.id) {
+    throw AppError.forbidden('You may only edit or deactivate your direct reportees.');
+  }
+}
+
 export async function getMyProfile(userId: string) {
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');

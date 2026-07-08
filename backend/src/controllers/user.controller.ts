@@ -11,8 +11,14 @@ import * as svc from '../services/user.service';
  * other user sees only their OWN department, excluding themselves.
  */
 function userScope(req: Request): svc.UserListScope {
-  const canViewAll = req.user!.permissions['userManagement']?.approve === true;
-  return canViewAll ? { all: true } : { departmentId: req.user!.departmentId, excludeUserId: req.user!.id };
+  // S4: anyone who can VIEW the Users module (userManagement:read — the route gate) sees
+  // ALL users, same as an admin. A Supervisor with only 'view' is therefore view-only
+  // (the action buttons are gated on write/approve). A Department filter narrows the list.
+  const canViewAll = req.user!.permissions['userManagement']?.read === true;
+  const departmentId = typeof req.query.departmentId === 'string' && req.query.departmentId ? req.query.departmentId : undefined;
+  return canViewAll
+    ? { all: true, departmentId }
+    : { departmentId: departmentId ?? req.user!.departmentId, excludeUserId: req.user!.id };
 }
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
@@ -107,6 +113,16 @@ export const activate = asyncHandler(async (req: Request, res: Response) => {
 
 export const deactivate = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.deactivateUser(req.params.id, req), 'User deactivated');
+});
+
+// S5: edit / deactivate a team member from My Team (hierarchy-scoped in the service).
+export const updateTeamMember = asyncHandler(async (req: Request, res: Response) => {
+  await svc.assertTeamManageAccess({ id: req.user!.id, roleNames: req.user!.roleNames }, req.params.id);
+  sendSuccess(res, await svc.updateUser(req.params.id, req.body, req), 'Team member updated');
+});
+export const deactivateTeamMember = asyncHandler(async (req: Request, res: Response) => {
+  await svc.assertTeamManageAccess({ id: req.user!.id, roleNames: req.user!.roleNames }, req.params.id);
+  sendSuccess(res, await svc.deactivateUser(req.params.id, req), 'Team member deactivated');
 });
 
 export const resetPassword = asyncHandler(async (req: Request, res: Response) => {

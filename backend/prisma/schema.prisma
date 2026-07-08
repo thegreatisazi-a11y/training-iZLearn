@@ -1020,6 +1020,11 @@ model CurriculumVitae {
   experience    Json     @default("[]") // [{ organisation, role, tenureFrom, tenureTo, responsibilities }]
   trainings     Json     @default("[]") // [{ srNo, detail }]
   publications  Json     @default("[]") // [{ srNo, detail }]
+  // S3: sections explicitly marked "Not Applicable" (so a mandatory section can be
+  // satisfied without data when the user genuinely has none).
+  experienceNotApplicable   Boolean @default(false)
+  trainingsNotApplicable    Boolean @default(false)
+  publicationsNotApplicable Boolean @default(false)
   attachmentPath String? // optional uploaded CV document
   isDeleted     Boolean  @default(false)
   createdAt     DateTime @default(now())

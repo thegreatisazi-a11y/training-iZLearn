@@ -87,7 +87,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const m = perms?.[module];
     if (!m) return false;
     if (m[action] === true) return true;
-    // Granular verb absent (older custom role) → fall back to its legacy equivalent.
+    // S6: respect an EXPLICIT false (admin turned it off) — don't fall back to the derived
+    // read/write. Fall back to the legacy equivalent ONLY when the verb is entirely absent
+    // (a legacy role saved under the old 5-flag model).
+    if (m[action] === false) return false;
     const fallback = LEGACY_FALLBACK[action as PermissionVerb];
     return fallback ? m[fallback] === true : false;
   },

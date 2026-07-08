@@ -28,6 +28,10 @@ interface ReviewDetail {
   explanation?: string | null;
 }
 interface AttemptReview {
+  // S2: the assessed employee's identity, shown at the top of the view/printout.
+  employeeName?: string | null;
+  employeeId?: string | null;
+  department?: string | null;
   topicTitle?: string | null;
   topicNumber?: string | null;
   score: number;
@@ -111,11 +115,14 @@ function fmtDuration(s?: number | null): string {
 /** Item 3: build & open a printable ("Save as PDF") document for a completed attempt —
  *  the same summary + per-question breakdown shown on screen. Used by the Download
  *  action on both a learner's own test and (for managers) a team member's test. */
-function printAttemptReview(data: AttemptReview, who?: string | null): void {
+function printAttemptReview(data: AttemptReview): void {
   const heading = `${data.topicNumber ? `${data.topicNumber} – ` : ''}${data.topicTitle ?? 'Assessment'}`;
   const summary =
     `<table>` +
-    (who ? `<tr><th>Employee</th><td>${escapeHtml(who)}</td></tr>` : '') +
+    // S2: identify the assessed employee at the top of the printout.
+    (data.employeeName ? `<tr><th>Employee Name</th><td>${escapeHtml(data.employeeName)}</td></tr>` : '') +
+    (data.employeeId ? `<tr><th>Employee ID</th><td>${escapeHtml(data.employeeId)}</td></tr>` : '') +
+    (data.department ? `<tr><th>Department</th><td>${escapeHtml(data.department)}</td></tr>` : '') +
     `<tr><th>Result</th><td>${data.isPassed ? 'Passed' : 'Failed'}</td></tr>` +
     `<tr><th>Score</th><td>${data.score}%</td></tr>` +
     `<tr><th>Passing score</th><td>${data.passingScorePercent}%</td></tr>` +
@@ -159,6 +166,14 @@ function AttemptReviewDialog({ id, onClose }: { id: string | null; onClose: () =
       ) : (
         <div className="space-y-4">
           <div className="text-sm font-medium text-slate-700">{title}</div>
+          {/* S2: identify the assessed employee at the top of the view. */}
+          {(data.employeeName || data.employeeId || data.department) && (
+            <div className="flex flex-wrap gap-x-6 gap-y-1 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              {data.employeeName && <span><span className="text-slate-400">Employee:</span> <strong>{data.employeeName}</strong></span>}
+              {data.employeeId && <span><span className="text-slate-400">Employee ID:</span> <strong>{data.employeeId}</strong></span>}
+              {data.department && <span><span className="text-slate-400">Department:</span> <strong>{data.department}</strong></span>}
+            </div>
+          )}
           <Card>
             <CardContent className="flex flex-wrap items-center gap-6">
               <div className="flex items-center gap-3">
@@ -227,6 +242,9 @@ export default function AssessmentsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canManage = useAuthStore((s) => s.hasPermission)('assessments', 'write');
+  // S1: the "Team Assessments" view (others' attempts) is gated on its own permission;
+  // scope within it (team vs all) is enforced server-side by role.
+  const canViewOthers = useAuthStore((s) => s.hasPermission)('assessments', 'view_others' as never);
 
   const mine = useQuery({ queryKey: ['assessments', 'mine'], queryFn: () => svc.assessments.listMine() as unknown as Promise<Attempt[]> });
   // Item B: the "Start Assessment" dropdown is built from the user's ASSIGNMENTS so it can
@@ -275,17 +293,21 @@ export default function AssessmentsPage() {
   const [reviewId, setReviewId] = useState<string | null>(null);
   // Item 3: attempts of others the requester may view/download (team for a supervisor,
   // org-wide for admin/coordinator). Empty for a plain learner → the table stays hidden.
-  const managed = useQuery({ queryKey: ['assessments', 'managed'], queryFn: () => svc.assessments.listManaged() as unknown as Promise<ManagedAttempt[]> });
+  const managed = useQuery({
+    queryKey: ['assessments', 'managed'],
+    queryFn: () => svc.assessments.listManaged() as unknown as Promise<ManagedAttempt[]>,
+    enabled: canViewOthers, // avoid a 403 for trainees (route now requires view_others)
+  });
   const managedRows = managed.data ?? [];
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Item 3: "Download" fetches the attempt's full review then opens a printable
   // ("Save as PDF") document. Own tests hide the answer key; managers get the full key.
-  const downloadReview = async (attemptId: string, who?: string | null) => {
+  const downloadReview = async (attemptId: string) => {
     setDownloadingId(attemptId);
     try {
       const data = (await svc.assessments.review(attemptId)) as unknown as AttemptReview;
-      printAttemptReview(data, who);
+      printAttemptReview(data); // employee details come from the review payload (S2)
     } catch (e) {
       toast.error(apiError(e));
     } finally {
@@ -349,7 +371,7 @@ export default function AssessmentsPage() {
           <Button size="sm" variant="outline" onClick={() => setReviewId(r.id)}>
             View Test
           </Button>
-          <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id, r.userFullName)}>
+          <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id)}>
             Download
           </Button>
         </div>

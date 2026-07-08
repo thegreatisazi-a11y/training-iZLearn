@@ -42,5 +42,9 @@ export const upsertCvSchema = z.object({
   experience: z.array(experienceItem).optional(),
   trainings: z.array(numberedItem).optional(),
   publications: z.array(numberedItem).optional(),
+  // S3: sections a user can explicitly mark "Not Applicable" instead of filling in.
+  experienceNotApplicable: z.coerce.boolean().optional(),
+  trainingsNotApplicable: z.coerce.boolean().optional(),
+  publicationsNotApplicable: z.coerce.boolean().optional(),
 });
 export type UpsertCvInput = z.infer<typeof upsertCvSchema>;

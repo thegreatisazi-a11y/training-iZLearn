@@ -88,6 +88,10 @@ export async function upsertMyCV(userId: string, input: UpsertCvInput) {
     experience: (input.experience ?? []) as Prisma.InputJsonValue,
     trainings: (input.trainings ?? []) as Prisma.InputJsonValue,
     publications: (input.publications ?? []) as Prisma.InputJsonValue,
+    // S3: "Not Applicable" flags for the optional-content sections.
+    experienceNotApplicable: !!input.experienceNotApplicable,
+    trainingsNotApplicable: !!input.trainingsNotApplicable,
+    publicationsNotApplicable: !!input.publicationsNotApplicable,
   };
   const existing = await prisma.curriculumVitae.findFirst({ where: { userId } });
   // Each save is a new version of the CV (history is preserved in the audit trail).

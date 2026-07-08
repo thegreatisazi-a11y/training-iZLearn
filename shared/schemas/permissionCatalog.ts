@@ -88,6 +88,10 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
       // Independent from the Users module's "Create / New User Request" so "Add Team
       // Member" can be granted/restricted separately for My Team.
       A('create', 'Add Team Member'),
+      // S5: edit / deactivate a team member from My Team. Scope is hierarchy-enforced —
+      // a supervisor may only act on their direct reports; admin/coordinator on anyone.
+      A('edit', 'Edit Team Member'),
+      A('deactivate', 'Deactivate Team Member'),
       A('approve', 'Approve / Verify Team Training'),
       A('print', 'Print Team Records'),
       A('export', 'Export Team Records'),
@@ -269,6 +273,9 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'assessmentCert',
     actions: [
       A('view', 'View Assessments'),
+      // Grants the "Team Assessments" view. Scope is role-based (server-enforced): a
+      // supervisor sees their team's; admin / training coordinator see everyone's.
+      A('view_others', "View Others' Assessments"),
       A('take', 'Take Assessment (Start / Submit)'),
       A('create', 'Create Assessment'),
       A('edit', 'Edit Assessment'),

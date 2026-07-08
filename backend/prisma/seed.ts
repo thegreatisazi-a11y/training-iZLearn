@@ -75,7 +75,10 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
     description: 'User & team management, JD/TNI assignment & approval, training oversight and reports.',
     permissions: buildMatrix({
       dashboard: ['view'],
-      userManagement: ['view', 'create', 'edit', 'approve', 'assign', 'reset_password', 'print', 'export'],
+      // S4: the Supervisor is VIEW-ONLY in the Users module (sees all users + dept filter,
+      // but no create/edit/deactivate there). Team members are managed from My Team via the
+      // team:* permissions instead.
+      userManagement: ['view', 'print', 'export'],
       userRequests: ['view', 'approve'],
       team: 'all',
       roleManagement: ['view'],
@@ -89,7 +92,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
       tni: ['view', 'create', 'edit', 'assign', 'approve', 'print', 'export'],
       jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
       cv: ['view'],
-      assessments: ['view'],
+      assessments: ['view', 'view_others'],
       certificates: ['view', 'view_others', 'print', 'export'],
       reports: ['view', 'print', 'export'],
       auditTrail: ['view', 'print', 'export'],
@@ -280,6 +283,17 @@ async function main() {
         p.team.create = true;
         changed = true;
       }
+      // S5: "Edit / Deactivate Team Member" (team:edit / team:deactivate) — granted to any
+      // role that can view a team (supervisors / coordinators / admins). Hierarchy (direct
+      // reports vs everyone) is enforced server-side at request time. Never for trainees.
+      if (p.team && p.team.view && p.team.edit === undefined) {
+        p.team.edit = true;
+        changed = true;
+      }
+      if (p.team && p.team.view && p.team.deactivate === undefined) {
+        p.team.deactivate = true;
+        changed = true;
+      }
       // "View Others' Certificates" (certificates:view_others). Granted to roles that can
       // view a team, manage users, or MANAGE certificates (supervisors / training
       // coordinators / admins) — never plain trainees or trainers (course authors), who
@@ -290,6 +304,18 @@ async function main() {
         (p.team?.view || p.team?.read || p.userManagement?.read || p.certificates?.write)
       ) {
         p.certificates.view_others = true;
+        changed = true;
+      }
+      // S1: "View Others' Assessments" (assessments:view_others). Granted to oversight
+      // roles (supervisors / training coordinators / admins) — identified by team view,
+      // user management, or audit-trail access — but NOT trainers (course authors) or
+      // trainees, who have none of these. Scope (team vs all) is enforced server-side.
+      if (
+        p.assessments &&
+        p.assessments.view_others === undefined &&
+        (p.team?.view || p.team?.read || p.userManagement?.read || p.auditTrail?.read)
+      ) {
+        p.assessments.view_others = true;
         changed = true;
       }
       // The old "Certificate Templates" menu required certificates:write, so only roles
@@ -306,6 +332,30 @@ async function main() {
       }
     }
     if (migrated) console.log(`   ✓ back-filled split permissions for ${migrated} role(s)`);
+  }
+
+  // 2a-2. S4 one-off: make the EXISTING Supervisor role VIEW-ONLY in the Users module
+  // (no create/edit/approve/assign/reset there — team members are managed from My Team).
+  // Guarded by a marker so it runs exactly once and never re-clobbers a later admin choice.
+  {
+    const markerKey = 'migration.supervisor_users_viewonly_v1';
+    const done = await prisma.systemConfig.findUnique({ where: { key: markerKey } });
+    if (!done) {
+      const sups = await prisma.role.findMany({ where: { isDeleted: false, roleName: { in: ['Supervisor', 'SUPERVISOR'] } } });
+      for (const r of sups) {
+        const p = (r.permissions ?? {}) as Record<string, Record<string, boolean>>;
+        if (!p.userManagement) continue;
+        for (const k of ['create', 'edit', 'approve', 'assign', 'reset_password']) p.userManagement[k] = false;
+        Object.assign(p.userManagement, deriveLegacyFlags(p.userManagement)); // recompute read/write/…
+        // Ensure the team-management actions used by My Team are present.
+        p.team = p.team ?? {};
+        for (const k of ['view', 'create', 'edit', 'deactivate']) p.team[k] = true;
+        Object.assign(p.team, deriveLegacyFlags(p.team));
+        await prisma.role.update({ where: { id: r.id }, data: { permissions: p as Prisma.InputJsonValue } });
+      }
+      await prisma.systemConfig.create({ data: { key: markerKey, value: 'done', description: 'S4: Supervisor is view-only in Users; team managed via My Team', updatedBy: SYSTEM } });
+      if (sups.length) console.log('   ✓ S4: Supervisor set view-only in Users (team managed from My Team)');
+    }
   }
 
   // 2b. Functional Roles (D-JD1) — stored in DesignationMaster ----------------
