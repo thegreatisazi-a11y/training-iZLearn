@@ -327,17 +327,43 @@ export async function publishDraftChanges(id: string, req: Request) {
 
   // Every publish of pending changes is a new controlled version: bump currentVersion
   // ONCE (regardless of how many changes are batched) and clear the staged metadata.
-  const draft = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput;
+  // Staged per-material read-time changes are held under a non-column key
+  // (materialReadTimes) — apply them to the live materials and strip the key before it is
+  // spread onto the topic (Prisma would reject the unknown field).
+  const { materialReadTimes, ...draft } = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput & {
+    materialReadTimes?: Record<string, number>;
+  };
+  let readTimeChanges = 0;
+  if (materialReadTimes && Object.keys(materialReadTimes).length) {
+    for (const [materialId, secs] of Object.entries(materialReadTimes)) {
+      await prisma.trainingMaterial.updateMany({ where: { id: materialId, isDeleted: false }, data: { requiredViewSeconds: secs } });
+      readTimeChanges += 1;
+    }
+  }
   const promoted = await prisma.trainingTopic.update({
     where: { id },
     data: { ...draft, draftMeta: null, currentVersion: { increment: 1 } },
   });
+  // Recompute course duration from the now-current materials' reading times (a staged
+  // read-time change only takes effect here, on the controlled publish).
+  {
+    const mats = await prisma.trainingMaterial.findMany({
+      where: { topicId: id, isDeleted: false, isCurrentVersion: true, isObsolete: false },
+      select: { requiredViewSeconds: true },
+    });
+    const totalSeconds = mats.reduce((s, m) => s + (m.requiredViewSeconds ?? 0), 0);
+    if (totalSeconds > 0) await prisma.trainingTopic.update({ where: { id }, data: { durationMinutes: Math.ceil(totalSeconds / 60) } });
+  }
   // Task-1: staged functional-role changes are now live — re-sync the TNI matrix.
   await syncTniRequirementsFromTopic(id, promoted.designationIds ?? [], req.user!.id);
 
   // One version-history entry describing the batch of changes published in this version.
   const parts: string[] = [];
-  if (topic.draftMeta) parts.push('course details updated');
+  if (topic.draftMeta) {
+    const draftFieldKeys = Object.keys(topic.draftMeta as Record<string, unknown>).filter((k) => k !== 'materialReadTimes');
+    if (draftFieldKeys.length) parts.push('course details updated');
+  }
+  if (readTimeChanges > 0) parts.push(`${readTimeChanges} material read-time change(s)`);
   if (stagedCount > 0) parts.push(`${stagedCount} material change(s)`);
   if (questionAdds > 0) parts.push(`${questionAdds} question(s) added`);
   if (questionEdits > 0) parts.push(`${questionEdits} question(s) edited`);

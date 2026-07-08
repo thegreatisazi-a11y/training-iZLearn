@@ -284,6 +284,9 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'assessmentCert',
     actions: [
       A('view', 'View Certificates'),
+      // Grants the "Other Certificates" view. Scope is role-based (server-enforced): a
+      // supervisor sees their team's; admin / training coordinator see everyone's.
+      A('view_others', "View Others' Certificates"),
       A('create', 'Generate Certificate'),
       A('print', 'Print Certificate'),
       A('export', 'Export Certificate'),

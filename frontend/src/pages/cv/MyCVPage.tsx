@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea, Field } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { PageLoader } from '@/components/ui/spinner';
 import { Dialog } from '@/components/ui/dialog';
 import { svc } from '@/services';
@@ -17,6 +18,8 @@ interface Qualification { year?: string; degree?: string; specialization?: strin
 interface Experience { organisation?: string; role?: string; tenureFrom?: string; tenureTo?: string; responsibilities?: string }
 interface Numbered { srNo?: string | number; detail?: string }
 interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
+/** R5: Yes/No options for the CV language proficiency fields (default No when unset). */
+const YES_NO = [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }];
 interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null; functionalRoles?: string[] }
 interface CvData {
   version?: number;
@@ -87,7 +90,7 @@ function seedForm(cv: CvData | null | undefined): FormState {
 function cvPrintBody(header: CvHeader, cv: CvData): string {
   const langs = (cv.languages ?? []).filter((l) => l.language);
   const languagesBlock = langs.length
-    ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
+    ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : 'No', l.write ? 'Yes' : 'No', l.understand ? 'Yes' : 'No']))
     : `<p>${cv.languagesKnown || '—'}</p>`;
   return (
     `<h1>Curriculum Vitae</h1>` +
@@ -242,9 +245,19 @@ export default function MyCVPage() {
         render={(row, set) => (
           <div className="flex flex-wrap items-center gap-3">
             <Input className="flex-1 min-w-[180px]" placeholder="Language (e.g. English)" value={row.language ?? ''} onChange={(e) => set({ ...row, language: e.target.value })} />
-            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.read} onChange={(e) => set({ ...row, read: e.target.checked })} /> Read</label>
-            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.write} onChange={(e) => set({ ...row, write: e.target.checked })} /> Write</label>
-            <label className="flex items-center gap-1 text-sm text-slate-700"><input type="checkbox" checked={!!row.understand} onChange={(e) => set({ ...row, understand: e.target.checked })} /> Understand</label>
+            {/* R5: explicit Yes/No (blank/unset defaults to No) instead of a tick/cross/hyphen. */}
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              Read
+              <Select className="w-20" options={YES_NO} value={row.read ? 'yes' : 'no'} onChange={(e) => set({ ...row, read: e.target.value === 'yes' })} />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              Write
+              <Select className="w-20" options={YES_NO} value={row.write ? 'yes' : 'no'} onChange={(e) => set({ ...row, write: e.target.value === 'yes' })} />
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              Understand
+              <Select className="w-20" options={YES_NO} value={row.understand ? 'yes' : 'no'} onChange={(e) => set({ ...row, understand: e.target.value === 'yes' })} />
+            </label>
           </div>
         )}
       />

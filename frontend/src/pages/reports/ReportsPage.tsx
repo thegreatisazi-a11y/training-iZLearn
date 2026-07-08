@@ -33,6 +33,20 @@ export default function ReportsPage() {
   const types = useQuery({ queryKey: ['reports', 'types'], queryFn: () => svc.reports.types() as unknown as Promise<string[]> });
   const typeOpts = useMemo(() => (types.data ?? []).map((t) => ({ value: t, label: labelFor(t) })), [types.data]);
 
+  // R1: dropdown data for the filters (replaces the old free-text ID inputs).
+  const topicsQ = useQuery({ queryKey: ['reports', 'topics'], queryFn: () => svc.topics.list({ pageSize: 500 }) });
+  const usersQ = useQuery({ queryKey: ['reports', 'users'], queryFn: () => svc.users.list({ pageSize: 1000 }) });
+  const deptsQ = useQuery({ queryKey: ['reports', 'depts'], queryFn: () => svc.departments.list({ pageSize: 500 }) });
+  const locsQ = useQuery({ queryKey: ['reports', 'locs'], queryFn: () => svc.locations.list({ pageSize: 500 }) });
+  const desigsQ = useQuery({ queryKey: ['reports', 'desigs'], queryFn: () => svc.master.listDesignations({ pageSize: 500 }) });
+
+  const rowsOf = (r: unknown): Array<Record<string, unknown>> => ((r as { data?: unknown } | undefined)?.data as Array<Record<string, unknown>>) ?? [];
+  const topicOpts = useMemo(() => rowsOf(topicsQ.data).map((t) => ({ value: String(t.id), label: `${(t.topicNumber ?? t.topicCode ?? '') as string} ${(t.title ?? '') as string}`.trim() })), [topicsQ.data]);
+  const userOpts = useMemo(() => rowsOf(usersQ.data).map((u) => ({ value: String(u.id), label: `${u.fullName as string}${u.employeeId ? ` (${u.employeeId as string})` : ''}` })), [usersQ.data]);
+  const deptOpts = useMemo(() => rowsOf(deptsQ.data).map((d) => ({ value: String(d.id), label: String(d.name ?? d.id) })), [deptsQ.data]);
+  const locOpts = useMemo(() => rowsOf(locsQ.data).map((l) => ({ value: String(l.id), label: String(l.name ?? l.id) })), [locsQ.data]);
+  const desigOpts = useMemo(() => rowsOf(desigsQ.data).map((d) => ({ value: String(d.id), label: String(d.displayName ?? d.id) })), [desigsQ.data]);
+
   const [type, setType] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -106,23 +120,23 @@ export default function ReportsPage() {
             <Field label="To">
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </Field>
-            <Field label="Topic ID">
-              <Input value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Optional" />
+            <Field label="Topic">
+              <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="All topics" />
             </Field>
-            <Field label="Department ID">
-              <Input value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} placeholder="Optional" />
+            <Field label="Department">
+              <Select options={deptOpts} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} placeholder="All departments" />
             </Field>
-            <Field label="User ID">
-              <Input value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="Optional" />
+            <Field label="User">
+              <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="All users" />
             </Field>
-            <Field label="Location ID">
-              <Input value={locationId} onChange={(e) => setLocationId(e.target.value)} placeholder="Optional" />
+            <Field label="Location">
+              <Select options={locOpts} value={locationId} onChange={(e) => setLocationId(e.target.value)} placeholder="All locations" />
             </Field>
-            <Field label="Functional Role ID">
-              <Input value={designationId} onChange={(e) => setDesignationId(e.target.value)} placeholder="Optional" />
+            <Field label="Functional Role">
+              <Select options={desigOpts} value={designationId} onChange={(e) => setDesignationId(e.target.value)} placeholder="All functional roles" />
             </Field>
-            <Field label="Reporting Manager ID">
-              <Input value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} placeholder="Optional (supervisor)" />
+            <Field label="Reporting Manager">
+              <Select options={userOpts} value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} placeholder="All managers" />
             </Field>
           </div>
           <div className="flex flex-wrap items-center gap-4">

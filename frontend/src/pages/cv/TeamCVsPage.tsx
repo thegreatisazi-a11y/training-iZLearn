@@ -100,7 +100,7 @@ export default function TeamCVsPage() {
     if (!h) return;
     const langs = (cv?.languages ?? []).filter((l) => l.language);
     const languagesBlock = langs.length
-      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : '—', l.write ? 'Yes' : '—', l.understand ? 'Yes' : '—']))
+      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : 'No', l.write ? 'Yes' : 'No', l.understand ? 'Yes' : 'No']))
       : `<p>${cv?.languagesKnown || '—'}</p>`;
     const body =
       `<h1>Curriculum Vitae</h1>` +

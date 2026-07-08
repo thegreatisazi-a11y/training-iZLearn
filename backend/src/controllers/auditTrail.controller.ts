@@ -85,13 +85,14 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
 
   await recordEvent({ action: 'EXPORT', entityType: 'AuditTrail', newValue: { format, count: rows.length } });
 
+  const generatedBy = req.user?.fullName;
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.csv"');
-    return res.send(exportToCsv(COLUMNS, rows));
+    return res.send(exportToCsv(COLUMNS, rows, { generatedBy }));
   }
   if (format === 'xls' || format === 'xlsx') {
-    const buf = await exportToExcel(COLUMNS, rows, 'Audit Trail');
+    const buf = await exportToExcel(COLUMNS, rows, 'Audit Trail', undefined, { generatedBy });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.xlsx"');
     return res.send(buf);

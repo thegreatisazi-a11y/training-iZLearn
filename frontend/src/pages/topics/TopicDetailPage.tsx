@@ -412,9 +412,18 @@ export default function TopicDetailPage() {
   const readTimeMut = useMutation({
     mutationFn: (seconds: number) => svc.materials.setViewTime(readTimeTarget!.id, seconds, applyReadTimeToAll),
     onSuccess: () => {
-      toast.success(applyReadTimeToAll ? 'Reading time applied to all files; course duration updated.' : 'Reading time updated; course duration updated.');
+      // On a PUBLISHED course the change is STAGED (applied + version-bumped only on the
+      // e-signed "Publish changes"); on a draft it applies immediately.
+      const published = String((topic as { status?: string } | undefined)?.status) === 'PUBLISHED';
+      toast.success(
+        published
+          ? 'Reading time staged as a pending change. Click “Publish changes” (top of the page) to apply it (requires e-sign).'
+          : applyReadTimeToAll
+            ? 'Reading time applied to all files; course duration updated.'
+            : 'Reading time updated; course duration updated.',
+      );
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
-      // Refresh the topic so the recomputed course duration shows immediately.
+      // Refresh the topic so the recomputed course duration / pending-change banner shows.
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
       setReadTimeTarget(null);

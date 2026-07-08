@@ -90,7 +90,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
       jobDescription: ['view', 'assign', 'approve', 'print', 'export'],
       cv: ['view'],
       assessments: ['view'],
-      certificates: ['view', 'print', 'export'],
+      certificates: ['view', 'view_others', 'print', 'export'],
       reports: ['view', 'print', 'export'],
       auditTrail: ['view', 'print', 'export'],
       feedback: ['view'],
@@ -278,6 +278,18 @@ async function main() {
       // the new gate doesn't silently remove it; it can then be toggled independently.
       if (p.team && p.team.create === undefined && (p.userManagement?.create || p.userManagement?.write)) {
         p.team.create = true;
+        changed = true;
+      }
+      // "View Others' Certificates" (certificates:view_others). Granted to roles that can
+      // view a team, manage users, or MANAGE certificates (supervisors / training
+      // coordinators / admins) — never plain trainees or trainers (course authors), who
+      // have none of these. Scope (team vs all) is enforced server-side by role.
+      if (
+        p.certificates &&
+        p.certificates.view_others === undefined &&
+        (p.team?.view || p.team?.read || p.userManagement?.read || p.certificates?.write)
+      ) {
+        p.certificates.view_others = true;
         changed = true;
       }
       // The old "Certificate Templates" menu required certificates:write, so only roles

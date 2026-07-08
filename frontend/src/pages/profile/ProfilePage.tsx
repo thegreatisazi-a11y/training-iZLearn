@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { Download, Eye } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { FileUpload } from '@/components/common/FileUpload';
@@ -281,6 +281,22 @@ export default function ProfilePage() {
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     { key: 'dueDate', header: 'Due Date', render: (r) => formatDate(r.dueDate) },
   ];
+  // View a certificate PDF inline. The tab is opened synchronously (within the click) so
+  // it isn't blocked as a popup, then pointed at the authed PDF blob once fetched.
+  const viewCertificate = async (c: Certificate) => {
+    const win = window.open('', '_blank');
+    try {
+      const blob = await svc.certificates.blob(c.id);
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url;
+      else await svc.certificates.download(c.id, `${c.certificateNumber}.pdf`); // popup blocked → fall back to download
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      win?.close();
+      toast.error(apiError(e));
+    }
+  };
+
   const certColumns: Column<Certificate>[] = [
     { key: 'certificateNumber', header: 'Certificate No.' },
     { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle || '—') },
@@ -289,10 +305,16 @@ export default function ProfilePage() {
     {
       key: 'actions',
       header: '',
+      className: 'text-right',
       render: (r) => (
-        <Button size="sm" variant="outline" onClick={() => svc.certificates.download(r.id, `${r.certificateNumber}.pdf`).catch((e) => toast.error(apiError(e)))}>
-          <Download className="h-4 w-4" /> Download
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => viewCertificate(r)}>
+            <Eye className="h-4 w-4" /> View
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => svc.certificates.download(r.id, `${r.certificateNumber}.pdf`).catch((e) => toast.error(apiError(e)))}>
+            <Download className="h-4 w-4" /> Download
+          </Button>
+        </div>
       ),
     },
   ];

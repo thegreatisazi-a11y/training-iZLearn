@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { renderPdfFromHtml } from '../utils/pdfGenerator';
@@ -157,6 +158,53 @@ export async function listCertificates(filters: { userId?: string }) {
   return rows.map((r) => {
     const t = tMap.get(r.topicId);
     return { ...r, topicTitle: t?.title ?? null, topicNumber: t?.topicNumber ?? t?.topicCode ?? null };
+  });
+}
+
+/**
+ * R3: who may view WHOSE certificates in the "Other Certificates" view.
+ *   - SUPER_ADMIN, admin, training coordinator (i.e. anyone with the permission who is
+ *     NOT a plain supervisor) → everyone's.
+ *   - a supervisor → only their direct reports'.
+ * (Access to the view itself is gated by certificates:view_others on the route.)
+ */
+export async function certificateViewerScope(requester: { id: string; roleNames: string[] }): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
+  const isSuperAdmin = requester.roleNames.includes('SUPER_ADMIN');
+  const isSupervisor = !isSuperAdmin && requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
+  if (!isSupervisor) return { canSeeAll: true, teamUserIds: [] };
+  const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
+  return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
+}
+
+/** R3: certificates of OTHER users the requester may view (team for a supervisor, all
+ *  for admin / training coordinator). Own certificates live under "My Certificates". */
+export async function listOtherCertificates(requester: { id: string; roleNames: string[] }) {
+  const scope = await certificateViewerScope(requester);
+  const where: Prisma.CertificateWhereInput = { isDeleted: false, userId: { not: requester.id } };
+  if (!scope.canSeeAll) where.userId = { in: scope.teamUserIds.length ? scope.teamUserIds.filter((u) => u !== requester.id) : ['__no_match__'] };
+  const rows = await prisma.certificate.findMany({ where, orderBy: { issuedAt: 'desc' } });
+  const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const [topics, people] = await Promise.all([
+    topicIds.length
+      ? prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })
+      : Promise.resolve([]),
+    userIds.length
+      ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } })
+      : Promise.resolve([]),
+  ]);
+  const tMap = new Map(topics.map((t) => [t.id, t]));
+  const uMap = new Map(people.map((u) => [u.id, u]));
+  return rows.map((r) => {
+    const t = tMap.get(r.topicId);
+    const u = uMap.get(r.userId);
+    return {
+      ...r,
+      topicTitle: t?.title ?? null,
+      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+      userFullName: u?.fullName ?? null,
+      employeeId: u?.employeeId ?? null,
+    };
   });
 }
 

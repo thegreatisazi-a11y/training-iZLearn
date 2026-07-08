@@ -192,9 +192,13 @@ export const svc = {
   certificates: {
     listMine: () => data(api.get('/certificates/mine')),
     list: (params?: ListParams) => data(api.get('/certificates', { params })),
+    /** R3: certificates of others the requester may view (team/all, scoped server-side). */
+    listOthers: () => data(api.get('/certificates/others')),
     get: (id: string) => data(api.get(`/certificates/${id}`)),
     downloadUrl: (id: string) => `/api/certificates/${id}/download`,
     download: (id: string, name = `certificate-${id}.pdf`) => downloadAuthed(`/certificates/${id}/download`, name),
+    /** Fetch the certificate PDF (authed) as a Blob so it can be viewed inline / in a new tab. */
+    blob: (id: string) => api.get(`/certificates/${id}/download`, { responseType: 'blob' }).then((r) => r.data as Blob),
     issue: (attemptId: string) => data(api.post('/certificates/issue', { attemptId })),
   },
 

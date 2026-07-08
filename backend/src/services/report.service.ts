@@ -118,6 +118,9 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
   const matchesUserScope = (id: string) => {
     const u = m.users.get(id);
     if (!u) return false;
+    // A specific user filter narrows EVERY user-based report to that person (applied here
+    // so it works uniformly, not only in the reports that special-case it).
+    if (f.userId && u.id !== f.userId) return false;
     if (f.locationId && u.locationId !== f.locationId) return false;
     if (f.departmentId && u.departmentId !== f.departmentId) return false;
     if (f.supervisorId && u.supervisorId !== f.supervisorId) return false;
@@ -705,12 +708,12 @@ export async function exportReport(
   const fmt = format.toLowerCase();
 
   if (fmt === 'csv') {
-    return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows), rowCount: data.rows.length };
+    return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows, { generatedBy: user.fullName }), rowCount: data.rows.length };
   }
   if (fmt === 'xls' || fmt === 'xlsx') {
     // Tab name is capped at 31 chars by the .xlsx format (sanitised); the FULL title is
     // preserved as a title row inside the sheet.
-    const buf = await exportToExcel(data.columns, data.rows, data.title, data.title);
+    const buf = await exportToExcel(data.columns, data.rows, data.title, data.title, { generatedBy: user.fullName });
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `${type}.xlsx`,

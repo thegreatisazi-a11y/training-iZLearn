@@ -483,6 +483,29 @@ export async function downloadMaterial(id: string): Promise<{ key: string; origi
  */
 export async function setRequiredViewSeconds(id: string, seconds: number, applyToAll = false) {
   const material = await getMaterial(id);
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId, isDeleted: false }, select: { id: true, status: true, draftMeta: true } });
+
+  // A PUBLISHED course is a controlled record: a read-time change must NOT go live
+  // directly. Stage it in draftMeta.materialReadTimes; it is applied (and the version
+  // bumped) only when "Publish changes" is e-signed — see publishDraftChanges().
+  if (topic && isPublished(topic.status)) {
+    const targetIds = applyToAll
+      ? (
+          await prisma.trainingMaterial.findMany({
+            where: { topicId: material.topicId, isDeleted: false, isCurrentVersion: true, isObsolete: false },
+            select: { id: true },
+          })
+        ).map((m) => m.id)
+      : [id];
+    const draft = { ...((topic.draftMeta ?? {}) as Record<string, unknown>) };
+    const readTimes: Record<string, number> = { ...((draft.materialReadTimes as Record<string, number>) ?? {}) };
+    for (const mid of targetIds) readTimes[mid] = seconds;
+    draft.materialReadTimes = readTimes;
+    await prisma.trainingTopic.update({ where: { id: topic.id }, data: { draftMeta: draft as Prisma.InputJsonValue } });
+    return getMaterial(id); // live material is unchanged until the staged change is published
+  }
+
+  // DRAFT / unpublished course: apply directly (no live version to protect).
   if (applyToAll) {
     await prisma.trainingMaterial.updateMany({
       where: { topicId: material.topicId, isDeleted: false, isCurrentVersion: true },
