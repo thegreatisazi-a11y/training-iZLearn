@@ -29,7 +29,9 @@ router.use(authenticate);
 router.get('/', c.list);
 router.get('/export', requirePermission('courseManagement', 'export'), c.exportCsv);
 router.get('/:id', c.get);
-router.get('/:id/history', requirePermission('courseManagement', 'view'), c.history);
+// Course version history is gated on its OWN permission (the "Version History" module in
+// Roles & Access Control) so it can be granted/restricted independently of course view.
+router.get('/:id/history', requirePermission('topicVersionHistory', 'view'), c.history);
 router.post('/', requirePermission('courseManagement', 'create'), validate(createTopicSchema), c.create);
 // Publish/archive: 'edit' covers publish; archiving is additionally gated on the
 // 'archive' verb inside the controller.

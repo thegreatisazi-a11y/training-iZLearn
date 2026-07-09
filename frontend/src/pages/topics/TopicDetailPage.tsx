@@ -208,6 +208,9 @@ export default function TopicDetailPage() {
   const canManage = canEdit || canArchive || canBundleEdit;
   const canMaterialWrite = can('materialManagement', 'write');
   const canQuestionWrite = can('questionBank', 'write');
+  // "Version History" is its own permission (topicVersionHistory:view) — controls the
+  // Version History tab within a course.
+  const canViewHistory = can('topicVersionHistory', 'view');
 
   const [tab, setTab] = useState('materials');
   const [deletingMaterial, setDeletingMaterial] = useState<Material | null>(null);
@@ -256,7 +259,7 @@ export default function TopicDetailPage() {
   const { data: history, isLoading: histLoading } = useQuery({
     queryKey: ['topic-history', id],
     queryFn: () => svc.topics.history(id, { pageSize: 100 }),
-    enabled: !!id && tab === 'history',
+    enabled: !!id && tab === 'history' && canViewHistory,
   });
   const { data: library } = useQuery({
     queryKey: ['materials', 'library'],
@@ -837,7 +840,8 @@ export default function TopicDetailPage() {
         tabs={[
           { key: 'materials', label: 'Materials' },
           { key: 'questions', label: 'Questions' },
-          { key: 'history', label: 'Version History' },
+          // Version History tab only when the topicVersionHistory:view permission is granted.
+          ...(canViewHistory ? [{ key: 'history', label: 'Version History' }] : []),
         ]}
         value={tab}
         onChange={setTab}

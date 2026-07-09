@@ -306,6 +306,20 @@ async function main() {
         p.certificates.view_others = true;
         changed = true;
       }
+      // "Version History" (topicVersionHistory:view) is now enforced on the course
+      // history route (previously it was inert — gated on courseManagement:view). Preserve
+      // prior access: any role that can view courses keeps history unless explicitly
+      // toggled off. Only fills when absent, so it stays independently toggleable.
+      if (p.topicVersionHistory && p.topicVersionHistory.view === undefined && (p.courseManagement?.view || p.courseManagement?.read)) {
+        p.topicVersionHistory.view = true;
+        changed = true;
+      }
+      // Also create the module for a course-viewing role that lacks it entirely.
+      if (!p.topicVersionHistory && (p.courseManagement?.view || p.courseManagement?.read)) {
+        p.topicVersionHistory = { view: true, ...deriveLegacyFlags({ view: true }) };
+        changed = true;
+      }
+
       // S1: "View Others' Assessments" (assessments:view_others). Granted to oversight
       // roles (supervisors / training coordinators / admins) — identified by team view,
       // user management, or audit-trail access — but NOT trainers (course authors) or
