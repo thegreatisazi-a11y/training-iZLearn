@@ -89,7 +89,19 @@ export async function putFile(key: string, sourcePath: string, contentType?: str
   if (driver() === 'local') {
     const p = localPath(key);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.renameSync(sourcePath, p);
+    try {
+      fs.renameSync(sourcePath, p);
+    } catch (err) {
+      // EXDEV: the multer temp dir and the storage dir are on DIFFERENT filesystems
+      // (e.g. the container's own fs vs. a mounted Docker volume), so rename cannot
+      // move across devices. Fall back to copy + delete, which works anywhere.
+      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+        fs.copyFileSync(sourcePath, p);
+        fs.unlinkSync(sourcePath);
+      } else {
+        throw err;
+      }
+    }
     return;
   }
   const buf = fs.readFileSync(sourcePath);
