@@ -5,6 +5,7 @@ import { AppError } from '../utils/response';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
+import { assignRequiredCoursesToUser } from './assignment.service';
 import { getBool } from './systemConfig.service';
 import {
   notifyUserRequestSubmitted,
@@ -308,6 +309,9 @@ export async function decideRequest(
   });
 
   await notifyUserRequestDecision(result.user.id, request.email, input.decision, input.remarks, request.createdBy, plainPassword);
+  // Auto-assign the courses this new user's functional role(s) already require (TNI matrix).
+  // Best-effort: a hiccup here must not fail an approval that already committed.
+  await assignRequiredCoursesToUser(result.user.id, req.user!.id).catch(() => undefined);
   return { ...result.request, tempPassword: plainPassword, windowsUsername: result.user.windowsUsername };
 }
 
@@ -477,6 +481,12 @@ export async function updateUser(id: string, input: UpdateUserInput, req: Reques
     input.departmentId !== undefined && input.departmentId !== existing.departmentId;
   if (departmentChanged) {
     await provisionJdFromTemplate(id, updated.departmentId, actorId ?? existing.createdBy);
+  }
+
+  // When the user's functional role(s) change, auto-assign any courses those role(s) now
+  // require per the TNI matrix (idempotent — existing assignments are skipped). Best-effort.
+  if (input.designationIds !== undefined || input.designationId !== undefined) {
+    await assignRequiredCoursesToUser(id, actorId ?? existing.createdBy).catch(() => undefined);
   }
 
   return updated;

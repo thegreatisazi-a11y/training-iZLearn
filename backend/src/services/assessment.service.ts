@@ -157,7 +157,10 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     where: { userId, topicId, isDeleted: false },
     orderBy: { attemptNumber: 'desc' },
   });
-  if (priorAttempts.some((a) => a.isPassed)) {
+  // Version-aware: passing an EARLIER version must NOT block re-taking a REVISED version
+  // (re-training on revision). Only a pass of the CURRENT version blocks a fresh attempt;
+  // the earlier pass stays on record as the completion of that prior version.
+  if (priorAttempts.some((a) => a.isPassed && a.topicVersion === topic.currentVersion)) {
     throw AppError.conflict('You have already passed this assessment.');
   }
 
@@ -177,8 +180,10 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   // updated some reasons.)
   const extraAttempts = assignments.reduce((m, a) => Math.max(m, a.extraAttempts ?? 0), 0);
   const effectiveMax = topic.maxAttempts + extraAttempts;
+  // Attempt limit is scoped to the CURRENT version: a revision gives the learner a fresh
+  // set of attempts (prior-version attempts don't count against the re-training).
   const finalized = await prisma.assessmentAttempt.findMany({
-    where: { userId, topicId, isDeleted: false, completedAt: { not: null } },
+    where: { userId, topicId, isDeleted: false, completedAt: { not: null }, topicVersion: topic.currentVersion },
     select: { submissionReason: true },
   });
   const completedCount = finalized.filter((a) => !a.submissionReason || failureReasonCountsAsAttempt(a.submissionReason as AssessmentFailureReason)).length;
@@ -212,7 +217,9 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     }
   }
 
-  const attemptNumber = priorAttempts.length + 1;
+  // Attempt numbers restart per course version, so a revision yields a fresh sequence
+  // (keeps the submit-time max-attempts block correct for the re-training).
+  const attemptNumber = priorAttempts.filter((a) => a.topicVersion === topic.currentVersion).length + 1;
 
   // Build the question set: all mandatory + (optionally randomized) non-mandatory up to the count.
   // The per-topic questionLimit takes precedence over the global default.

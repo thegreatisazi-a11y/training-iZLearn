@@ -381,6 +381,9 @@ export async function publishDraftChanges(id: string, req: Request) {
   // matching functional-role users.
   await markSignatoriesComplete(id, req.user!.id);
   await assignToFunctionalRoleHolders(promoted, req.user!.id);
+  // Re-training on revision: everyone who completed the prior version must re-qualify on
+  // the new one (their old completion + certificate stay on record; a fresh task appears).
+  await reassignCompletedUsersForRevision(id, req.user!.id);
   return promoted;
 }
 
@@ -452,6 +455,40 @@ async function assignToFunctionalRoleHolders(
     }
   } catch {
     /* best-effort: a notification/assignment hiccup must not block publish */
+  }
+}
+
+/**
+ * Re-training on revision: when a new course version is published, every user who had
+ * COMPLETED the course must re-qualify on the new version. For each such user we create a
+ * FRESH pending assignment while LEAVING the old COMPLETED assignment (and its certificate /
+ * assessment attempts, which are versioned) untouched — so the prior completion stays on
+ * record for the user, their supervisor, and reports, and a new re-training task appears.
+ * The version-aware guards in assessment.service allow the re-take with a fresh attempt set.
+ *
+ * Users who already have an ACTIVE (not-completed, not-waived) assignment are skipped so a
+ * repeated publish never stacks duplicate pending rows. Best-effort — never blocks publish.
+ */
+async function reassignCompletedUsersForRevision(topicId: string, actorId: string) {
+  try {
+    const assignments = await prisma.trainingAssignment.findMany({
+      where: { topicId, isDeleted: false },
+      select: { userId: true, status: true },
+    });
+    // Users with a completed record, minus anyone who already has an active (re-)assignment.
+    const completedUserIds = new Set(assignments.filter((a) => a.status === 'COMPLETED').map((a) => a.userId));
+    const activeUserIds = new Set(
+      assignments.filter((a) => a.status !== 'COMPLETED' && a.status !== 'WAIVED').map((a) => a.userId),
+    );
+    for (const userId of completedUserIds) {
+      if (activeUserIds.has(userId)) continue; // already has a pending/in-progress re-training
+      const a = await prisma.trainingAssignment.create({
+        data: { userId, topicId, assignmentType: 'ROLE_SPECIFIC', status: 'PENDING', assignedBy: actorId, createdBy: actorId },
+      });
+      await notifyTrainingAssigned(a.userId, a.topicId, null);
+    }
+  } catch {
+    /* best-effort: re-training assignment must not block the version publish */
   }
 }
 

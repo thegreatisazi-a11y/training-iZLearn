@@ -25,6 +25,9 @@ interface MyTraining {
   status: string;
   dueDate: string | null;
   refresherDueDate: string | null;
+  // Per-row version: a completed row keeps the version it was completed at; an actionable
+  // row shows the topic's current version. Falls back to the topic's current version.
+  topicVersion?: number | null;
   topic: {
     id: string;
     title: string;
@@ -108,7 +111,7 @@ export default function MyTrainingsPage() {
     { key: 'title', header: 'Training', render: (r) => <span className="font-medium text-slate-800">{r.topic?.title}</span> },
     { key: 'type', header: 'Type', render: (r) => (r.topic?.trainingType ?? '').replace(/_/g, ' ') },
     { key: 'duration', header: 'Duration', render: (r) => (r.topic?.durationMinutes ? `${r.topic.durationMinutes} min` : '—') },
-    { key: 'version', header: 'Version', render: (r) => `v${r.topic?.currentVersion ?? '—'}` },
+    { key: 'version', header: 'Version', render: (r) => `v${r.topicVersion ?? r.topic?.currentVersion ?? '—'}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status.replace(/_/g, ' ')}</Badge> },
     { key: 'due', header: 'Due', render: (r) => formatDate(r.dueDate) },
     {
