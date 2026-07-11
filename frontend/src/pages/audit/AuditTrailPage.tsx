@@ -167,6 +167,15 @@ export default function AuditTrailPage() {
     return m;
   }, [usersForNames.data]);
   const resolveUser = (id: string) => userNameById.get(id);
+  // Options for the User filter dropdown (searchable), mirroring the Reports page.
+  const userOpts = useMemo(
+    () =>
+      ((usersForNames.data?.data ?? []) as { id: string; fullName: string; employeeId?: string }[]).map((u) => ({
+        value: u.id,
+        label: u.employeeId ? `${u.fullName} (${u.employeeId})` : u.fullName,
+      })),
+    [usersForNames.data],
+  );
 
   // CR-AU1: resolve the audited record's id → a readable name per entity type.
   const topicsForNames = useQuery({ queryKey: ['topics', 'audit-names'], queryFn: () => svc.topics.list({ pageSize: 1000 }) });
@@ -324,8 +333,8 @@ export default function AuditTrailPage() {
             <Field label="Action">
               <Select options={ACTIONS} value={draft.action} onChange={(e) => setDraft((d) => ({ ...d, action: e.target.value }))} placeholder="Any action" />
             </Field>
-            <Field label="User ID">
-              <Input value={draft.userId} onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))} placeholder="Optional" />
+            <Field label="User">
+              <Select options={userOpts} value={draft.userId} onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))} placeholder="All users" />
             </Field>
             <Field label="Entity type">
               <Input value={draft.entityType} onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))} placeholder="Optional" />

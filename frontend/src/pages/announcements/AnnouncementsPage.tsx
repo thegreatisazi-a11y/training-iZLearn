@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import DOMPurify from 'dompurify';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
@@ -12,6 +11,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
 import { EmptyState } from '@/components/common/EmptyState';
+import { MultiSelect } from '@/components/common/MultiSelect';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
@@ -36,6 +36,7 @@ export default function AnnouncementsPage() {
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Announcement | null>(null);
+  const [viewing, setViewing] = useState<Announcement | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [reasonRow, setReasonRow] = useState<Announcement | null>(null);
   const [deactivateRow, setDeactivateRow] = useState<Announcement | null>(null);
@@ -133,6 +134,9 @@ export default function AnnouncementsPage() {
       header: 'Actions',
       render: (r) => (
         <div className="flex gap-1">
+          <Button size="sm" variant="outline" onClick={() => setViewing(r)}>
+            View
+          </Button>
           <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
             Edit
           </Button>
@@ -197,16 +201,28 @@ export default function AnnouncementsPage() {
                     <div className="font-medium text-slate-800">{a.title}</div>
                     {a.expiresAt && <span className="text-xs text-slate-400">Expires {formatDate(a.expiresAt)}</span>}
                   </div>
-                  <div
-                    className="prose-sm mt-1 text-sm text-slate-600"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(a.content) }}
-                  />
+                  <div className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{a.content}</div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
       </section>
+
+      {/* View announcement (read-only) */}
+      <Dialog
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        title={viewing?.title ?? 'Announcement'}
+        className="max-w-2xl"
+        footer={<Button variant="outline" onClick={() => setViewing(null)}>Close</Button>}
+      >
+        <div className="mb-2 flex items-center gap-3 text-xs text-slate-400">
+          <Badge tone={viewing?.isActive ? 'APPROVED' : 'default'}>{viewing?.isActive ? 'Active' : 'Inactive'}</Badge>
+          {viewing?.expiresAt && <span>Expires {formatDate(viewing.expiresAt)}</span>}
+        </div>
+        <div className="whitespace-pre-wrap text-sm text-slate-700">{viewing?.content}</div>
+      </Dialog>
 
       {/* Create / Edit dialog */}
       <Dialog
@@ -228,27 +244,22 @@ export default function AnnouncementsPage() {
         <Field label="Title" required>
           <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
         </Field>
-        <Field label="Content (HTML)" required>
+        <Field label="Content" required>
           <Textarea
-            className="min-h-[160px] font-mono text-xs"
+            className="min-h-[160px]"
             value={form.content}
             onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-            placeholder="<p>Your announcement…</p>"
+            placeholder="Write your announcement in plain English… line breaks are preserved."
           />
         </Field>
         <Field label="Target Roles (none = all)">
-          <select
-            multiple
-            className="iz-input h-28"
+          <MultiSelect
+            options={((roles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }))}
             value={form.targetRoles}
-            onChange={(e) => setForm((f) => ({ ...f, targetRoles: Array.from(e.target.selectedOptions, (o) => o.value) }))}
-          >
-            {((roles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.roleName}
-              </option>
-            ))}
-          </select>
+            onChange={(vals) => setForm((f) => ({ ...f, targetRoles: vals }))}
+            placeholder="Search roles… (leave empty = all)"
+            emptyText="No roles"
+          />
         </Field>
         <Field label="Expires At">
           <Input type="date" value={form.expiresAt} onChange={(e) => setForm((f) => ({ ...f, expiresAt: e.target.value }))} />

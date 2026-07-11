@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Button } from '@/components/ui/button';
 import { Input, Field, Textarea } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -395,11 +396,16 @@ export default function RolesPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input className="max-w-xs" placeholder="Search by name or description…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
-        <select className="iz-input max-w-[10rem]" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value as StatusFilter); setPage(1); }}>
-          <option value="active">Active only</option>
-          <option value="inactive">Inactive only</option>
-          <option value="all">All</option>
-        </select>
+        <Select
+          className="max-w-[10rem]"
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value as StatusFilter); setPage(1); }}
+          options={[
+            { value: 'active', label: 'Active only' },
+            { value: 'inactive', label: 'Inactive only' },
+            { value: 'all', label: 'All' },
+          ]}
+        />
       </div>
 
       <DataTable
