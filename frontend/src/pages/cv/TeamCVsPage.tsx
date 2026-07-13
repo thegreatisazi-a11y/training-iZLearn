@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
 import { CvDocument } from '@/components/common/CvDocument';
 import { svc } from '@/services';
-import { printHtml, printTable } from '@/lib/print';
+import { printCurriculumVitae } from '@/lib/cvPrint';
 
 interface TeamRow {
   id: string;
@@ -95,23 +95,8 @@ export default function TeamCVsPage() {
   ];
 
   function handlePrint() {
-    const h = cvData?.header;
-    const cv = cvData?.cv;
-    if (!h) return;
-    const langs = (cv?.languages ?? []).filter((l) => l.language);
-    const languagesBlock = langs.length
-      ? printTable(['Language', 'Read', 'Write', 'Understand'], langs.map((l) => [l.language, l.read ? 'Yes' : 'No', l.write ? 'Yes' : 'No', l.understand ? 'Yes' : 'No']))
-      : `<p>${cv?.languagesKnown || '—'}</p>`;
-    const body =
-      `<h1>Curriculum Vitae</h1>` +
-      `<div class="meta">${h.employeeName} (${h.employeeCode}) · ${h.functionalRole ?? ''} · ${h.departmentName ?? ''} · v${cv?.version ?? 1}</div>` +
-      `<div class="section">Languages Known</div>${languagesBlock}` +
-      `<div class="section">Educational Qualifications</div>` +
-      printTable(['Year', 'Degree', 'Specialization', 'Institute'], (cv?.qualifications ?? []).map((q) => [q.year, q.degree, q.specialization, q.institute])) +
-      `<div class="section">Current Role</div><p>${cv?.currentRole || '—'}</p><p>${cv?.currentResponsibilities || ''}</p>` +
-      `<div class="section">Previous Positions</div>` +
-      printTable(['Organisation', 'Role', 'From', 'To', 'Responsibilities'], (cv?.experience ?? []).map((e) => [e.organisation, e.role, e.tenureFrom, e.tenureTo, e.responsibilities]));
-    printHtml('Curriculum Vitae', body);
+    if (!cvData?.header) return;
+    printCurriculumVitae(cvData.header, cvData.cv);
   }
 
   return (

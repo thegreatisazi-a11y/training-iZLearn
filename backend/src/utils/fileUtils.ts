@@ -74,7 +74,8 @@ export function validateUpload(file: UploadCandidate, maxSizeBytes: number): { e
   if (!allowedMimes.includes(file.mimetype)) {
     throw AppError.badRequest(`File MIME type "${file.mimetype}" does not match its ".${ext}" extension.`);
   }
-  if (file.size > maxSizeBytes) {
+  // maxSizeBytes <= 0 means "no limit" (System Config `upload.max_size_mb` set to 0/blank).
+  if (maxSizeBytes > 0 && file.size > maxSizeBytes) {
     throw AppError.badRequest(`File exceeds the maximum size of ${Math.round(maxSizeBytes / (1024 * 1024))} MB.`);
   }
   return { ext };

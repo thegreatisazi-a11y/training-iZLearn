@@ -51,10 +51,18 @@ const EMPTY_FORM: CertificateTemplateInput = {
   primaryColor: '#0f766e',
   secondaryColor: '#334155',
   fontFamily: 'Georgia',
+  orgName: '',
   headerText: 'Certificate of Training Completion',
   subHeaderText: 'This is to certify that',
   bodyText: '',
   footerText: 'Certificate No: {{certificateNumber}}',
+  orgFontSize: 15,
+  headerFontSize: 30,
+  subHeaderFontSize: 16,
+  nameFontSize: 30,
+  bodyFontSize: 18,
+  footerFontSize: 12,
+  signatoryFontSize: 13,
   signatory1Name: '',
   signatory1Title: '',
   signatory2Name: '',
@@ -68,13 +76,24 @@ const EMPTY_FORM: CertificateTemplateInput = {
 
 function LivePreview({ form }: { form: Partial<CertificateTemplateInput> }) {
   const html = renderCertificateTemplateHtml(form, SAMPLE_CERT_DATA);
+  // Render at the true page dimensions (A4 at ~96dpi) and scale to fit, so the preview
+  // matches the downloaded PDF's proportions/layout — not an arbitrary iframe box.
+  const portrait = form.orientation === 'PORTRAIT';
+  const pageW = portrait ? 794 : 1123;
+  const pageH = portrait ? 1123 : 794;
+  const displayW = portrait ? 460 : 640; // width shown in the form column
+  const scale = displayW / pageW;
   return (
-    <iframe
-      srcDoc={html}
-      className="w-full rounded border border-slate-200"
-      style={{ height: form.orientation === 'PORTRAIT' ? '560px' : '420px' }}
-      title="Certificate preview"
-    />
+    <div
+      className="overflow-hidden rounded border border-slate-200 bg-white"
+      style={{ width: displayW, height: Math.round(pageH * scale) }}
+    >
+      <iframe
+        srcDoc={html}
+        title="Certificate preview"
+        style={{ width: pageW, height: pageH, border: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+      />
+    </div>
   );
 }
 
@@ -91,6 +110,51 @@ function PlaceholderBar({ onInsert }: { onInsert: (token: string) => void }) {
           {p.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Small inline "Size __ px" control shown next to each certificate field's label. */
+function SizeInput({ value, onChange, min, max }: { value?: number | null; onChange: (v: number) => void; min: number; max: number }) {
+  return (
+    <label className="flex shrink-0 items-center gap-1 text-xs font-normal text-slate-500">
+      Size
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value ?? ''}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="iz-input h-7 w-16 px-1.5 py-0 text-xs"
+      />
+      px
+    </label>
+  );
+}
+
+/** A labelled block whose header row carries an inline per-field text-size control. */
+function FieldWithSize({
+  label,
+  size,
+  onSize,
+  min,
+  max,
+  children,
+}: {
+  label: string;
+  size?: number | null;
+  onSize: (v: number) => void;
+  min: number;
+  max: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="iz-label">{label}</span>
+        <SizeInput value={size} onChange={onSize} min={min} max={max} />
+      </div>
+      {children}
     </div>
   );
 }
@@ -171,39 +235,63 @@ function TemplateForm({
         </Field>
       </div>
 
-      <Field label="Header Text">
+      <p className="text-xs text-slate-500">
+        Each field below has its own text size (the box on the right). Leave a field blank to remove it — the
+        certificate re-centres the remaining fields automatically.
+      </p>
+
+      <FieldWithSize label="Organisation Name" size={form.orgFontSize} onSize={(v) => set('orgFontSize', v)} min={6} max={96}>
+        <Input
+          className="mt-1"
+          placeholder="Leave blank to use the organisation name from System Config"
+          value={form.orgName ?? ''}
+          onChange={(e) => set('orgName', e.target.value)}
+        />
+      </FieldWithSize>
+
+      <FieldWithSize label="Header Text" size={form.headerFontSize} onSize={(v) => set('headerFontSize', v)} min={8} max={120}>
         <PlaceholderBar onInsert={(t) => insertInto('headerText', t)} />
         <Input className="mt-1" value={form.headerText} onChange={(e) => set('headerText', e.target.value)} />
-      </Field>
+      </FieldWithSize>
 
-      <Field label="Sub-header Text">
+      <FieldWithSize label="Sub-header Text" size={form.subHeaderFontSize} onSize={(v) => set('subHeaderFontSize', v)} min={6} max={96}>
         <PlaceholderBar onInsert={(t) => insertInto('subHeaderText', t)} />
         <Input className="mt-1" value={form.subHeaderText} onChange={(e) => set('subHeaderText', e.target.value)} />
-      </Field>
+      </FieldWithSize>
 
-      <Field label="Body Text">
+      <FieldWithSize label="Recipient Name (auto-filled)" size={form.nameFontSize} onSize={(v) => set('nameFontSize', v)} min={8} max={120}>
+        <Input className="mt-1 bg-slate-50 text-slate-400" disabled value={SAMPLE_CERT_DATA.employeeName} />
+      </FieldWithSize>
+
+      <FieldWithSize label="Body Text" size={form.bodyFontSize} onSize={(v) => set('bodyFontSize', v)} min={6} max={96}>
         <PlaceholderBar onInsert={(t) => insertInto('bodyText', t)} />
         <Textarea className="mt-1" rows={3} value={form.bodyText} onChange={(e) => set('bodyText', e.target.value)} />
-      </Field>
+      </FieldWithSize>
 
-      <Field label="Footer Text">
+      <FieldWithSize label="Footer Text" size={form.footerFontSize} onSize={(v) => set('footerFontSize', v)} min={6} max={72}>
         <PlaceholderBar onInsert={(t) => insertInto('footerText', t)} />
         <Input className="mt-1" value={form.footerText} onChange={(e) => set('footerText', e.target.value)} />
-      </Field>
+      </FieldWithSize>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Signatory 1 Name">
-          <Input value={form.signatory1Name ?? ''} onChange={(e) => set('signatory1Name', e.target.value)} />
-        </Field>
-        <Field label="Signatory 1 Title">
-          <Input value={form.signatory1Title ?? ''} onChange={(e) => set('signatory1Title', e.target.value)} />
-        </Field>
-        <Field label="Signatory 2 Name">
-          <Input value={form.signatory2Name ?? ''} onChange={(e) => set('signatory2Name', e.target.value)} />
-        </Field>
-        <Field label="Signatory 2 Title">
-          <Input value={form.signatory2Title ?? ''} onChange={(e) => set('signatory2Title', e.target.value)} />
-        </Field>
+      <div>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="iz-label">Signatories</span>
+          <SizeInput value={form.signatoryFontSize} onChange={(v) => set('signatoryFontSize', v)} min={6} max={72} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Signatory 1 Name">
+            <Input value={form.signatory1Name ?? ''} onChange={(e) => set('signatory1Name', e.target.value)} />
+          </Field>
+          <Field label="Signatory 1 Title">
+            <Input value={form.signatory1Title ?? ''} onChange={(e) => set('signatory1Title', e.target.value)} />
+          </Field>
+          <Field label="Signatory 2 Name">
+            <Input value={form.signatory2Name ?? ''} onChange={(e) => set('signatory2Name', e.target.value)} />
+          </Field>
+          <Field label="Signatory 2 Title">
+            <Input value={form.signatory2Title ?? ''} onChange={(e) => set('signatory2Title', e.target.value)} />
+          </Field>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

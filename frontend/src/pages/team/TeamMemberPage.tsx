@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, FileText, UserCircle } from 'lucide-react';
+import { ArrowLeft, FileText, UserCircle, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { printJobDescription } from '@/lib/jdPrint';
+import { printCurriculumVitae } from '@/lib/cvPrint';
 import { CvDocument } from '@/components/common/CvDocument';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -321,6 +323,25 @@ export default function TeamMemberPage() {
                     <div className="flex items-center gap-2">
                       <Badge tone={jd.status}>{jd.status.replace(/_/g, ' ')}</Badge>
                       <span className="rounded bg-white px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200">Version v{jd.version}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          printJobDescription({
+                            title: jd.title,
+                            version: jd.version,
+                            status: jd.status,
+                            employeeName: data?.user.fullName ?? null,
+                            employeeCode: data?.user.employeeId ?? null,
+                            department: jd.departmentId ? deptName.get(jd.departmentId) ?? null : null,
+                            functionalRole: jd.functionalRoleId ? roleName.get(jd.functionalRoleId) ?? null : null,
+                            acknowledgedAt: jd.acknowledgedAt ?? null,
+                            content: jd.content ?? null,
+                          })
+                        }
+                      >
+                        <Printer className="h-4 w-4" /> Print
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -348,7 +369,19 @@ export default function TeamMemberPage() {
         onClose={() => setCvOpen(false)}
         className="max-w-3xl"
         title={cvData?.header ? `CV — ${cvData.header.employeeName}` : 'Curriculum Vitae'}
-        footer={<Button onClick={() => setCvOpen(false)}>Close</Button>}
+        footer={
+          <>
+            {/* Download the CV as a print-to-PDF, mirroring the JD "Print" action above. */}
+            <Button
+              variant="outline"
+              disabled={!cvData?.cv}
+              onClick={() => cvData?.header && printCurriculumVitae(cvData.header, cvData.cv)}
+            >
+              <Printer className="h-4 w-4" /> Download CV
+            </Button>
+            <Button onClick={() => setCvOpen(false)}>Close</Button>
+          </>
+        }
       >
         {cvLoading ? (
           <PageLoader />

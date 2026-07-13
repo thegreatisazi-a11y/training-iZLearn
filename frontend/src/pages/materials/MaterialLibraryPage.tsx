@@ -41,6 +41,11 @@ export default function MaterialLibraryPage() {
   // BUG-10: explicit downloads are limited to material managers (download permission).
   const canDownload = canWrite || hasPermission('courseManagement', 'write');
   const bulkInputRef = useRef<HTMLInputElement>(null);
+  // Live upload progress for the single-file topic upload, the library bulk upload,
+  // and the training-instruction replace (each a separate request).
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [bulkPct, setBulkPct] = useState<number | null>(null);
+  const [instrPct, setInstrPct] = useState<number | null>(null);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -90,12 +95,13 @@ export default function MaterialLibraryPage() {
   };
 
   const uploadMut = useMutation({
-    mutationFn: (file: File) => svc.materials.upload(file, uploadTopicId),
+    mutationFn: (file: File) => svc.materials.upload(file, uploadTopicId, setUploadPct),
     onSuccess: () => {
       toast.success('Material uploaded');
       qc.invalidateQueries({ queryKey: ['materials'] });
     },
     onError: (e) => toast.error(apiError(e)),
+    onSettled: () => setUploadPct(null),
   });
 
   const bulkUploadMut = useMutation({
@@ -103,7 +109,11 @@ export default function MaterialLibraryPage() {
       const fd = new FormData();
       files.forEach((f) => fd.append('files', f));
       // Library-level upload (no topicId): files become reusable library materials.
-      const r = await api.post('/materials/bulk', fd);
+      const r = await api.post('/materials/bulk', fd, {
+        onUploadProgress: (ev: { loaded: number; total?: number }) => {
+          if (ev.total) setBulkPct(Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+        },
+      });
       return r.data.data as { uploaded: number; failed: number; errors: { fileName: string; error: string }[] };
     },
     onSuccess: (res) => {
@@ -112,11 +122,12 @@ export default function MaterialLibraryPage() {
       qc.invalidateQueries({ queryKey: ['materials'] });
     },
     onError: (e) => toast.error(apiError(e)),
+    onSettled: () => setBulkPct(null),
   });
 
   const onBulkFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    if (files.length > 0) bulkUploadMut.mutate(files);
+    if (files.length > 0) { setBulkPct(0); bulkUploadMut.mutate(files); }
     e.target.value = ''; // allow re-selecting the same files
   };
 
@@ -133,12 +144,13 @@ export default function MaterialLibraryPage() {
   // Update the instruction with a new file — versioned (previous is archived), latest reflected.
   const instrInputRef = useRef<HTMLInputElement>(null);
   const replaceInstructionMut = useMutation({
-    mutationFn: (file: File) => svc.materials.replaceInstruction(file),
+    mutationFn: (file: File) => svc.materials.replaceInstruction(file, setInstrPct),
     onSuccess: () => {
       toast.success('Instruction updated — trainees now see the latest version.');
       refreshInstruction();
     },
     onError: (e) => toast.error(apiError(e)),
+    onSettled: () => setInstrPct(null),
   });
 
   const deleteMut = useMutation({
@@ -247,7 +259,7 @@ export default function MaterialLibraryPage() {
               />
               <Button onClick={() => bulkInputRef.current?.click()} disabled={bulkUploadMut.isPending}>
                 <Upload className="mr-2 h-4 w-4" />
-                {bulkUploadMut.isPending ? 'Uploading…' : 'Bulk Upload'}
+                {bulkUploadMut.isPending ? `Uploading… ${bulkPct ?? 0}%` : 'Bulk Upload'}
               </Button>
             </>
           ) : undefined
@@ -262,7 +274,7 @@ export default function MaterialLibraryPage() {
         accept={ALLOWED_MATERIAL_EXTENSIONS.map((e) => `.${e}`).join(',')}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) replaceInstructionMut.mutate(file);
+          if (file) { setInstrPct(0); replaceInstructionMut.mutate(file); }
           e.target.value = '';
         }}
       />
@@ -289,7 +301,7 @@ export default function MaterialLibraryPage() {
                 <Eye className="h-4 w-4" /> View
               </Button>
               <Button size="sm" variant="outline" disabled={replaceInstructionMut.isPending} onClick={() => instrInputRef.current?.click()}>
-                <RefreshCw className="h-4 w-4" /> {replaceInstructionMut.isPending ? 'Updating…' : 'Update file'}
+                <RefreshCw className="h-4 w-4" /> {replaceInstructionMut.isPending ? `Updating… ${instrPct ?? 0}%` : 'Update file'}
               </Button>
               <Button size="sm" variant="outline" disabled={setInstructionMut.isPending} onClick={() => setInstructionMut.mutate({ id: instruction.id, on: false })}>
                 <X className="h-4 w-4" /> Remove
@@ -312,8 +324,9 @@ export default function MaterialLibraryPage() {
                 {uploadTopicId ? (
                   <FileUpload
                     accept={ALLOWED_MATERIAL_EXTENSIONS.map((e) => `.${e}`).join(',')}
-                    onSelect={(f) => uploadMut.mutate(f)}
-                    label={uploadMut.isPending ? 'Uploading…' : 'Upload material'}
+                    onSelect={(f) => { setUploadPct(0); uploadMut.mutate(f); }}
+                    label="Upload material"
+                    progress={uploadPct}
                   />
                 ) : (
                   <p className="text-sm text-slate-400">Select a topic to enable upload.</p>

@@ -3,6 +3,16 @@ import { createCrud, ListParams } from './crud';
 
 const data = <T>(p: Promise<{ data: { data: T } }>) => p.then((r) => r.data.data);
 
+/** Axios config that reports upload progress as a 0–100 percentage, for file uploads. */
+function upCfg(onProgress?: (pct: number) => void) {
+  if (!onProgress) return {};
+  return {
+    onUploadProgress: (e: { loaded: number; total?: number }) => {
+      if (e.total) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+    },
+  };
+}
+
 /** Build a `?a=b&c=d` query suffix from a params object (skips empty values). */
 function qs(params?: Record<string, unknown>): string {
   if (!params) return '';
@@ -82,38 +92,38 @@ export const svc = {
 
   materials: {
     list: (params?: ListParams) => api.get('/materials', { params }).then((r) => r.data),
-    upload: (file: File, topicId: string) => {
+    upload: (file: File, topicId: string, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('topicId', topicId);
-      return api.post('/materials', fd).then((r) => r.data.data);
+      return api.post('/materials', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
     /**
      * Upload several files to a topic in one request. The server adds each as its own
      * current material (no file supersedes another) and returns an
      * { uploaded, failed, errors[] } summary; partial success is HTTP 200.
      */
-    bulkUpload: (files: File[], topicId: string) => {
+    bulkUpload: (files: File[], topicId: string, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       files.forEach((f) => fd.append('files', f));
       fd.append('topicId', topicId);
-      return api.post('/materials/bulk', fd).then((r) => r.data.data);
+      return api.post('/materials/bulk', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
-    replace: (id: string, file: File, reasonForChange?: string) => {
+    replace: (id: string, file: File, reasonForChange?: string, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
       if (reasonForChange) fd.append('reasonForChange', reasonForChange);
-      return api.post(`/materials/${id}/replace`, fd).then((r) => r.data.data);
+      return api.post(`/materials/${id}/replace`, fd, upCfg(onProgress)).then((r) => r.data.data);
     },
     attachFromLibrary: (materialId: string, topicId: string, reasonForChange?: string) =>
       data(api.post('/materials/attach', { materialId, topicId, reasonForChange })),
     // Global "training instruction" file shown before reading on Start Training.
     instruction: () => data(api.get('/materials/instruction')),
     setInstruction: (id: string, on: boolean) => data(api.patch(`/materials/${id}/set-instruction`, { on })),
-    replaceInstruction: (file: File) => {
+    replaceInstruction: (file: File, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
-      return api.post('/materials/instruction/replace', fd).then((r) => r.data.data);
+      return api.post('/materials/instruction/replace', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
     acknowledgeInstruction: (id: string) => data(api.post(`/materials/${id}/acknowledge-instruction`)),
     /** Replace a specific material with an existing Material Library file. */
@@ -299,13 +309,13 @@ export const svc = {
   personalDocs: {
     mine: () => data(api.get('/personal-documents/me')),
     byUser: (userId: string) => data(api.get(`/personal-documents/user/${userId}`)),
-    upload: (file: File, documentType: string, title: string, userId?: string) => {
+    upload: (file: File, documentType: string, title: string, userId?: string, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('documentType', documentType);
       fd.append('title', title);
       if (userId) fd.append('userId', userId);
-      return api.post('/personal-documents', fd).then((r) => r.data.data);
+      return api.post('/personal-documents', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
     downloadUrl: (id: string) => `/api/personal-documents/${id}/download`,
     download: (id: string, name = 'document') => downloadAuthed(`/personal-documents/${id}/download`, name),

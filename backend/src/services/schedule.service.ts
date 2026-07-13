@@ -360,7 +360,7 @@ export async function attachOfflineAttendanceSheet(id: string, file: Express.Mul
   const record = await prisma.offlineTrainingRecord.findFirst({ where: { id, isDeleted: false } });
   if (!record) throw AppError.notFound('Offline training record not found');
 
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 

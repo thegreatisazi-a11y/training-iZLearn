@@ -41,7 +41,7 @@ export const DEFAULT_SYSTEM_CONFIG: Record<string, { value: string; description:
   'backup.auto_enabled': { value: 'true', description: 'Enable scheduled database backups' },
   'backup.cron_expression': { value: '0 1 * * *', description: 'Cron for automatic backups' },
   'backup.destination_path': { value: '/app/backups', description: 'Directory where backups are written' },
-  'upload.max_size_mb': { value: '500', description: 'Maximum upload size in MB (training videos; hard ceiling 1 GB)' },
+  'upload.max_size_mb': { value: '0', description: 'Maximum upload size in MB. 0 = no limit.' },
   'security.allowed_origins': { value: 'http://localhost:5173', description: 'Comma-separated CORS whitelist' },
   'security.allowed_ip_ranges': { value: '', description: 'UR-80: comma-separated client IP prefixes allowed to access the app (empty = no restriction)' },
   'assessment.default_question_count': { value: '10', description: 'Default number of questions per assessment' },

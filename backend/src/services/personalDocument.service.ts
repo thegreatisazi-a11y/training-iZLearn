@@ -23,7 +23,7 @@ export async function uploadPersonalDoc(
   file: Express.Multer.File,
   createdBy: string,
 ) {
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 

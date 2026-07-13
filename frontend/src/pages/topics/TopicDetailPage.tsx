@@ -286,9 +286,11 @@ export default function TopicDetailPage() {
 
   // Upload one or many files at once. Each becomes its own current material — a new
   // upload no longer supersedes the topic's existing files.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
   const uploadMut = useMutation({
-    mutationFn: (files: File[]) => svc.materials.bulkUpload(files, id),
+    mutationFn: (files: File[]) => svc.materials.bulkUpload(files, id, setUploadPct),
     onSuccess: (r: { uploaded: number; failed: number; errors?: { fileName: string; error: string }[] }) => {
+      setUploadPct(null);
       if (r.failed > 0) {
         const first = r.errors?.[0];
         toast.error(`${r.uploaded} uploaded, ${r.failed} failed${first ? ` — ${first.fileName}: ${first.error}` : ''}`);
@@ -299,7 +301,7 @@ export default function TopicDetailPage() {
       // A material change can bump the course version — refresh the topic header.
       qc.invalidateQueries({ queryKey: ['topic', id] });
     },
-    onError: (e) => toast.error(apiError(e)),
+    onError: (e) => { setUploadPct(null); toast.error(apiError(e)); },
   });
 
   const deleteMaterialMut = useMutation({
@@ -322,8 +324,9 @@ export default function TopicDetailPage() {
 
   // Replace a file (from device). On a published course this stages the change; the
   // reason (+ e-sign) is captured once at "Publish changes", so none is prompted here.
+  const [replacePct, setReplacePct] = useState<number | null>(null);
   const replaceMut = useMutation({
-    mutationFn: (args: { material: Material; file: File }) => svc.materials.replace(args.material.id, args.file),
+    mutationFn: (args: { material: Material; file: File }) => svc.materials.replace(args.material.id, args.file, undefined, setReplacePct),
     onSuccess: () => {
       toast.success(isPublished ? 'File replacement staged — publish changes to make it live.' : 'File replaced with a new version');
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
@@ -331,6 +334,7 @@ export default function TopicDetailPage() {
       qc.invalidateQueries({ queryKey: ['topic', id] });
     },
     onError: (e) => toast.error(apiError(e)),
+    onSettled: () => setReplacePct(null),
   });
 
   // Replace a specific file using an existing Material Library file (true replace).
@@ -647,10 +651,12 @@ export default function TopicDetailPage() {
           {canMaterialWrite && (
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              disabled={replaceMut.isPending && replaceTarget?.id === r.id}
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline disabled:opacity-60"
               onClick={() => setReplaceChoice(r)}
             >
-              <RefreshCw className="h-4 w-4" /> Replace / Update
+              <RefreshCw className="h-4 w-4" />
+              {replaceMut.isPending && replaceTarget?.id === r.id ? `Replacing… ${replacePct ?? 0}%` : 'Replace / Update'}
             </button>
           )}
           {/* G5/H1: material delete is only allowed before the course is published. */}
@@ -853,9 +859,10 @@ export default function TopicDetailPage() {
             <div className="flex flex-wrap items-center gap-3">
               <FileUpload
                 multiple
-                onSelect={(f) => uploadMut.mutate([f])}
-                onSelectMany={(files) => uploadMut.mutate(files)}
-                label={uploadMut.isPending ? 'Uploading…' : 'Upload material(s)'}
+                onSelect={(f) => { setUploadPct(0); uploadMut.mutate([f]); }}
+                onSelectMany={(files) => { setUploadPct(0); uploadMut.mutate(files); }}
+                label="Upload material(s)"
+                progress={uploadPct}
               />
               <Button variant="outline" onClick={() => { setSelectedLibraryIds([]); setLibraryOpen(true); }}>
                 <Library className="h-4 w-4" /> Choose from Material Library
@@ -949,7 +956,7 @@ export default function TopicDetailPage() {
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file && replaceTarget) replaceMut.mutate({ material: replaceTarget, file });
+              if (file && replaceTarget) { setReplacePct(0); replaceMut.mutate({ material: replaceTarget, file }); }
               e.target.value = '';
             }}
           />

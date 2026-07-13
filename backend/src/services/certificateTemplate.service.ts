@@ -89,7 +89,12 @@ export async function previewTemplatePdf(id: string): Promise<Buffer> {
   const org = await getOrgInfo();
   const data: CertificatePlaceholderData = { ...SAMPLE_CERT_DATA, orgName: org.name };
   const html = renderCertificateTemplateHtml(t, data);
-  return renderPdfFromHtml(html, { landscape: t.orientation === 'LANDSCAPE', format: t.pageSize as 'A4' | 'Letter' });
+  return renderPdfFromHtml(html, {
+    landscape: t.orientation === 'LANDSCAPE',
+    format: t.pageSize as 'A4' | 'Letter',
+    margin: { top: '0', bottom: '0', left: '0', right: '0' },
+    preferCSSPageSize: true,
+  });
 }
 
 /** Resolve the default template for a certificate type (null → built-in fallback). */

@@ -70,7 +70,7 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
   // soft-deleted rows so Replace/Update still works.
   await assertNoDuplicateName(file.originalname, { topicId });
 
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
@@ -174,7 +174,7 @@ export async function bulkUploadMaterials(
   createdBy: string,
   opts?: { topicId?: string | null },
 ): Promise<{ uploaded: number; failed: number; materials: unknown[]; errors: { fileName: string; error: string }[] }> {
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   const materials: unknown[] = [];
   const errors: { fileName: string; error: string }[] = [];
 
@@ -207,7 +207,7 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
 
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 
@@ -616,7 +616,7 @@ export async function setInstruction(materialId: string, on: boolean, actorId: s
  * history). "The latest is reflected" — every trainee then sees the new file.
  */
 export async function replaceInstruction(file: Express.Multer.File, createdBy: string) {
-  const maxBytes = (await getNumber('upload.max_size_mb', 100)) * 1024 * 1024;
+  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 

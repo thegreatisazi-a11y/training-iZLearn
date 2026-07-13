@@ -7,6 +7,10 @@ export interface PdfOptions {
   footerHtml?: string;
   landscape?: boolean;
   format?: 'A4' | 'Letter';
+  /** Override page margins. Pass all-'0' for full-bleed designs (certificates). */
+  margin?: { top?: string; bottom?: string; left?: string; right?: string };
+  /** Honour the HTML's own `@page` size/margins (full-bleed certificates) instead of format+margin. */
+  preferCSSPageSize?: boolean;
 }
 
 let browserPromise: Promise<Browser> | null = null;
@@ -41,10 +45,11 @@ export async function renderPdfFromHtml(html: string, opts: PdfOptions = {}): Pr
       format: opts.format || 'A4',
       landscape: Boolean(opts.landscape),
       printBackground: true,
+      preferCSSPageSize: Boolean(opts.preferCSSPageSize),
       displayHeaderFooter,
       headerTemplate: opts.headerHtml || '<span></span>',
       footerTemplate: opts.footerHtml || '<span></span>',
-      margin: {
+      margin: opts.margin ?? {
         top: opts.headerHtml ? '100px' : '40px',
         bottom: opts.footerHtml ? '80px' : '40px',
         left: '24px',

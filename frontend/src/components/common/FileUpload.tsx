@@ -10,10 +10,13 @@ interface FileUploadProps {
   multiple?: boolean;
   /** Called with all chosen files when `multiple` is set (falls back to per-file `onSelect`). */
   onSelectMany?: (files: File[]) => void;
+  /** When set (0–100), the button shows live upload progress ("Uploading… 42%") and is disabled. */
+  progress?: number | null;
 }
 
-export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, onSelectMany }: FileUploadProps) {
+export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, onSelectMany, progress }: FileUploadProps) {
   const ref = useRef<HTMLInputElement>(null);
+  const uploading = progress != null;
   return (
     <div className="flex items-center gap-2">
       <input
@@ -21,6 +24,7 @@ export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, 
         type="file"
         accept={accept}
         multiple={multiple}
+        disabled={uploading}
         className="hidden"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
@@ -35,8 +39,8 @@ export function FileUpload({ onSelect, accept, label = 'Choose file', multiple, 
           e.target.value = '';
         }}
       />
-      <Button type="button" variant="outline" onClick={() => ref.current?.click()}>
-        <Upload className="h-4 w-4" /> {label}
+      <Button type="button" variant="outline" disabled={uploading} onClick={() => ref.current?.click()}>
+        <Upload className="h-4 w-4" /> {uploading ? `Uploading… ${progress}%` : label}
       </Button>
     </div>
   );

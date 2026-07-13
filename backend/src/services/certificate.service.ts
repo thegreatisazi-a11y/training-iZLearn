@@ -125,7 +125,14 @@ export async function issueForAttempt(attemptId: string) {
     });
   }
 
-  const pdf = await renderPdfFromHtml(html, { landscape, format: pageFormat });
+  // Certificates are full-bleed (own border/frame + @page margin:0). Render with zero
+  // page margin and the CSS page size so nothing is pushed onto a blank second page.
+  const pdf = await renderPdfFromHtml(html, {
+    landscape,
+    format: pageFormat,
+    margin: { top: '0', bottom: '0', left: '0', right: '0' },
+    preferCSSPageSize: true,
+  });
   await storage.putBuffer(key, pdf, 'application/pdf');
 
   const cert = await prisma.certificate.create({

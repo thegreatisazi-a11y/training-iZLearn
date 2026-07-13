@@ -251,9 +251,10 @@ export default function ProfilePage() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState('');
   const [docTitle, setDocTitle] = useState('');
+  const [docPct, setDocPct] = useState<number | null>(null);
 
   const uploadMutation = useMutation({
-    mutationFn: () => svc.personalDocs.upload(docFile as File, documentType, docTitle),
+    mutationFn: () => svc.personalDocs.upload(docFile as File, documentType, docTitle, undefined, setDocPct),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['personalDocs', 'mine'] });
       toast.success('Document uploaded.');
@@ -262,6 +263,7 @@ export default function ProfilePage() {
       setDocTitle('');
     },
     onError: (e) => toast.error(apiError(e)),
+    onSettled: () => setDocPct(null),
   });
 
   const trainingColumns: Column<Assignment>[] = [
@@ -405,7 +407,7 @@ export default function ProfilePage() {
                 </div>
               </div>
               <Button onClick={() => uploadMutation.mutate()} disabled={uploadMutation.isPending || !docFile || !documentType || !docTitle}>
-                {uploadMutation.isPending ? 'Uploading…' : 'Upload Document'}
+                {uploadMutation.isPending ? `Uploading… ${docPct ?? 0}%` : 'Upload Document'}
               </Button>
             </CardContent>
           </Card>

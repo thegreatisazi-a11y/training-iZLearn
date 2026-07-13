@@ -607,10 +607,20 @@ model CertificateTemplate {
   primaryColor               String          @default("#0f766e")
   secondaryColor             String          @default("#334155")
   fontFamily                 String          @default("Georgia")
+  orgName                    String?         // template override for the org name (blank → System Config org.name)
   headerText                 String          @default("Certificate of Training Completion")
   subHeaderText              String          @default("This is to certify that")
   bodyText                   String          @default("{{employeeName}} ({{employeeId}}) has successfully completed the training {{topicName}} [{{topicCode}}] with a score of {{score}}% on {{completionDate}}.")
   footerText                 String          @default("Certificate No: {{certificateNumber}}")
+  // Per-field text sizes (px). Optional so pre-existing templates read cleanly; the
+  // renderer applies the built-in default when a value is absent.
+  orgFontSize                Int?            @default(15)
+  headerFontSize             Int?            @default(30)
+  subHeaderFontSize          Int?            @default(16)
+  nameFontSize               Int?            @default(30)
+  bodyFontSize               Int?            @default(18)
+  footerFontSize             Int?            @default(12)
+  signatoryFontSize          Int?            @default(13)
   signatory1Name             String?
   signatory1Title            String?
   signatory1SignatureImagePath String?
