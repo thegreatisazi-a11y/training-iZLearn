@@ -30,8 +30,15 @@ interface HistJD {
   status: string;
   assignedAt?: string | null;
   acknowledgedAt?: string | null;
+  // Enriched by the API so a printout from history matches the "My JD" printout.
+  employeeName?: string | null;
+  employeeCode?: string | null;
+  departmentName?: string | null;
+  functionalRoleName?: string | null;
+  approvedByName?: string | null;
 }
 function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const userName = useAuthStore((s) => s.user?.fullName);
   const { data, isLoading } = useQuery({
     queryKey: ['my-jd-history'],
     queryFn: () => svc.jds.mineHistory() as unknown as Promise<HistJD[]>,
@@ -40,7 +47,21 @@ function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void
   const [viewing, setViewing] = useState<HistJD | null>(null);
   const rows = data ?? [];
   const print = (j: HistJD) =>
-    printJobDescription({ title: j.title, version: j.version, status: j.status, acknowledgedAt: j.acknowledgedAt ?? null, content: j.content });
+    printJobDescription(
+      {
+        title: j.title,
+        version: j.version,
+        status: j.status,
+        employeeName: j.employeeName ?? userName ?? null,
+        employeeCode: j.employeeCode ?? null,
+        department: j.departmentName ?? null,
+        functionalRole: j.functionalRoleName ?? null,
+        approvedByName: j.approvedByName ?? null,
+        acknowledgedAt: j.acknowledgedAt ?? null,
+        content: j.content,
+      },
+      { printedBy: userName },
+    );
   return (
     <Dialog open={open} onClose={() => { setViewing(null); onClose(); }} className="max-w-2xl" title="Job Description — Version History" footer={<Button variant="outline" onClick={() => { setViewing(null); onClose(); }}>Close</Button>}>
       {isLoading ? (
@@ -54,7 +75,7 @@ function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void
           <div className="prose-sm max-h-[60vh] overflow-auto text-sm text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.content ?? '') }} />
         </div>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-500">No versions found.</p>
+        <p className="text-sm text-slate-500">No previous versions — this is the first version of your Job Description.</p>
       ) : (
         <div className="space-y-2">
           {rows.map((j) => (

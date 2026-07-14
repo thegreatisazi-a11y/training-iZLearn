@@ -13,6 +13,21 @@ function upCfg(onProgress?: (pct: number) => void) {
   };
 }
 
+/**
+ * Axios config for authed blob downloads/exports that reports download progress as a
+ * 0–100 percentage. The percentage is only available when the server sends a
+ * Content-Length header; for chunked/streamed responses `e.total` is undefined and no
+ * update fires (the caller should show an indeterminate state until completion).
+ */
+function downCfg(onProgress?: (pct: number) => void) {
+  const cfg: Record<string, unknown> = { responseType: 'blob' };
+  if (onProgress)
+    cfg.onDownloadProgress = (e: { loaded: number; total?: number }) => {
+      if (e.total) onProgress(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+    };
+  return cfg;
+}
+
 /** Build a `?a=b&c=d` query suffix from a params object (skips empty values). */
 function qs(params?: Record<string, unknown>): string {
   if (!params) return '';
@@ -29,8 +44,8 @@ function qs(params?: Record<string, unknown>): string {
  * (a plain <a>/window.open would hit the API unauthenticated → 401). The filename
  * is taken from the Content-Disposition header when present.
  */
-async function downloadAuthed(url: string, fallbackName: string): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob' });
+async function downloadAuthed(url: string, fallbackName: string, onProgress?: (pct: number) => void): Promise<void> {
+  const res = await api.get(url, downCfg(onProgress));
   const cd = (res.headers['content-disposition'] as string | undefined) ?? '';
   const match = /filename\*?=(?:UTF-8'')?"?([^"";]+)"?/i.exec(cd);
   const name = match ? decodeURIComponent(match[1]) : fallbackName;
@@ -65,12 +80,13 @@ export const svc = {
     deactivate: (id: string, body: unknown) => data(api.post(`/users/${id}/deactivate`, body)),
     resetPassword: (id: string, body: unknown) => data(api.post(`/users/${id}/reset-password`, body)),
     changeRoles: (id: string, body: unknown) => data(api.post(`/users/${id}/roles`, body)),
-    bulkPreview: (file: File) => {
+    bulkPreview: (file: File, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
-      return api.post('/users/bulk/preview', fd).then((r) => r.data.data);
+      return api.post('/users/bulk/preview', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
-    bulkCommit: (rows: unknown) => api.post('/users/bulk/commit', { rows }).then((r) => r.data.data),
+    bulkCommit: (rows: unknown, onProgress?: (pct: number) => void) =>
+      api.post('/users/bulk/commit', { rows }, upCfg(onProgress)).then((r) => r.data.data),
     lifecycle: (id: string) => data(api.get(`/users/${id}/lifecycle`)),
     setReleaseStage: (id: string, body: unknown) => data(api.post(`/users/${id}/release-stage`, body)),
     team: (params?: ListParams) => api.get('/users/team', { params }).then((r) => r.data),
@@ -175,16 +191,16 @@ export const svc = {
   attendance: {
     list: (scheduleId: string) => data(api.get(`/attendance/schedule/${scheduleId}`)),
     mark: (body: unknown) => data(api.post('/attendance', body)),
-    uploadPreview: (file: File) => {
+    uploadPreview: (file: File, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
-      return api.post('/attendance/upload/preview', fd).then((r) => r.data.data);
+      return api.post('/attendance/upload/preview', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
-    uploadCommit: (file: File, scheduleId: string) => {
+    uploadCommit: (file: File, scheduleId: string, onProgress?: (pct: number) => void) => {
       const fd = new FormData();
       fd.append('file', file);
       fd.append('scheduleId', scheduleId);
-      return api.post('/attendance/upload/commit', fd).then((r) => r.data.data);
+      return api.post('/attendance/upload/commit', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
   },
 
@@ -287,8 +303,8 @@ export const svc = {
 
   audit: {
     list: (params?: ListParams) => api.get('/audit-trail', { params }).then((r) => r.data),
-    export: (format: string, body: unknown) =>
-      api.post('/audit-trail/export', { format, ...(body as object) }, { responseType: 'blob' }),
+    export: (format: string, body: unknown, onProgress?: (pct: number) => void) =>
+      api.post('/audit-trail/export', { format, ...(body as object) }, downCfg(onProgress)),
   },
 
   systemConfig: {
@@ -302,8 +318,8 @@ export const svc = {
   reports: {
     types: () => data(api.get('/reports')),
     get: (type: string, params?: ListParams) => data(api.get(`/reports/${type}`, { params })),
-    export: (type: string, params: Record<string, unknown>) =>
-      api.post(`/reports/${type}/export`, params, { responseType: 'blob', params }),
+    export: (type: string, params: Record<string, unknown>, onProgress?: (pct: number) => void) =>
+      api.post(`/reports/${type}/export`, params, { ...downCfg(onProgress), params }),
   },
 
   personalDocs: {

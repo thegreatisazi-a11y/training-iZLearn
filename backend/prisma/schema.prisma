@@ -664,6 +664,7 @@ model JobDescription {
   acknowledgementSignatureId String? // e-signature captured on acknowledgement
   acknowledgementComment     String? // optional comment the owner sends back (esp. on reject)
   parentJdId   String? // previous version, for history chains
+  sourceTemplateId String? // JDTemplate this JD was assigned from — drives template-update fan-out
   isDeleted    Boolean   @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -671,6 +672,7 @@ model JobDescription {
 
   @@index([userId])
   @@index([departmentId, roleId])
+  @@index([sourceTemplateId])
 }
 
 enum DocStatus {

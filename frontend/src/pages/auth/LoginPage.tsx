@@ -49,7 +49,7 @@ export default function LoginPage() {
           }}
         >
           {/* onPaste is blocked on both fields — a 21 CFR Part 11 security requirement (Module 1). */}
-          <Field label="Windows Username" required>
+          <Field label="Username" required>
             <Input value={username} onChange={(e) => setUsername(e.target.value)} onPaste={(e) => e.preventDefault()} autoComplete="off" />
           </Field>
           <Field label="Password" required>

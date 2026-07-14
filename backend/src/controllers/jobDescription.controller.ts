@@ -27,8 +27,9 @@ export const mine = asyncHandler(async (req, res) => sendSuccess(res, await svc.
 
 export const mineList = asyncHandler(async (req, res) => sendSuccess(res, await svc.listMyJDs(req.user!.id)));
 
-// Item A: the logged-in user's OWN JD version history (all versions incl. obsolete).
-export const mineHistory = asyncHandler(async (req, res) => sendSuccess(res, await svc.getEmployeeJDHistory(req.user!.id)));
+// Item A: the logged-in user's OWN JD version history — PREVIOUS (superseded) versions
+// only. The current live version is shown in "My Job Description", not here.
+export const mineHistory = asyncHandler(async (req, res) => sendSuccess(res, await svc.getEmployeeJDHistory(req.user!.id, { onlyPrevious: true })));
 
 export const assignFunctionalRole = asyncHandler(async (req, res) =>
   sendCreated(res, await svc.assignFunctionalRole(req.body.userId, req.body.functionalRoleId, req), 'Functional role assigned'),

@@ -69,6 +69,12 @@ const USER_ID_FIELDS = new Set([
   'approvedBy', 'createdBy', 'updatedBy', 'assignedBy', 'decidedBy', 'changedBy', 'identifiedBy',
   'supervisorId', 'releasedBy', 'userId', 'createdUserId', 'evaluatorId', 'trainerId', 'markedBy', 'archivedBy',
 ]);
+// Fields whose values are department / location IDs — resolved to their name in change details.
+const DEPT_ID_FIELDS = new Set(['departmentId']);
+const LOC_ID_FIELDS = new Set(['locationId']);
+// Field changes that are pure system housekeeping — used to give a login-style update a
+// meaningful summary instead of dumping the whole record when nothing user-facing changed.
+const HOUSEKEEPING_FIELDS = ['lastLoginAt', 'failedLoginAttempts', 'lockedUntil', 'passwordChangedAt'];
 
 // Friendly description for event-style actions that carry no before/after field diff,
 // so every audit row shows a meaningful detail (never a bare "—").
@@ -96,14 +102,27 @@ const ACTION_DESCRIPTION: Record<string, string> = {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 
-type ResolveUser = (id: string) => string | undefined;
+type ResolveName = (id: string) => string | undefined;
+interface NameResolvers {
+  user: ResolveName;
+  dept: ResolveName;
+  loc: ResolveName;
+}
 
-function fmtVal(v: unknown, key?: string, resolveUser?: ResolveUser): string {
+function fmtVal(v: unknown, key?: string, resolvers?: NameResolvers): string {
   if (v === null || v === undefined) return '∅';
-  // Resolve user-id fields to the person's name instead of showing the raw UUID.
-  if (key && USER_ID_FIELDS.has(key) && typeof v === 'string' && resolveUser) {
-    const name = resolveUser(v);
-    if (name) return name;
+  // Resolve id-valued fields to a human name instead of showing the raw UUID.
+  if (key && typeof v === 'string' && resolvers) {
+    if (USER_ID_FIELDS.has(key)) {
+      const name = resolvers.user(v);
+      if (name) return name;
+    } else if (DEPT_ID_FIELDS.has(key)) {
+      const name = resolvers.dept(v);
+      if (name) return name;
+    } else if (LOC_ID_FIELDS.has(key)) {
+      const name = resolvers.loc(v);
+      if (name) return name;
+    }
   }
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   if (typeof v === 'string' && ISO_DATE.test(v)) return formatDateTime(v);
@@ -122,10 +141,11 @@ function fmtVal(v: unknown, key?: string, resolveUser?: ResolveUser): string {
  *  - otherwise a friendly action description so no row is left blank.
  * User-id fields are resolved to names.
  */
-function changeSummary(entry: AuditEntry, resolveUser?: ResolveUser): string {
+function changeSummary(entry: AuditEntry, resolvers?: NameResolvers): string {
   const { action, oldValue, newValue } = entry;
   if (action === 'CREATE') return 'Record created';
   if (action === 'SOFT_DELETE') return 'Record removed (soft-delete)';
+  // A true before/after update: show only the fields that actually changed.
   if (oldValue && newValue && typeof oldValue === 'object' && typeof newValue === 'object') {
     const keys = new Set([...Object.keys(oldValue), ...Object.keys(newValue)]);
     const changes: string[] = [];
@@ -134,15 +154,22 @@ function changeSummary(entry: AuditEntry, resolveUser?: ResolveUser): string {
       if (DIFF_REDACT.has(k)) continue;
       const ov = (oldValue as Record<string, unknown>)[k];
       const nv = (newValue as Record<string, unknown>)[k];
-      if (JSON.stringify(ov) !== JSON.stringify(nv)) changes.push(`${fieldLabel(k)}: ${fmtVal(ov, k, resolveUser)} → ${fmtVal(nv, k, resolveUser)}`);
+      if (JSON.stringify(ov) !== JSON.stringify(nv)) changes.push(`${fieldLabel(k)}: ${fmtVal(ov, k, resolvers)} → ${fmtVal(nv, k, resolvers)}`);
     }
     if (changes.length) return changes.slice(0, 8).join('; ') + (changes.length > 8 ? ` (+${changes.length - 8} more)` : '');
+    // Both snapshots exist but only ignored/system fields differ (e.g. lastLoginAt on
+    // every sign-in). Never dump the whole record here — that's what made these rows
+    // unreadable. Say what actually happened instead.
+    const housekeeping = HOUSEKEEPING_FIELDS.some(
+      (k) => JSON.stringify((oldValue as Record<string, unknown>)[k]) !== JSON.stringify((newValue as Record<string, unknown>)[k]),
+    );
+    return housekeeping ? 'Sign-in / account activity (no data fields changed)' : 'No data fields changed';
   }
-  // Event payload (newValue only) — e.g. ESIGN { meaning }, FILE_DOWNLOAD { originalFileName }.
+  // Event payload (newValue only, no before-snapshot) — e.g. ESIGN { meaning }, FILE_DOWNLOAD { originalFileName }.
   if (newValue && typeof newValue === 'object' && !Array.isArray(newValue)) {
     const parts = Object.entries(newValue as Record<string, unknown>)
       .filter(([k]) => !DIFF_IGNORE.has(k) && !DIFF_REDACT.has(k))
-      .map(([k, v]) => `${fieldLabel(k)}: ${fmtVal(v, k, resolveUser)}`);
+      .map(([k, v]) => `${fieldLabel(k)}: ${fmtVal(v, k, resolvers)}`);
     if (parts.length) return parts.slice(0, 8).join('; ');
   }
   return ACTION_DESCRIPTION[action] ?? '—';
@@ -166,7 +193,23 @@ export default function AuditTrailPage() {
     for (const u of (usersForNames.data?.data ?? []) as { id: string; fullName: string }[]) m.set(u.id, u.fullName);
     return m;
   }, [usersForNames.data]);
-  const resolveUser = (id: string) => userNameById.get(id);
+  // Resolve department / location IDs in change details to their names (CR: item 5).
+  const deptsForNames = useQuery({ queryKey: ['departments', 'audit-names'], queryFn: () => svc.departments.list({ pageSize: 500 }) });
+  const locsForNames = useQuery({ queryKey: ['locations', 'audit-names'], queryFn: () => svc.locations.list({ pageSize: 500 }) });
+  const deptNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const d of (deptsForNames.data?.data ?? []) as { id: string; name: string }[]) m.set(d.id, d.name);
+    return m;
+  }, [deptsForNames.data]);
+  const locNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of (locsForNames.data?.data ?? []) as { id: string; name: string }[]) m.set(l.id, l.name);
+    return m;
+  }, [locsForNames.data]);
+  const resolvers: NameResolvers = useMemo(
+    () => ({ user: (id) => userNameById.get(id), dept: (id) => deptNameById.get(id), loc: (id) => locNameById.get(id) }),
+    [userNameById, deptNameById, locNameById],
+  );
   // Options for the User filter dropdown (searchable), mirroring the Reports page.
   const userOpts = useMemo(
     () =>
@@ -208,9 +251,11 @@ export default function AuditTrailPage() {
   // CR-10: let the user pick the export format. Excel/CSV are generated server-side
   // with no browser dependency; PDF needs headless Chrome and may be unavailable.
   const [format, setFormat] = useState<'xlsx' | 'csv' | 'pdf'>('xlsx');
+  // Item 7: live export progress percentage.
+  const [exportPct, setExportPct] = useState<number | null>(null);
 
   // Applied filters (drive the query); the form mutates draft state then commits via Search.
-  const [filters, setFilters] = useState({ from: '', to: '', userId: '', action: '', entityType: '', entityId: '' });
+  const [filters, setFilters] = useState({ from: '', to: '', userId: '', action: '', entityType: '' });
   const [draft, setDraft] = useState(filters);
 
   const { data, isLoading } = useQuery({
@@ -224,23 +269,27 @@ export default function AuditTrailPage() {
         userId: filters.userId || undefined,
         action: filters.action || undefined,
         entityType: filters.entityType || undefined,
-        entityId: filters.entityId || undefined,
       }),
   });
 
   const exportMutation = useMutation({
     // Item 6: audit-trail export no longer requires an e-signature.
     mutationFn: async () => {
-      const res = await svc.audit.export(format, {
-        from: filters.from || undefined,
-        to: filters.to || undefined,
-        userId: filters.userId || undefined,
-        action: filters.action || undefined,
-        entityType: filters.entityType || undefined,
-        entityId: filters.entityId || undefined,
-      });
+      setExportPct(0);
+      const res = await svc.audit.export(
+        format,
+        {
+          from: filters.from || undefined,
+          to: filters.to || undefined,
+          userId: filters.userId || undefined,
+          action: filters.action || undefined,
+          entityType: filters.entityType || undefined,
+        },
+        setExportPct,
+      );
       return res.data as Blob;
     },
+    onSettled: () => setExportPct(null),
     onSuccess: (blob) => {
       downloadBlob(blob, `audit-trail.${format}`);
       toast.success('Audit trail exported.');
@@ -278,19 +327,21 @@ export default function AuditTrailPage() {
         // Prefer the backend-resolved label (covers all entity types), then the local
         // resolver, then fall back to the raw id only if nothing resolved.
         const name = r.entityLabel ?? recordName(r.entityType, r.entityId);
-        return name ? (
-          <span className="text-slate-700">{name}</span>
-        ) : r.entityId ? (
-          <span className="font-mono text-xs text-slate-400">{r.entityId.slice(0, 8)}…</span>
-        ) : (
-          '—'
+        const full = name ?? r.entityId ?? null;
+        if (!full) return '—';
+        // Item 4: keep the FULL value in the DOM (so selecting/copying yields the whole
+        // string, not the visual "scheduli…") and truncate only visually with CSS.
+        return (
+          <span className={`block max-w-[16rem] truncate ${name ? 'text-slate-700' : 'font-mono text-xs text-slate-500'}`} title={full}>
+            {full}
+          </span>
         );
       },
     },
     {
       key: 'changeDetails',
       header: 'Change Details',
-      render: (r) => <span className="block max-w-md whitespace-pre-wrap break-words text-xs text-slate-600">{changeSummary(r, resolveUser)}</span>,
+      render: (r) => <span className="block max-w-md whitespace-pre-wrap break-words text-xs text-slate-600">{changeSummary(r, resolvers)}</span>,
     },
     { key: 'reasonForChange', header: 'Reason', render: (r) => r.reasonForChange ?? '—' },
   ];
@@ -314,7 +365,8 @@ export default function AuditTrailPage() {
                 ]}
               />
               <Button variant="outline" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
-                <Download className="h-4 w-4" /> Export
+                <Download className="h-4 w-4" />{' '}
+                {exportMutation.isPending ? `Exporting… ${exportPct ?? 0}%` : 'Export'}
               </Button>
             </div>
           )
@@ -338,9 +390,6 @@ export default function AuditTrailPage() {
             </Field>
             <Field label="Entity type">
               <Input value={draft.entityType} onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))} placeholder="Optional" />
-            </Field>
-            <Field label="Entity ID">
-              <Input value={draft.entityId} onChange={(e) => setDraft((d) => ({ ...d, entityId: e.target.value }))} placeholder="Optional" />
             </Field>
           </div>
           <Button onClick={applyFilters}>Search</Button>

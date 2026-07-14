@@ -95,14 +95,25 @@ export default function AttendancePage() {
   // Excel upload state.
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<UploadPreview | null>(null);
+  // Item 7: live upload progress percentage.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [commitPct, setCommitPct] = useState<number | null>(null);
 
   const previewMutation = useMutation({
-    mutationFn: (f: File) => svc.attendance.uploadPreview(f) as unknown as Promise<UploadPreview>,
+    mutationFn: (f: File) => {
+      setUploadPct(0);
+      return svc.attendance.uploadPreview(f, setUploadPct) as unknown as Promise<UploadPreview>;
+    },
+    onSettled: () => setUploadPct(null),
     onSuccess: (data) => setPreview(data),
     onError: (e) => toast.error(apiError(e)),
   });
   const commitMutation = useMutation({
-    mutationFn: () => svc.attendance.uploadCommit(file as File, id),
+    mutationFn: () => {
+      setCommitPct(0);
+      return svc.attendance.uploadCommit(file as File, id, setCommitPct);
+    },
+    onSettled: () => setCommitPct(null),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['attendance', id] });
       toast.success('Attendance imported.');
@@ -192,8 +203,9 @@ export default function AttendancePage() {
                   setPreview(null);
                   previewMutation.mutate(f);
                 }}
+                progress={uploadPct}
               />
-              {previewMutation.isPending && <p className="mt-3 text-sm text-slate-500">Validating…</p>}
+              {previewMutation.isPending && uploadPct === 100 && <p className="mt-3 text-sm text-slate-500">Validating…</p>}
               {preview && (
                 <div className="mt-4 space-y-3 text-sm">
                   <div>
@@ -221,7 +233,11 @@ export default function AttendancePage() {
                     </div>
                   )}
                   <Button onClick={() => commitMutation.mutate()} disabled={commitMutation.isPending || preview.valid.length === 0}>
-                    {commitMutation.isPending ? 'Importing…' : `Commit ${preview.valid.length} row(s)`}
+                    {commitMutation.isPending
+                      ? commitPct != null && commitPct < 100
+                        ? `Uploading… ${commitPct}%`
+                        : 'Importing…'
+                      : `Commit ${preview.valid.length} row(s)`}
                   </Button>
                 </div>
               )}

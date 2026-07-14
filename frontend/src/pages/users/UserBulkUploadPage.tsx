@@ -42,9 +42,16 @@ interface CommitSummary {
 export default function UserBulkUploadPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [summary, setSummary] = useState<CommitSummary | null>(null);
+  // Item 7: live upload progress percentage for the file-upload steps.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [commitPct, setCommitPct] = useState<number | null>(null);
 
   const previewMutation = useMutation({
-    mutationFn: (file: File) => svc.users.bulkPreview(file) as unknown as Promise<PreviewResult>,
+    mutationFn: (file: File) => {
+      setUploadPct(0);
+      return svc.users.bulkPreview(file, setUploadPct) as unknown as Promise<PreviewResult>;
+    },
+    onSettled: () => setUploadPct(null),
     onSuccess: (data) => {
       setPreview(data);
       setSummary(null);
@@ -53,7 +60,11 @@ export default function UserBulkUploadPage() {
   });
 
   const commitMutation = useMutation({
-    mutationFn: (rows: ValidRow[]) => svc.users.bulkCommit(rows) as unknown as Promise<CommitSummary>,
+    mutationFn: (rows: ValidRow[]) => {
+      setCommitPct(0);
+      return svc.users.bulkCommit(rows, setCommitPct) as unknown as Promise<CommitSummary>;
+    },
+    onSettled: () => setCommitPct(null),
     onSuccess: (data) => {
       setSummary(data);
       setPreview(null);
@@ -71,8 +82,8 @@ export default function UserBulkUploadPage() {
 
       <Card className="mb-6">
         <CardContent className="flex flex-wrap items-center gap-4">
-          <FileUpload accept=".xls,.xlsx" label="Choose Excel file" onSelect={(f) => previewMutation.mutate(f)} />
-          {previewMutation.isPending && <span className="text-sm text-slate-500">Validating…</span>}
+          <FileUpload accept=".xls,.xlsx" label="Choose Excel file" onSelect={(f) => previewMutation.mutate(f)} progress={uploadPct} />
+          {previewMutation.isPending && uploadPct === 100 && <span className="text-sm text-slate-500">Validating…</span>}
         </CardContent>
       </Card>
 
@@ -118,7 +129,11 @@ export default function UserBulkUploadPage() {
                 <Badge tone="APPROVED">{validRows.length}</Badge>
               </div>
               <Button disabled={validRows.length === 0 || commitMutation.isPending} onClick={() => commitMutation.mutate(validRows)}>
-                {commitMutation.isPending ? 'Committing…' : `Commit ${validRows.length} Row(s)`}
+                {commitMutation.isPending
+                  ? commitPct != null && commitPct < 100
+                    ? `Uploading… ${commitPct}%`
+                    : 'Committing…'
+                  : `Commit ${validRows.length} Row(s)`}
               </Button>
             </div>
             {validRows.length === 0 ? (

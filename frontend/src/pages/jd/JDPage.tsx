@@ -494,9 +494,10 @@ export default function JDPage() {
           </>
         }
       >
-        {editing?.acknowledgedAt && (
+        {editing?.status === 'APPROVED' && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            This JD was already acknowledged. Saving a change will clear the acknowledgement so the user must acknowledge the updated version again.
+            This JD is assigned to the employee. Saving will publish a new version (v{(editing.version ?? 1) + 1}) and re-send it for
+            acknowledgement — the employee must acknowledge the updated version again. The current version is kept in the JD's version history.
           </div>
         )}
         <div className="grid grid-cols-2 gap-3">

@@ -87,9 +87,14 @@ export default function JDTemplateEditorPage() {
         content: form.content,
         reasonForChange: reason.trim(),
         signature: sig,
-      }),
-    onSuccess: () => {
-      toast.success('Template updated');
+      }) as unknown as Promise<{ propagatedCount?: number }>,
+    onSuccess: (res) => {
+      const n = res?.propagatedCount ?? 0;
+      toast.success(
+        n > 0
+          ? `Template updated — a new version was sent to ${n} employee${n === 1 ? '' : 's'} to acknowledge.`
+          : 'Template updated.',
+      );
       qc.invalidateQueries({ queryKey: ['jd-templates'] });
       navigate('/job-descriptions');
     },
@@ -161,9 +166,15 @@ export default function JDTemplateEditorPage() {
             <RichTextEditor value={form.content} onChange={(content) => setForm((f) => ({ ...f, content }))} />
           </Field>
           {isEdit && (
-            <Field label="Reason for change" required>
-              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least 5 characters" />
-            </Field>
+            <>
+              <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Saving will publish a new version of this master JD to every employee currently assigned a Job Description from it.
+                Each of them will need to acknowledge the updated version again; their previous version is kept in Version History.
+              </div>
+              <Field label="Reason for change" required>
+                <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least 5 characters" />
+              </Field>
+            </>
           )}
         </CardContent>
       </Card>

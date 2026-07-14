@@ -100,6 +100,25 @@ async function enrichEntityLabels<T extends { entityType: string; entityId: stri
   // Resolve user + topic ids first — several relational records label via these.
   const allUserIds = new Set<string>(idsOf('User'));
   const allTopicIds = new Set<string>(idsOf('TrainingTopic'));
+
+  // UserSession events (SESSION_TERMINATED / LOGOUT / SESSION_LOCKED) should show the
+  // affected user's name, not a raw id (item 1). The stored id is inconsistent — some
+  // events carry the userId, others the sessionId — so resolve both: map any sessionIds
+  // to their userId, and treat the rest as userIds directly.
+  const sessionIds = idsOf('UserSession');
+  const sessionToUser = new Map<string, string>();
+  if (sessionIds.length) {
+    try {
+      const sessions = await prisma.userSession.findMany({ where: { sessionId: { in: sessionIds } }, select: { sessionId: true, userId: true } });
+      for (const s of sessions) {
+        sessionToUser.set(s.sessionId, s.userId);
+        allUserIds.add(s.userId);
+      }
+    } catch {
+      /* skip */
+    }
+    for (const id of sessionIds) allUserIds.add(id); // ids that are themselves userIds
+  }
   // Relational records whose label is composed from their user/topic.
   const relational = ['TrainingAssignment', 'AssessmentAttempt', 'RetakeRequest', 'CurriculumVitae'] as const;
   const relRecords: Record<string, { userId?: string; topicId?: string }> = {};
@@ -155,6 +174,13 @@ async function enrichEntityLabels<T extends { entityType: string; entityId: stri
       }
     }),
   );
+
+  // UserSession → the affected user's name (item 1).
+  for (const id of sessionIds) {
+    const uid = sessionToUser.get(id) ?? id;
+    const name = userLabel.get(uid);
+    if (name) put('UserSession', id, name);
+  }
 
   // Relational composite labels: "<user> · <topic>".
   for (const type of relational) {

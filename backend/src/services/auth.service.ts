@@ -72,12 +72,16 @@ export async function login(
   if (!passwordValid) {
     const attempts = user.failedLoginAttempts + 1;
     const reachedLimit = attempts >= authPolicy.maxFailedAttempts;
-    await prisma.user.update({
-      where: { id: user.id },
-      data: reachedLimit
-        ? { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + authPolicy.lockoutMinutes * 60 * 1000) }
-        : { failedLoginAttempts: attempts },
-    });
+    // Housekeeping counter — the LOGIN_FAILED event below is the audit record; don't
+    // emit a redundant "UPDATE User" row for it (item 1).
+    await auditContext.runWithoutAudit(() =>
+      prisma.user.update({
+        where: { id: user.id },
+        data: reachedLimit
+          ? { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + authPolicy.lockoutMinutes * 60 * 1000) }
+          : { failedLoginAttempts: attempts },
+      }),
+    );
     await recordEvent({
       action: 'LOGIN_FAILED',
       entityType: 'User',
@@ -90,11 +94,15 @@ export async function login(
     throw AppError.unauthorized('Invalid credentials');
   }
 
-  // Successful credential check — clear failure state.
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
-  });
+  // Successful credential check — clear failure state and stamp lastLoginAt. This is
+  // operational housekeeping already captured by the LOGIN event below, so suppress
+  // the redundant "UPDATE User" audit row (item 1: avoids duplicate/confusing entries).
+  await auditContext.runWithoutAudit(() =>
+    prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+    }),
+  );
 
   // Single-session enforcement.
   const existing = await session.getActiveSessions(user.id);

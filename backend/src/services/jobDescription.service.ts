@@ -115,22 +115,25 @@ export async function getMyJD(userId: string) {
 }
 
 /**
- * B1: every non-obsolete JD assigned to the logged-in user (supports holding more
- * than one active JD), newest first, with the assigning supervisor's name resolved.
+ * Resolve the referenced people (owner, assigner, approver) + department + functional
+ * role for a set of JDs, so every consumer (the My-JD list, version history, printouts)
+ * shows names instead of UUIDs and the printout can mirror the JD module exactly.
  */
-export async function listMyJDs(userId: string) {
-  const jds = await prisma.jobDescription.findMany({
-    where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
-    orderBy: [{ assignedAt: 'desc' }, { version: 'desc' }, { createdAt: 'desc' }],
-  });
-  // B1: "Assigned by" = whoever assigned it; fall back to the approver, then the creator,
+async function enrichJdsForDisplay<
+  T extends {
+    userId: string;
+    assignedBy: string | null;
+    approvedBy: string | null;
+    createdBy: string;
+    departmentId: string | null;
+    functionalRoleId: string | null;
+  },
+>(jds: T[]) {
+  // "Assigned by" = whoever assigned it; fall back to the approver, then the creator,
   // so JDs that became APPROVED via the review flow (assignedBy unset) still show a name.
-  const assignerOf = (j: { assignedBy: string | null; approvedBy: string | null; createdBy: string }) =>
-    j.assignedBy ?? j.approvedBy ?? j.createdBy ?? null;
-  // Resolve every referenced person (owner, assigner, approver) + department + functional
-  // role so the printout can mirror the Job Description module's format exactly (item 8).
+  const assignerOf = (j: T) => j.assignedBy ?? j.approvedBy ?? j.createdBy ?? null;
   const personIds = Array.from(
-    new Set([userId, ...jds.map(assignerOf), ...jds.map((j) => j.approvedBy)].filter(Boolean) as string[]),
+    new Set([...jds.map((j) => j.userId), ...jds.map(assignerOf), ...jds.map((j) => j.approvedBy)].filter(Boolean) as string[]),
   );
   const deptIds = Array.from(new Set(jds.map((j) => j.departmentId).filter(Boolean) as string[]));
   const roleIds = Array.from(new Set(jds.map((j) => j.functionalRoleId).filter(Boolean) as string[]));
@@ -148,9 +151,9 @@ export async function listMyJDs(userId: string) {
   const personById = new Map(people.map((u) => [u.id, u]));
   const deptById = new Map(depts.map((d) => [d.id, d.name]));
   const roleById = new Map(roles.map((r) => [r.id, r.displayName]));
-  const owner = personById.get(userId);
   return jds.map((j) => {
     const aid = assignerOf(j);
+    const owner = personById.get(j.userId);
     return {
       ...j,
       assignedByName: aid ? personById.get(aid)?.fullName ?? null : null,
@@ -161,6 +164,18 @@ export async function listMyJDs(userId: string) {
       functionalRoleName: j.functionalRoleId ? roleById.get(j.functionalRoleId) ?? null : null,
     };
   });
+}
+
+/**
+ * B1: every non-obsolete JD assigned to the logged-in user (supports holding more
+ * than one active JD), newest first, with the assigning supervisor's name resolved.
+ */
+export async function listMyJDs(userId: string) {
+  const jds = await prisma.jobDescription.findMany({
+    where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
+    orderBy: [{ assignedAt: 'desc' }, { version: 'desc' }, { createdAt: 'desc' }],
+  });
+  return enrichJdsForDisplay(jds);
 }
 
 /**
@@ -195,18 +210,20 @@ export async function assignJDFromTemplate(input: AssignJDFromTemplateInput, req
   // Controlled, direct assignment — two-component e-signature.
   await signFromRequest(req, 'User', input.userId, 'Approved');
 
-  const last = await prisma.jobDescription.findFirst({ where: { userId: input.userId }, orderBy: { version: 'desc' } });
-  const version = (last?.version ?? 0) + 1;
-
+  // Item 2: a newly assigned JD is a new controlled document → it starts at v1. The
+  // version only advances when this JD is later revised (see updateJD), so the number
+  // the employee sees reflects the JD's own revision history, not a running count of
+  // how many JDs they have ever been assigned.
   auditContext.setActionOverride('CREATE');
   const jd = await prisma.jobDescription.create({
     data: {
       userId: input.userId,
       departmentId: input.departmentId ?? template.departmentId ?? user.departmentId,
       functionalRoleId: template.functionalRoleId,
+      sourceTemplateId: template.id,
       title: input.title,
       content: DOMPurify.sanitize(input.content),
-      version,
+      version: 1,
       status: 'APPROVED',
       approvedBy: req.user!.id,
       approvedAt: new Date(),
@@ -250,18 +267,19 @@ export async function assignFunctionalRole(userId: string, functionalRoleId: str
     where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } },
     data: { status: 'OBSOLETE' },
   });
-  const last = await prisma.jobDescription.findFirst({ where: { userId }, orderBy: { version: 'desc' } });
-  const version = (last?.version ?? 0) + 1;
 
+  // Item 2: a freshly assigned JD is a new controlled document → v1. The prior JD is
+  // preserved as history above; the version advances only on later revisions (updateJD).
   auditContext.setActionOverride('CREATE');
   const jd = await prisma.jobDescription.create({
     data: {
       userId,
       departmentId: template.departmentId ?? user.departmentId,
       functionalRoleId,
+      sourceTemplateId: template.id,
       title: template.title,
       content: DOMPurify.sanitize(template.content),
-      version,
+      version: 1,
       status: 'APPROVED',
       approvedBy: req.user!.id,
       approvedAt: new Date(),
@@ -319,11 +337,118 @@ export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req
 }
 
 /**
- * Edits are allowed while a JD is DRAFT or REJECTED, and — I2 — on an APPROVED
- * assigned JD (a controlled edit: the route requires a reason for change, which the
- * audit middleware records). Obsolete JDs are part of the permanent record and stay
- * locked. Editing an already-acknowledged JD clears the acknowledgement so the user
- * must re-acknowledge the revised responsibilities.
+ * Publish the next version of a live (assigned) JD: obsolete the current version so it
+ * is preserved in the employee's version history, then create its successor linked via
+ * `parentJdId`, left AWAITING acknowledgement (acknowledgedAt stays null). Shared by the
+ * per-employee edit (updateJD) and the template-update fan-out (propagateTemplateUpdate).
+ */
+async function publishJdRevision(
+  current: {
+    id: string;
+    userId: string;
+    departmentId: string;
+    roleId: string | null;
+    functionalRoleId: string | null;
+    sourceTemplateId: string | null;
+    version: number | null;
+    title: string;
+    content: string;
+  },
+  changes: { title?: string; content?: string; departmentId?: string; functionalRoleId?: string | null; sourceTemplateId?: string | null },
+  actorId: string,
+) {
+  // Preserve the current version as history (obsolete → hidden from "My JD").
+  auditContext.setActionOverride('UPDATE');
+  await prisma.jobDescription.update({ where: { id: current.id }, data: { status: 'OBSOLETE' } });
+
+  // Publish the successor: assigned, awaiting (re-)acknowledgement.
+  auditContext.setActionOverride('CREATE');
+  return prisma.jobDescription.create({
+    data: {
+      userId: current.userId,
+      departmentId: changes.departmentId ?? current.departmentId,
+      roleId: current.roleId,
+      functionalRoleId: changes.functionalRoleId !== undefined ? changes.functionalRoleId : current.functionalRoleId,
+      sourceTemplateId: changes.sourceTemplateId !== undefined ? changes.sourceTemplateId : current.sourceTemplateId,
+      title: changes.title ?? current.title,
+      content: changes.content !== undefined ? DOMPurify.sanitize(changes.content) : current.content,
+      version: (current.version ?? 1) + 1,
+      status: 'APPROVED',
+      approvedBy: actorId,
+      approvedAt: new Date(),
+      assignedBy: actorId,
+      assignedAt: new Date(),
+      parentJdId: current.id,
+      createdBy: actorId,
+    },
+  });
+}
+
+/**
+ * Course-style fan-out: propagate a JD template edit to every employee who currently
+ * holds a live JD assigned from that template. Each such JD is republished as a new
+ * version carrying the template's new title/content, and the employee must acknowledge
+ * the update again. Best-effort per employee (one failure never aborts the rest).
+ * Returns the number of employees the update was pushed to.
+ */
+async function propagateTemplateUpdate(
+  template: { id: string; functionalRoleId: string | null; departmentId: string | null; title: string; content: string },
+  actorId: string,
+): Promise<number> {
+  // Fetch candidates broadly, then decide in JS which to fan out to. This avoids a
+  // Prisma+MongoDB gotcha: a `sourceTemplateId: null` filter does NOT match documents
+  // where the field is ABSENT (every JD assigned before this field existed), so the
+  // legacy fallback silently matched nobody. Filtering in code sidesteps that entirely.
+  const or: Prisma.JobDescriptionWhereInput[] = [{ sourceTemplateId: template.id }];
+  if (template.functionalRoleId) {
+    // Legacy fallback: JDs assigned before source-template tracking — match by
+    // functional role (+ department when the template is department-scoped).
+    or.push({
+      functionalRoleId: template.functionalRoleId,
+      ...(template.departmentId ? { departmentId: template.departmentId } : {}),
+    });
+  }
+  const candidates = await prisma.jobDescription.findMany({ where: { isDeleted: false, status: 'APPROVED', OR: or } });
+  // A JD is a fan-out target when it was assigned from THIS template, or (legacy) it has
+  // no source template recorded and matches this template's functional role + department.
+  const jds = candidates.filter(
+    (jd) =>
+      jd.sourceTemplateId === template.id ||
+      (jd.sourceTemplateId == null &&
+        !!template.functionalRoleId &&
+        jd.functionalRoleId === template.functionalRoleId &&
+        (!template.departmentId || jd.departmentId === template.departmentId)),
+  );
+  let count = 0;
+  for (const jd of jds) {
+    try {
+      const next = await publishJdRevision(jd, { title: template.title, content: template.content, sourceTemplateId: template.id }, actorId);
+      await notifyJdDecision(jd.userId, next.title, `updated to v${next.version} — please acknowledge`).catch(() => undefined);
+      count++;
+    } catch {
+      /* skip this employee, continue the fan-out */
+    }
+  }
+  return count;
+}
+
+/**
+ * Edit a job description. The route requires a reason for change and the edit is
+ * e-signed. Obsolete JDs are part of the permanent record and stay locked.
+ *
+ * Item 2 — the JD version is a true revision lineage tied to edits, exactly like the
+ * course/topic model:
+ *  - Editing a JD that is LIVE with the employee (status APPROVED — i.e. already
+ *    assigned, whether or not it has been acknowledged yet) publishes a NEW version.
+ *    The current copy is preserved (obsoleted, so it stays in the employee's version
+ *    history), a fresh version is created and linked via `parentJdId`, the version
+ *    number advances (v1 → v2 → …), the new version is left AWAITING ACKNOWLEDGEMENT
+ *    (acknowledgedAt stays null), and the employee is notified to acknowledge it again.
+ *    "My Job Description" always shows the latest non-obsolete version; older versions
+ *    live in Version History.
+ *  - Editing a JD still being authored (DRAFT / UNDER_REVIEW / REJECTED-in-review —
+ *    never assigned to the employee) edits the same row in place; the version number
+ *    does not advance.
  */
 export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
   const jd = await getJD(id);
@@ -332,8 +457,23 @@ export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
   }
   // "Ask approval before change" — every JD edit is a controlled, e-signed action.
   await signFromRequest(req, 'JobDescription', id, 'Approved');
+
+  // Versioned revision: the JD is live with the employee, so any change must be
+  // (re-)acknowledged. This fires whether or not the current version was already
+  // acknowledged — an assigned-but-not-yet-acknowledged JD is still superseded by the
+  // new version so the employee only ever acknowledges the latest content.
+  if (jd.status === 'APPROVED') {
+    const next = await publishJdRevision(
+      jd,
+      { title: input.title, content: input.content, departmentId: input.departmentId, functionalRoleId: input.functionalRoleId },
+      req.user!.id,
+    );
+    await notifyJdDecision(jd.userId, next.title, `revised to v${next.version} — please acknowledge`);
+    return next;
+  }
+
+  // Authoring edit (never assigned): edit in place, version unchanged.
   auditContext.setActionOverride('UPDATE');
-  const reAcknowledge = jd.status === 'APPROVED' && !!jd.acknowledgedAt;
   return prisma.jobDescription.update({
     where: { id },
     data: {
@@ -341,10 +481,6 @@ export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
       ...(input.content !== undefined ? { content: DOMPurify.sanitize(input.content) } : {}),
       ...(input.departmentId !== undefined ? { departmentId: input.departmentId } : {}),
       ...(input.functionalRoleId !== undefined ? { functionalRoleId: input.functionalRoleId } : {}),
-      ...(reAcknowledge ? { acknowledgedAt: null, acknowledgementText: null, acknowledgementSignatureId: null } : {}),
-      // Every edit to a JD is a new version (computed explicitly so a record whose version
-      // field is absent/legacy still advances correctly, e.g. v1 → v2).
-      version: (jd.version ?? 1) + 1,
     },
   });
 }
@@ -460,6 +596,7 @@ export async function createFromTemplate(
       userId,
       departmentId,
       functionalRoleId,
+      sourceTemplateId: template.id,
       title: template.title,
       content: DOMPurify.sanitize(template.content),
       version: 1,
@@ -469,12 +606,20 @@ export async function createFromTemplate(
   });
 }
 
-/** Full JD history for an employee (never filtered by isDeleted — permanent record). */
-export async function getEmployeeJDHistory(userId: string) {
-  return prisma.jobDescription.findMany({
-    where: { userId },
+/**
+ * A user's JD version history (never filtered by isDeleted — permanent record).
+ * With `onlyPrevious`, returns just the SUPERSEDED (obsolete) versions: the current
+ * live version is shown in "My Job Description", so it must not also appear in the
+ * Version History list (which should contain only prior versions).
+ */
+export async function getEmployeeJDHistory(userId: string, opts?: { onlyPrevious?: boolean }) {
+  const jds = await prisma.jobDescription.findMany({
+    where: { userId, ...(opts?.onlyPrevious ? { status: 'OBSOLETE' } : {}) },
     orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
   });
+  // Enrich so a JD printed from Version History carries the same employee / department /
+  // functional-role / approver details as one printed from "My Job Description".
+  return enrichJdsForDisplay(jds);
 }
 
 // ---- JD templates -----------------------------------------------------------
@@ -519,7 +664,7 @@ export async function updateTemplate(id: string, input: JDTemplateInput, req: Re
   if (!template) throw AppError.notFound('Job-description template not found');
   await signFromRequest(req, 'JDTemplate', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
-  return prisma.jDTemplate.update({
+  const updated = await prisma.jDTemplate.update({
     where: { id },
     data: {
       functionalRoleId: input.functionalRoleId,
@@ -528,4 +673,9 @@ export async function updateTemplate(id: string, input: JDTemplateInput, req: Re
       content: DOMPurify.sanitize(input.content),
     },
   });
+
+  // Course-style fan-out: push the revised master to every employee holding a JD
+  // assigned from this template — each gets a new version to acknowledge again.
+  const propagatedCount = await propagateTemplateUpdate(updated, req.user!.id);
+  return { ...updated, propagatedCount };
 }

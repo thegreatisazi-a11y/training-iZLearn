@@ -79,11 +79,15 @@ export default function ReportsPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // Item 7: live export progress percentage.
+  const [exportPct, setExportPct] = useState<number | null>(null);
   const exportMutation = useMutation({
     mutationFn: async ({ format, print }: { format: string; print?: boolean }) => {
-      const res = await svc.reports.export(type, { ...filters(), format, ...(print ? { print: true } : {}) });
+      setExportPct(0);
+      const res = await svc.reports.export(type, { ...filters(), format, ...(print ? { print: true } : {}) }, setExportPct);
       return { blob: res.data as Blob, format };
     },
+    onSettled: () => setExportPct(null),
     onSuccess: ({ blob, format }) => downloadBlob(blob, `${type}.${EXT[format] ?? format}`),
     onError: (e) => toast.error(apiError(e)),
   });
@@ -166,6 +170,7 @@ export default function ReportsPage() {
                   <Printer className="h-4 w-4" /> Print
                 </Button>
               )}
+              {exportMutation.isPending && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}
             </div>
           </div>
         </CardContent>

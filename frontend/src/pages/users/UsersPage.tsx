@@ -202,6 +202,8 @@ export default function UsersPage() {
   // CR-12: Active / Inactive / All filter (drives the API includeInactive flag).
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [exporting, setExporting] = useState(false);
+  // Item 7: live export progress percentage.
+  const [exportPct, setExportPct] = useState<number | null>(null);
 
   const [esign, setEsign] = useState<{ open: boolean; action: ActionKind; user?: UserRow; reason: string }>({
     open: false,
@@ -375,10 +377,14 @@ export default function UsersPage() {
   // CR-12: download the filtered users list from the export endpoint (authenticated blob).
   async function handleExport(format: 'xlsx' | 'csv') {
     setExporting(true);
+    setExportPct(0);
     try {
       const res = await api.get('/users/export', {
         params: { format, search: search || undefined, includeInactive },
         responseType: 'blob',
+        onDownloadProgress: (e: { loaded: number; total?: number }) => {
+          if (e.total) setExportPct(Math.min(100, Math.round((e.loaded / e.total) * 100)));
+        },
       });
       downloadBlob(res.data as Blob, `users.${format}`);
       toast.success('Users exported.');
@@ -386,6 +392,7 @@ export default function UsersPage() {
       toast.error(apiError(e));
     } finally {
       setExporting(false);
+      setExportPct(null);
     }
   }
 
@@ -488,6 +495,7 @@ export default function UsersPage() {
                 <Button variant="outline" disabled={exporting} onClick={() => handleExport('csv')}>
                   <Download className="h-4 w-4" /> CSV
                 </Button>
+                {exporting && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}
               </>
             )}
             {canCreateRequest && (

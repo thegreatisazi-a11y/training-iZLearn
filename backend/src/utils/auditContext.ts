@@ -44,6 +44,27 @@ export const auditContext = {
     return als.run({ actor: SYSTEM_ACTOR, inAudit: false }, fn);
   },
 
+  /**
+   * Run a callback with automatic audit capture suppressed (uses the same
+   * `inAudit` recursion guard the middleware honours). Use ONLY for operational /
+   * housekeeping writes that are already represented by an explicit event — e.g.
+   * clearing the failed-login counter and stamping `lastLoginAt` on sign-in, which
+   * the LOGIN / LOGIN_FAILED event already records. Without this, each such write
+   * emits a redundant "UPDATE User" audit row (item 1: 2 login POSTs during a
+   * terminate-and-login produced 4 rows instead of 2).
+   */
+  async runWithoutAudit<T>(fn: () => Promise<T>): Promise<T> {
+    const s = als.getStore();
+    if (!s) return fn();
+    const prev = s.inAudit;
+    s.inAudit = true;
+    try {
+      return await fn();
+    } finally {
+      s.inAudit = prev;
+    }
+  },
+
   getStore(): AuditStore | undefined {
     return als.getStore();
   },
