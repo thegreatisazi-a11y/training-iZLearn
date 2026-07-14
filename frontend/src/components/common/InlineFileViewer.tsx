@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MoveHorizontal, Maximize2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MoveHorizontal, Maximize2, Maximize, Minimize, Presentation, List } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import DOMPurify from 'dompurify';
@@ -128,7 +128,9 @@ export function InlineFileViewer({
   const zoomOut = () => { setZoomMode('custom'); setZoomPct((p) => Math.max(40, (zoomMode === 'custom' ? p : 100) - 25)); };
 
   if (rendersAsPdf) {
-    return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
+    // Presentations open in slideshow (one-slide-at-a-time) mode by default; any PDF can
+    // still be switched into it from the toolbar.
+    return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} defaultSlideshow={ext === 'ppt' || ext === 'pptx'} />;
   }
 
   if (isDocx || isXlsx) {
@@ -314,12 +316,15 @@ function PdfDocViewer({
   lockClass,
   lockStyle,
   onCtx,
+  defaultSlideshow,
 }: {
   url: string;
   heightClass: string;
   lockClass: string;
   lockStyle: { userSelect: 'none' };
   onCtx: (e: MouseEvent) => void;
+  /** Start in one-slide-at-a-time presentation mode (used for ppt/pptx). */
+  defaultSlideshow?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageElsRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -377,6 +382,88 @@ function PdfDocViewer({
     const fitH = box.h > 0 ? (box.h - padW) / base.h : 1;
     return Math.max(0.1, Math.min(fitW, fitH)); // fit-page
   }, [base, box, zoomMode, zoomPct]);
+
+  // ---- Slideshow / presentation mode (one slide at a time; default for ppt/pptx) ----
+  const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [slideshow, setSlideshow] = useState(!!defaultSlideshow);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [stageBox, setStageBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+
+  // Measure the stage so a single slide is scaled to fit inside it (contain).
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el || !slideshow) return;
+    const measure = () => setStageBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [slideshow, isFullscreen]);
+
+  const slideScale = useMemo(() => {
+    if (!base) return 1;
+    const pad = 32;
+    const fitW = stageBox.w > 0 ? (stageBox.w - pad) / base.w : 1;
+    const fitH = stageBox.h > 0 ? (stageBox.h - pad) / base.h : 1;
+    return Math.max(0.1, Math.min(fitW, fitH));
+  }, [base, stageBox]);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void el.requestFullscreen?.().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
+  // Focus the stage on entering slideshow so the arrow keys work immediately.
+  useEffect(() => {
+    if (slideshow) containerRef.current?.focus();
+  }, [slideshow]);
+
+  const goSlide = useCallback((n: number) => setPage(Math.min(Math.max(1, n), Math.max(1, numPages))), [numPages]);
+
+  const onSlideKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+      case 'PageDown':
+      case ' ':
+        e.preventDefault();
+        goSlide(page + 1);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+      case 'PageUp':
+        e.preventDefault();
+        goSlide(page - 1);
+        break;
+      case 'Home':
+        e.preventDefault();
+        goSlide(1);
+        break;
+      case 'End':
+        e.preventDefault();
+        goSlide(numPages);
+        break;
+      case 'f':
+      case 'F':
+        e.preventDefault();
+        toggleFullscreen();
+        break;
+      case 'Escape':
+        if (!document.fullscreenElement) setSlideshow(false);
+        break;
+      default:
+        break;
+    }
+  };
 
   // Scrolling (wheel/trackpad/drag) → update the page indicator to the page nearest the top.
   const syncPageFromScroll = useCallback(() => {
@@ -472,6 +559,59 @@ function PdfDocViewer({
     </button>
   );
 
+  // Presentation mode: a single slide fills a dark stage, with prev/next (buttons +
+  // arrow keys), a slide counter and fullscreen. Still fully locked (canvas render, no
+  // text layer, no context menu → nothing selectable/downloadable).
+  if (slideshow) {
+    return (
+      <div
+        ref={containerRef}
+        tabIndex={0}
+        onKeyDown={onSlideKey}
+        onContextMenu={onCtx}
+        style={lockStyle}
+        className={`flex flex-col ${isFullscreen ? 'h-screen w-screen' : heightClass} ${lockClass} overflow-hidden rounded border border-slate-800 bg-slate-900 outline-none`}
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2 py-1">
+          <button type="button" onClick={() => setSlideshow(false)} title="Exit slideshow (Esc)" className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium text-slate-200 hover:bg-slate-700">
+            <List className="h-4 w-4" /> Exit
+          </button>
+          <span className="text-xs tabular-nums text-slate-300">Slide {page}{numPages ? ` / ${numPages}` : ''}</span>
+          <button type="button" onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen (f)' : 'Fullscreen (f)'} className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium text-slate-200 hover:bg-slate-700">
+            {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+          </button>
+        </div>
+        <div ref={stageRef} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+          {error ? (
+            <div className="p-4 text-sm text-red-300">{error}</div>
+          ) : !doc || !base ? (
+            <div className="text-sm text-slate-400">Loading…</div>
+          ) : (
+            <PdfPage doc={doc} pageNumber={page} scale={slideScale} registerEl={() => undefined} />
+          )}
+          <button
+            type="button"
+            onClick={() => goSlide(page - 1)}
+            disabled={page <= 1}
+            title="Previous slide"
+            className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-slate-800/70 p-2 text-white transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+          <button
+            type="button"
+            onClick={() => goSlide(page + 1)}
+            disabled={numPages > 0 && page >= numPages}
+            title="Next slide"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-slate-800/70 p-2 text-white transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-30"
+          >
+            <ChevronRight className="h-6 w-6" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex flex-col ${heightClass} ${lockClass} rounded border border-slate-200`} style={lockStyle} onContextMenu={onCtx}>
       <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1">
@@ -485,6 +625,8 @@ function PdfDocViewer({
         <ToolbarBtn onClick={() => goToPage(page - 1)} title="Previous page" disabled={page <= 1}><ChevronLeft className="h-4 w-4" /></ToolbarBtn>
         <span className="text-xs tabular-nums text-slate-600">Page {page}{numPages ? ` / ${numPages}` : ''}</span>
         <ToolbarBtn onClick={() => goToPage(page + 1)} title="Next page" disabled={numPages > 0 && page >= numPages}><ChevronRight className="h-4 w-4" /></ToolbarBtn>
+        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <ToolbarBtn onClick={() => setSlideshow(true)} title="Slideshow (present one slide at a time)"><Presentation className="h-4 w-4" /> Slideshow</ToolbarBtn>
       </div>
       <div ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-auto bg-slate-100 outline-none">
         {error ? (
