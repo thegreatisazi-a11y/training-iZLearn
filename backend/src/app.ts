@@ -1,5 +1,6 @@
 import express, { Express } from 'express';
 import helmet from 'helmet';
+import compression from 'compression';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env';
@@ -20,6 +21,11 @@ import apiRouter from './routes';
 export async function createApp(): Promise<Express> {
   const app = express();
   app.set('trust proxy', 1);
+
+  // Gzip API/JSON responses (the large report/list payloads compress well). Kept before
+  // the routes so every response passes through it. Blob/file streams are already
+  // compressed formats (pdf/png/mp4) and compression skips them by content-type.
+  app.use(compression());
 
   app.use(
     helmet({
