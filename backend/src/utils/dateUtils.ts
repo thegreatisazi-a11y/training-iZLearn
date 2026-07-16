@@ -41,3 +41,13 @@ export function startOfDay(date: Date): Date {
 export function endOfDay(date: Date): Date {
   return dayjs(date).endOf('day').toDate();
 }
+
+/**
+ * Parse a "to" filter bound. A date-only value (YYYY-MM-DD) is pushed to the END of that
+ * day so an inclusive `lte` query returns records from the whole day, not just 00:00:00
+ * (DATE-1). A full datetime is used as-is.
+ */
+export function toEndBound(value: string): Date {
+  const d = new Date(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? endOfDay(d) : d;
+}

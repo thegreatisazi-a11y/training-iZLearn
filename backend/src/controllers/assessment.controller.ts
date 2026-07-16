@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { asyncHandler, sendSuccess, sendCreated } from '../utils/response';
+import { asyncHandler, sendSuccess, sendCreated, AppError } from '../utils/response';
 import * as svc from '../services/assessment.service';
 
 export const start = asyncHandler(async (req: Request, res: Response) =>
@@ -18,9 +18,23 @@ export const listMine = asyncHandler(async (req, res) =>
   sendSuccess(res, await svc.listAttempts({ userId: req.user!.id, topicId: req.query.topicId as string | undefined })),
 );
 
-export const list = asyncHandler(async (req, res) =>
-  sendSuccess(res, await svc.listAttempts({ userId: req.query.userId as string | undefined, topicId: req.query.topicId as string | undefined })),
-);
+export const list = asyncHandler(async (req, res) => {
+  // ASMT-2: this endpoint must not expose arbitrary users' attempts. Resolve the
+  // requester's scope and restrict the userId filter to what they may see.
+  const scope = await svc.attemptViewerScope({
+    id: req.user!.id,
+    roleNames: req.user!.roleNames,
+    permissions: req.user!.permissions as Record<string, Record<string, boolean>>,
+  });
+  const userId = req.query.userId as string | undefined;
+  if (!scope.canSeeAll) {
+    const allowed = new Set([req.user!.id, ...scope.teamUserIds]);
+    if (!userId || !allowed.has(userId)) {
+      throw AppError.forbidden('You may only view assessments for yourself or your direct reports.');
+    }
+  }
+  sendSuccess(res, await svc.listAttempts({ userId, topicId: req.query.topicId as string | undefined }));
+});
 
 // Item 3: completed attempts of OTHER users the requester may view/download — scoped to
 // their team (supervisor) or the whole org (admin / training coordinator / SUPER_ADMIN).
@@ -34,7 +48,17 @@ export const listManaged = asyncHandler(async (req, res) =>
   ),
 );
 
-export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.getAttempt(req.params.id)));
+// ASMT-2: the raw attempt exposes the answer key (questionsUsed.correctAnswer) and has
+// no ownership check. Route it through the SAME scoped, answer-key-hidden review the
+// /:id/review endpoint uses — an owner or a manager in scope only.
+export const get = asyncHandler(async (req, res) => {
+  const scope = await svc.attemptViewerScope({
+    id: req.user!.id,
+    roleNames: req.user!.roleNames,
+    permissions: req.user!.permissions as Record<string, Record<string, boolean>>,
+  });
+  sendSuccess(res, await svc.reviewAttempt(req.params.id, req.user!.id, scope));
+});
 
 // View a completed attempt's full review (questions + answers) — the learner's own, or
 // any attempt for a manager with assessments:write.

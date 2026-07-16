@@ -5,6 +5,7 @@ import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
 import { hasPermission } from '../utils/permissions';
+import { isOrgWideUserManager, directReportIds } from '../utils/accessScope';
 import { signFromRequest } from './eSignature.service';
 import { notifyJdPendingApproval, notifyJdDecision } from './notification.service';
 import { JD_ACK_SENTENCE } from '@izlearn/shared';
@@ -16,6 +17,7 @@ import type {
   AcknowledgeJDInput,
   AssignJDFromTemplateInput,
   PaginationQuery,
+  PermissionMatrix,
 } from '@izlearn/shared';
 
 /**
@@ -33,26 +35,28 @@ import type {
 // ---- Job descriptions -------------------------------------------------------
 
 export async function listJDs(
-  q: PaginationQuery & { userId?: string },
-  requester?: { id: string; roleNames: string[] },
+  q: PaginationQuery & { userId?: string; status?: string },
+  requester?: { id: string; permissions?: Record<string, Record<string, boolean>> },
 ) {
+  // JD-6: filter by lifecycle state SERVER-SIDE (default: active = APPROVED/UNDER_REVIEW),
+  // so paginated pages and totals are correct instead of the old client-side filter that
+  // ran after pagination and left pages half-empty once versioning produced OBSOLETE rows.
+  const statusFilter: Prisma.JobDescriptionWhereInput =
+    q.status === 'all'
+      ? {}
+      : q.status === 'inactive'
+        ? { status: { in: ['DRAFT', 'OBSOLETE', 'REJECTED'] } }
+        : { status: { in: ['APPROVED', 'UNDER_REVIEW'] } };
   const where: Prisma.JobDescriptionWhereInput = {
     isDeleted: false,
+    ...statusFilter,
     ...(q.search ? { title: { contains: q.search, mode: 'insensitive' } } : {}),
   };
-  // Item 9: a Supervisor (who is not also a SUPER_ADMIN) may only see the JDs of their
-  // own direct reports. Admins / Training Coordinators / everyone else keep org-wide
-  // visibility. Keyed on the role NAME because a live 'Supervisor' role can actually
-  // carry broader granular permissions than a coordinator, so permissions can't tell
-  // them apart. Case-insensitive to match both 'Supervisor' and legacy 'SUPERVISOR'.
-  const isSuperAdmin = !!requester?.roleNames.includes('SUPER_ADMIN');
-  const isSupervisor = !isSuperAdmin && !!requester?.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
-  if (isSupervisor && requester) {
-    const reports = await prisma.user.findMany({
-      where: { supervisorId: requester.id, isDeleted: false },
-      select: { id: true },
-    });
-    let allowed = reports.map((r) => r.id);
+  // Item 9 (permission-driven, no role names): an org-wide user manager sees every JD;
+  // anyone else is limited to their direct reports' JDs. A new custom role scopes from
+  // its granted permissions alone.
+  if (requester && !isOrgWideUserManager(requester.permissions as PermissionMatrix)) {
+    let allowed = await directReportIds(requester.id);
     // Honour an explicit ?userId filter only when it targets a direct report.
     if (q.userId) allowed = allowed.includes(q.userId) ? [q.userId] : [];
     // No reports (or a disallowed filter) must yield NO rows, never the whole org.
@@ -183,15 +187,49 @@ export async function listMyJDs(userId: string) {
  * readable by the owner, the owner's direct supervisor, or a SUPER_ADMIN. Lets a
  * supervisor open a team member's JD just like their CV.
  */
-export async function getUserJDsForViewer(targetUserId: string, requester: { id: string; roleNames: string[] }) {
-  if (targetUserId !== requester.id && !requester.roleNames.includes('SUPER_ADMIN')) {
-    const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
-    if (!target) throw AppError.notFound('User not found');
-    if (target.supervisorId !== requester.id) {
-      throw AppError.forbidden('You may only view your own JD or the JDs of your direct reports.');
-    }
+type JdRequester = { id: string; permissions?: Record<string, Record<string, boolean>> };
+
+/**
+ * Authorise viewing another user's JD records (permission-driven, no role names):
+ * always your own; org-wide user managers see anyone; everyone else only their DIRECT
+ * reports. Used by the single-JD read, the history endpoint and the team JD view so they
+ * all enforce the SAME scope (JD-3 / JD-4).
+ */
+async function assertCanViewUserJDs(targetUserId: string, requester: JdRequester) {
+  if (targetUserId === requester.id) return;
+  if (isOrgWideUserManager(requester.permissions as PermissionMatrix)) return;
+  const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
+  if (!target) throw AppError.notFound('User not found');
+  if (target.supervisorId !== requester.id) {
+    throw AppError.forbidden('You may only view your own JD or the JDs of your direct reports.');
   }
+}
+
+export async function getUserJDsForViewer(targetUserId: string, requester: JdRequester) {
+  await assertCanViewUserJDs(targetUserId, requester);
   return listMyJDs(targetUserId);
+}
+
+/** JD-3: a single JD by id, scoped to the same viewers as the list/history endpoints. */
+export async function getJDForViewer(id: string, requester: JdRequester) {
+  const jd = await getJD(id);
+  await assertCanViewUserJDs(jd.userId, requester);
+  return jd;
+}
+
+/** JD-4: a user's JD version history, viewer-scoped (was unscoped). */
+export async function getEmployeeJDHistoryForViewer(targetUserId: string, requester: JdRequester) {
+  await assertCanViewUserJDs(targetUserId, requester);
+  return getEmployeeJDHistory(targetUserId);
+}
+
+/** JD-5: authorise assigning a JD to a user — org-wide managers, or the user's direct supervisor. */
+async function assertCanAssignToUser(targetUserId: string, req: Request) {
+  if (isOrgWideUserManager(req.user!.permissions as PermissionMatrix)) return;
+  const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
+  if (!target || target.supervisorId !== req.user!.id) {
+    throw AppError.forbidden('You may only assign Job Descriptions to your direct reports.');
+  }
 }
 
 /**
@@ -204,6 +242,7 @@ export async function getUserJDsForViewer(targetUserId: string, requester: { id:
 export async function assignJDFromTemplate(input: AssignJDFromTemplateInput, req: Request) {
   const user = await prisma.user.findFirst({ where: { id: input.userId, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
+  await assertCanAssignToUser(input.userId, req); // JD-5: direct-report / org-wide only
   const template = await prisma.jDTemplate.findFirst({ where: { id: input.templateId, isDeleted: false } });
   if (!template) throw AppError.notFound('Job-description template not found');
 
@@ -245,6 +284,7 @@ export async function assignJDFromTemplate(input: AssignJDFromTemplateInput, req
 export async function assignFunctionalRole(userId: string, functionalRoleId: string, req: Request) {
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
+  await assertCanAssignToUser(userId, req); // JD-5: direct-report / org-wide only
   const fr = await prisma.designationMaster.findFirst({ where: { id: functionalRoleId, isDeleted: false } });
   if (!fr) throw AppError.notFound('Functional role not found');
 
@@ -301,6 +341,13 @@ export async function acknowledgeJD(jdId: string, input: AcknowledgeJDInput, req
   const jd = await getJD(jdId);
   if (jd.userId !== req.user!.id) throw AppError.forbidden('You can only respond to your own Job Description.');
   if (jd.acknowledgedAt) throw AppError.conflict('This Job Description has already been acknowledged.');
+  // JD-2: only a live JD awaiting a response may be acknowledged/returned. A JD already
+  // returned (REJECTED) or superseded (OBSOLETE) is locked — this prevents an employee
+  // from re-acknowledging a JD they just rejected (a contradictory REJECTED+acknowledged
+  // state) or acting on an obsolete version.
+  if (jd.status !== 'APPROVED') {
+    throw AppError.conflict('This Job Description is not awaiting your acknowledgement.');
+  }
 
   const decision = input.decision ?? 'APPROVE';
   const comment = (input.comment ?? '').trim();
@@ -422,7 +469,11 @@ async function propagateTemplateUpdate(
   let count = 0;
   for (const jd of jds) {
     try {
-      const next = await publishJdRevision(jd, { title: template.title, content: template.content, sourceTemplateId: template.id }, actorId);
+      const next = await publishJdRevision(
+        jd,
+        { title: template.title, content: template.content, functionalRoleId: template.functionalRoleId, sourceTemplateId: template.id },
+        actorId,
+      );
       await notifyJdDecision(jd.userId, next.title, `updated to v${next.version} — please acknowledge`).catch(() => undefined);
       count++;
     } catch {
@@ -459,10 +510,11 @@ export async function updateJD(id: string, input: UpdateJDInput, req: Request) {
   await signFromRequest(req, 'JobDescription', id, 'Approved');
 
   // Versioned revision: the JD is live with the employee, so any change must be
-  // (re-)acknowledged. This fires whether or not the current version was already
-  // acknowledged — an assigned-but-not-yet-acknowledged JD is still superseded by the
-  // new version so the employee only ever acknowledges the latest content.
-  if (jd.status === 'APPROVED') {
+  // (re-)acknowledged. Fires for an APPROVED (assigned) JD whether or not it was already
+  // acknowledged, AND for a JD the employee RETURNED (status REJECTED but assigned) — so
+  // JD-1: editing a rejected JD re-publishes a fresh version and re-sends it, giving the
+  // assigner a real recovery path instead of a permanently stranded row.
+  if (jd.status === 'APPROVED' || (jd.status === 'REJECTED' && !!jd.assignedAt)) {
     const next = await publishJdRevision(
       jd,
       { title: input.title, content: input.content, departmentId: input.departmentId, functionalRoleId: input.functionalRoleId },

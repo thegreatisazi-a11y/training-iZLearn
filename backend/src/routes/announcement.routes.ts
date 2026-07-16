@@ -18,16 +18,17 @@ router.use(authenticate);
 // Personal feed — any authenticated user may read their own announcements.
 router.get('/feed', c.feed);
 
-router.get('/', requirePermission('announcements', 'read'), c.list);
-router.get('/:id', requirePermission('announcements', 'read'), c.get);
-router.post('/', requirePermission('announcements', 'write'), validate(createAnnouncementSchema), c.create);
+// Granular verbs (view / create / edit / archive) so R&AC toggles apply independently.
+router.get('/', requirePermission('announcements', 'view'), c.list);
+router.get('/:id', requirePermission('announcements', 'view'), c.get);
+router.post('/', requirePermission('announcements', 'create'), validate(createAnnouncementSchema), c.create);
 router.patch(
   '/:id',
-  requirePermission('announcements', 'write'),
+  requirePermission('announcements', 'edit'),
   requireReasonForChange,
   validate(updateAnnouncementSchema),
   c.update,
 );
-router.delete('/:id', requirePermission('announcements', 'write'), requireReasonForChange, c.remove);
+router.delete('/:id', requirePermission('announcements', 'archive'), requireReasonForChange, c.remove);
 
 export default router;

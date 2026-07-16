@@ -108,6 +108,12 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
+    // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+    // (or archived) content, even by guessing a material id.
+    const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
+    if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
+      throw AppError.forbidden('This material is not currently available.');
+    }
     // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
     // training, material access is revoked (enable via material.lock_after_completion).
     if (await getBool('material.lock_after_completion', false)) {
@@ -134,6 +140,12 @@ export const viewPdf = asyncHandler(async (req: Request, res: Response) => {
     const material = await svc.getMaterial(req.params.id);
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
+    }
+    // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+    // (or archived) content, even by guessing a material id.
+    const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
+    if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
+      throw AppError.forbidden('This material is not currently available.');
     }
     if (await getBool('material.lock_after_completion', false)) {
       const completed = await prisma.trainingAssignment.findFirst({

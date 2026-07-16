@@ -10,8 +10,10 @@ import { notifyAssessmentBlocked } from './notification.service';
 import { issueForAttempt } from './certificate.service';
 import { hasCompletedRequiredReading } from './materialView.service';
 import { gradeQuestion } from '../utils/grading';
+import { hasPermission } from '../utils/permissions';
+import { isOrgWideUserManager, directReportIds } from '../utils/accessScope';
 import { failureReasonLabel, failureReasonIsTechnical, failureReasonCountsAsAttempt } from '@izlearn/shared';
-import type { AssessmentResult, QuestionResult, AssessmentFailureReason } from '@izlearn/shared';
+import type { AssessmentResult, QuestionResult, AssessmentFailureReason, PermissionMatrix, PermissionAction } from '@izlearn/shared';
 
 interface SnapshotQuestion {
   id: string;
@@ -132,6 +134,12 @@ async function assertJdAndCvReady(userId: string) {
 export async function startAttempt(userId: string, topicId: string, assignmentId?: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
+  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED topic version may be assessed.
+  // Blocks starting an attempt (and thus minting a certificate) against a DRAFT/under-review
+  // or an ARCHIVED/superseded version reached by guessing the topic id.
+  if (topic.status !== 'PUBLISHED') {
+    throw AppError.conflict('This training is not currently published and cannot be assessed.');
+  }
 
   await assertJdAndCvReady(userId);
 
@@ -536,6 +544,10 @@ export async function submitAttempt(
 export async function completeByAcknowledgement(userId: string, topicId: string, assignmentId?: string): Promise<AssessmentResult> {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training topic not found');
+  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED topic version may be completed.
+  if (topic.status !== 'PUBLISHED') {
+    throw AppError.conflict('This training is not currently published and cannot be completed.');
+  }
   if (topic.requiresAssessment) throw AppError.badRequest('This training requires an assessment and cannot be completed by acknowledgement.');
 
   await assertJdAndCvReady(userId);
@@ -543,8 +555,13 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
   if (!readingDone) throw AppError.forbidden('You must finish the required reading time before completing this training.');
 
-  const prior = await prisma.assessmentAttempt.findFirst({ where: { userId, topicId, isPassed: true, isDeleted: false } });
-  if (prior) throw AppError.conflict('You have already completed this training.');
+  // ASMT-3: scope the "already completed" check to the CURRENT version. Without this, a
+  // user who completed v1 by acknowledgement could never re-complete the topic after it was
+  // revised (the revision auto-assigns re-training), permanently locking SOP re-reads.
+  const prior = await prisma.assessmentAttempt.findFirst({
+    where: { userId, topicId, topicVersion: topic.currentVersion, isPassed: true, isDeleted: false },
+  });
+  if (prior) throw AppError.conflict('You have already completed the current version of this training.');
 
   const attempt = await prisma.assessmentAttempt.create({
     data: {
@@ -646,25 +663,20 @@ export async function getAttempt(id: string) {
  */
 export async function attemptViewerScope(requester: {
   id: string;
-  roleNames: string[];
+  roleNames?: string[];
   permissions?: Record<string, Record<string, boolean>>;
 }): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
-  // S1: assessment visibility.
-  //   - Trainee (no view_others permission) → own only.
-  //   - Supervisor → own + direct reports.
-  //   - Admin / Training Coordinator (view_others, not a supervisor) → everyone.
-  // Gating on the PERMISSION (not just role) is essential: this helper also authorises
-  // the review endpoint, which every user hits for their OWN attempt — without the
-  // permission gate a plain trainee would fall through to "see all".
-  const isSuperAdmin = requester.roleNames.includes('SUPER_ADMIN');
-  const hasViewOthers = requester.permissions?.assessments?.view_others === true;
-  if (!isSuperAdmin && !hasViewOthers) return { canSeeAll: false, teamUserIds: [] };
-  const isSupervisor = !isSuperAdmin && requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
-  if (isSupervisor) {
-    const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
-    return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
-  }
-  return { canSeeAll: true, teamUserIds: [] };
+  // S1: assessment visibility — permission-driven, no role names (so new custom roles
+  // scope correctly from their granted permissions):
+  //   - No assessments:view_others → OWN attempts only (a plain trainee). This gate is
+  //     essential: this helper also authorises the review endpoint, which every user hits
+  //     for their own attempt.
+  //   - Org-wide user manager (userManagement edit/approve/reset_password) → EVERYONE.
+  //   - Otherwise (a team manager / supervisor) → their DIRECT reports.
+  const perms = requester.permissions as PermissionMatrix | undefined;
+  if (!hasPermission(perms, 'assessments', 'view_others' as PermissionAction)) return { canSeeAll: false, teamUserIds: [] };
+  if (isOrgWideUserManager(perms)) return { canSeeAll: true, teamUserIds: [] };
+  return { canSeeAll: false, teamUserIds: await directReportIds(requester.id) };
 }
 
 /**

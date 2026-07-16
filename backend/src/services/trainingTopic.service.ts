@@ -23,8 +23,11 @@ import type {
  *  - soft-delete only; reads filter isDeleted and default to active-only.
  *  - topicCode is generated once on creation and is PERMANENTLY locked — it is
  *    never accepted by any update path.
- *  - passingScorePercent is a controlled value: it is changed only through a
- *    dedicated e-signed endpoint, never via the plain update.
+ *  - passingScorePercent is a controlled value. On a PUBLISHED topic every edit
+ *    (including the passing score) is staged into draftMeta and only goes live via the
+ *    e-signed publishDraftChanges; while DRAFT it is editable as normal authoring, before
+ *    the e-signed publish. (TOPIC-2: the old "dedicated e-signed endpoint" was never wired
+ *    — the staged-publish path is the actual control.)
  *  - a "revision" creates a NEW topic row (currentVersion + 1) linked to the
  *    original via parentTopicId, and supersedes the prior version's materials.
  *  - plain CRUD writes are captured by the Prisma audit middleware automatically.
@@ -187,8 +190,9 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
 }
 
 /**
- * Plain metadata update. topicCode and passingScorePercent are intentionally
- * NOT updatable here (passing score has its own e-signed endpoint).
+ * Plain metadata update. topicCode is PERMANENTLY locked and never updatable here.
+ * passingScorePercent IS accepted here, but on a PUBLISHED topic it (like every field)
+ * is staged into draftMeta and only goes live via the e-signed publish.
  *
  * G4: if the topic is PUBLISHED, the edits are NOT applied to the live record — they
  * are staged in `draftMeta` (a draft working copy). The published version stays live
@@ -655,7 +659,13 @@ export async function reviseTopic(id: string, req: Request) {
   }
 
   // Copy the live question set onto the new version so it is immediately usable.
-  const questions = await prisma.question.findMany({ where: { topicId: old.id, isDeleted: false } });
+  // TOPIC-1: copy only the LIVE questions forward. Excluding staged edits/adds and
+  // pending-removal flags prevents duplicates, un-published edits silently going live, and
+  // questions staged for removal being resurrected on the new version. (`{ not: true }`
+  // also matches records where the flag is absent, per Prisma+Mongo semantics.)
+  const questions = await prisma.question.findMany({
+    where: { topicId: old.id, isDeleted: false, isStaged: { not: true }, pendingRemoval: { not: true } },
+  });
   for (const q of questions) {
     await prisma.question.create({
       data: {

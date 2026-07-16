@@ -7,13 +7,13 @@ import { renderPdfFromHtml } from '../utils/pdfGenerator';
 import { buildHeaderTemplate, buildFooterTemplate, escapeHtml } from '../utils/reportHeader';
 import { generateReportReference } from '../utils/certificateNumber';
 import { getOrgInfo } from '../services/systemConfig.service';
-import { formatDateTime } from '../utils/dateUtils';
+import { formatDateTime, toEndBound } from '../utils/dateUtils';
 import { prisma } from '../config/prisma';
 
 function parseFilters(src: Record<string, unknown>) {
   return {
     from: src.from ? new Date(String(src.from)) : undefined,
-    to: src.to ? new Date(String(src.to)) : undefined,
+    to: src.to ? toEndBound(String(src.to)) : undefined,
     userId: src.userId ? String(src.userId) : undefined,
     action: src.action ? String(src.action) : undefined,
     entityType: src.entityType ? String(src.entityType) : undefined,

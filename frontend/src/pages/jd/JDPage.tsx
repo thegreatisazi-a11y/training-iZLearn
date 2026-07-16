@@ -101,9 +101,10 @@ export default function JDPage() {
   const frName = new Map(frList.map((d) => [d.id, d.displayName]));
   const deptName = new Map(((departments?.data ?? []) as { id: string; name: string }[]).map((d) => [d.id, d.name]));
 
+  // JD-6: filter by lifecycle state on the SERVER so pagination and totals are correct.
   const { data, isLoading } = useQuery({
-    queryKey: ['jds', { page, search }],
-    queryFn: () => svc.jds.list({ page, search: search || undefined }),
+    queryKey: ['jds', { page, search, activeFilter }],
+    queryFn: () => svc.jds.list({ page, search: search || undefined, status: activeFilter }),
   });
 
   const { data: templates, isLoading: tplLoading } = useQuery({
@@ -391,14 +392,12 @@ export default function JDPage() {
                 { value: 'all', label: 'All' },
               ]}
               value={activeFilter}
-              onChange={(e) => setActiveFilter(e.target.value as 'all' | 'active' | 'inactive')}
+              onChange={(e) => { setActiveFilter(e.target.value as 'all' | 'active' | 'inactive'); setPage(1); }}
             />
           </div>
           <DataTable<JD>
             columns={columns}
-            rows={((data?.data ?? []) as unknown as JD[]).filter((r) =>
-              activeFilter === 'all' ? true : activeFilter === 'active' ? isJdActive(r) : !isJdActive(r),
-            )}
+            rows={(data?.data ?? []) as unknown as JD[]}
             loading={isLoading}
             page={data?.page}
             pageSize={data?.pageSize}

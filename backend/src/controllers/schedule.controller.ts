@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
 import { paginationQuery } from '@izlearn/shared';
+import { toEndBound } from '../utils/dateUtils';
 import * as svc from '../services/schedule.service';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
@@ -9,7 +10,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
     topicId: req.query.topicId as string | undefined,
     status: req.query.status as string | undefined,
     from: req.query.from ? new Date(req.query.from as string) : undefined,
-    to: req.query.to ? new Date(req.query.to as string) : undefined,
+    to: req.query.to ? toEndBound(req.query.to as string) : undefined,
   });
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });

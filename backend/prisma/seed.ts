@@ -136,7 +136,9 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
       jobDescription: ['view', 'acknowledge'],
       cv: ['view', 'edit'],
       tni: ['view'],
-      feedback: ['view', 'create'],
+      // Trainees only SUBMIT feedback (the open /feedback/submit route); they must not be
+      // able to create/manage feedback FORMS. (Was ['view','create'] which derived write.)
+      feedback: ['view'],
       announcements: ['view'],
     }),
   },

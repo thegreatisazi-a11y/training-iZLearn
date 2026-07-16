@@ -14,11 +14,16 @@ import {
 } from './notification.service';
 import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
+import { hasPermission, mergePermissions } from '../utils/permissions';
+import { isOrgWideUserManager } from '../utils/accessScope';
+import { createUserSchema } from '@izlearn/shared';
 import type {
   CreateUserInput,
   UpdateUserInput,
   UserRequestDecisionInput,
   PaginationQuery,
+  PermissionMatrix,
+  PermissionAction,
 } from '@izlearn/shared';
 
 /**
@@ -50,6 +55,27 @@ async function assertRolesActive(roleIds: string[]): Promise<void> {
   }
 }
 
+/**
+ * SECURITY (RBAC-2): no privilege escalation — a granter can only assign roles whose
+ * combined permissions are a subset of their own. This is fully permission-driven (no
+ * role names), so it holds for any custom role: e.g. a holder of the lesser
+ * `userRequests:approve` cannot provision a user carrying SUPER_ADMIN (or any permission
+ * the granter themselves lacks), whether via request approval, role change, or bulk upload.
+ */
+async function assertCanGrantRoles(granterPerms: PermissionMatrix | undefined, roleIds: string[]): Promise<void> {
+  const ids = Array.from(new Set(roleIds.filter(Boolean)));
+  if (!ids.length) return;
+  const roles = await prisma.role.findMany({ where: { id: { in: ids } }, select: { permissions: true } });
+  const granted = mergePermissions(roles.map((r) => r.permissions as PermissionMatrix)) as unknown as Record<string, Record<string, boolean>>;
+  for (const [module, actions] of Object.entries(granted)) {
+    for (const [action, on] of Object.entries(actions)) {
+      if (on && !hasPermission(granterPerms, module, action as PermissionAction)) {
+        throw AppError.forbidden('You cannot grant a role that carries permissions beyond your own.');
+      }
+    }
+  }
+}
+
 /** Normalise a user's functional roles to an id array (merges legacy single + array). */
 function functionalRoleIds(r: { designationId?: string | null; designationIds?: unknown }): string[] {
   const arr = Array.isArray(r.designationIds) ? (r.designationIds as string[]) : [];
@@ -73,13 +99,22 @@ async function withNames<T extends { departmentId: string; locationId: string; d
   const frMap = new Map(frs.map((f) => [f.id, f.displayName]));
   return rows.map((r) => {
     const ids = functionalRoleIds(r);
+    // SECURITY (AUTH-1): never expose credential hashes in any list/detail response.
+    // Strip them here — the one place every user-facing read passes through — and surface
+    // only whether a signature password is set.
+    const { passwordHash: _pw, signaturePasswordHash: _sig, refreshToken: _rt, ...safe } = r as typeof r & {
+      passwordHash?: string;
+      signaturePasswordHash?: string | null;
+      refreshToken?: string | null;
+    };
     return {
-      ...r,
+      ...safe,
       departmentName: deptMap.get(r.departmentId) ?? null,
       locationName: locMap.get(r.locationId) ?? null,
       // #2: normalised functional-role ids + their display names for the UI.
       designationIds: ids,
       functionalRoleNames: ids.map((id) => frMap.get(id)).filter(Boolean) as string[],
+      hasSignaturePassword: !!_sig,
     };
   });
 }
@@ -250,6 +285,8 @@ export async function decideRequest(
   const roleIds = (request.roleIds as string[]) ?? [];
   // CR-1(c): never provision a user against an inactive/deleted role.
   await assertRolesActive(roleIds);
+  // RBAC-2: the approver cannot grant roles more powerful than their own.
+  await assertCanGrantRoles(req.user!.permissions as PermissionMatrix, roleIds);
   const plainPassword = tempPassword();
   const passwordHash = await hashPassword(plainPassword);
 
@@ -408,10 +445,14 @@ export async function getUser(id: string) {
  * that isn't a plain "supervisor" but was granted team:edit/deactivate) may act on
  * anyone; a supervisor may act ONLY on their direct reports.
  */
-export async function assertTeamManageAccess(requester: { id: string; roleNames: string[] }, targetUserId: string) {
-  if (requester.roleNames.includes('SUPER_ADMIN')) return;
-  const isSupervisor = requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
-  if (!isSupervisor) return; // admin / training coordinator (reached via the team perm gate)
+export async function assertTeamManageAccess(
+  requester: { id: string; permissions?: Record<string, Record<string, boolean>> },
+  targetUserId: string,
+) {
+  // Permission-driven (no role names): an org-wide user manager may act on anyone; everyone
+  // else reaching the team routes (gated on team:edit / team:deactivate) is limited to their
+  // DIRECT reports. A new custom role scopes correctly purely from its granted permissions.
+  if (isOrgWideUserManager(requester.permissions as PermissionMatrix | undefined)) return;
   const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
   if (!target || target.supervisorId !== requester.id) {
     throw AppError.forbidden('You may only edit or deactivate your direct reportees.');
@@ -431,17 +472,13 @@ export async function getMyProfile(userId: string) {
   const roles = roleLinks.length
     ? await prisma.role.findMany({ where: { id: { in: roleLinks.map((r) => r.roleId) } }, select: { roleName: true } })
     : [];
-  // Never expose credential hashes to the client.
-  const { passwordHash: _p, signaturePasswordHash, ...safe } = withName as typeof withName & {
-    passwordHash?: string;
-    signaturePasswordHash?: string | null;
-  };
+  // Credential hashes are already stripped by withNames, which also provides
+  // hasSignaturePassword.
   return {
-    ...safe,
+    ...withName,
     supervisorName: supervisor?.fullName ?? null,
     supervisorEmployeeId: supervisor?.employeeId ?? null,
     roleNames: roles.map((r) => r.roleName),
-    hasSignaturePassword: !!signaturePasswordHash,
   };
 }
 
@@ -513,6 +550,8 @@ export async function changeRoles(id: string, roleIds: string[], req: Request) {
 
   // CR-1(c): role-change requests may only reference active, non-deleted roles.
   await assertRolesActive(roleIds);
+  // RBAC-2: cannot elevate a user with roles beyond the granter's own permissions.
+  await assertCanGrantRoles(req.user!.permissions as PermissionMatrix, roleIds);
 
   await signFromRequest(req, 'User', id, 'Approved');
   auditContext.setActionOverride('PERMISSION_CHANGE');
@@ -555,13 +594,25 @@ export async function deactivateUser(id: string, req: Request) {
 export async function resetPassword(id: string, req: Request) {
   const user = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
-  // #5: an admin (userManagement write/reset_password) may reset anyone; a supervisor may
-  // reset ONLY their own DIRECT reports — never someone outside their direct team.
+  // SECURITY (AUTH-2): admin reset requires the EXPLICIT `reset_password` permission —
+  // NOT the derived legacy `write` flag, which any edit/assign-capable role carries and
+  // would let a non-approver reset arbitrary (incl. SUPER_ADMIN) accounts. A supervisor
+  // may still reset ONLY their own DIRECT reports.
   const um = (req.user!.permissions as unknown as Record<string, Record<string, boolean>>)['userManagement'] ?? {};
-  const isAdminReset = um.write === true || um.reset_password === true;
+  const isAdminReset = um.reset_password === true;
   const isDirectSupervisor = user.supervisorId === req.user!.id;
   if (!isAdminReset && !isDirectSupervisor) {
     throw AppError.forbidden('You can only reset the password of your direct team members.');
+  }
+  // Never let a non-SUPER_ADMIN reset a SUPER_ADMIN's credentials (privilege-escalation guard).
+  if (!req.user!.roleNames.includes('SUPER_ADMIN')) {
+    const targetRoleLinks = await prisma.userRole.findMany({ where: { userId: id, isActive: true }, select: { roleId: true } });
+    if (targetRoleLinks.length) {
+      const targetRoles = await prisma.role.findMany({ where: { id: { in: targetRoleLinks.map((r) => r.roleId) } }, select: { roleName: true } });
+      if (targetRoles.some((r) => r.roleName === 'SUPER_ADMIN')) {
+        throw AppError.forbidden('You cannot reset the password of a Super Administrator account.');
+      }
+    }
   }
   await signFromRequest(req, 'User', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
@@ -675,12 +726,16 @@ export async function bulkPreview(buffer: Buffer): Promise<BulkPreviewResult> {
   return { valid, errors };
 }
 
-export async function bulkCommit(rows: CreateUserInput[], createdBy: string) {
+export async function bulkCommit(rows: CreateUserInput[], createdBy: string, granterPerms?: PermissionMatrix) {
   let created = 0;
   let failed = 0;
   for (const row of rows) {
     try {
-      await createUserRequest(row, createdBy);
+      // RBAC-1: re-validate every row server-side (the client re-sends preview rows that
+      // could be tampered with) and enforce the no-privilege-escalation guard on its roles.
+      const clean = createUserSchema.parse(row);
+      await assertCanGrantRoles(granterPerms, clean.roleIds);
+      await createUserRequest(clean, createdBy);
       created += 1;
     } catch {
       failed += 1;
@@ -700,8 +755,11 @@ export async function getUserLifecycle(userId: string) {
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
 
-  const [jd, cv, tnis, assignments] = await Promise.all([
-    prisma.jobDescription.findFirst({ where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } }, orderBy: { version: 'desc' } }),
+  const [liveJds, cv, tnis, assignments] = await Promise.all([
+    // JD-7: a user may hold several live JDs; release requires EVERY one acknowledged, not
+    // just the highest-version pick. (Versions collide across independent lineages, so
+    // "the latest" was arbitrary.)
+    prisma.jobDescription.findMany({ where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } }, orderBy: { version: 'desc' } }),
     prisma.curriculumVitae.findFirst({ where: { userId, isDeleted: false } }),
     prisma.tNI.findMany({ where: { userId, isDeleted: false } }),
     prisma.trainingAssignment.findMany({ where: { userId, isDeleted: false, status: { not: 'DEFERRED' } } }),
@@ -710,18 +768,21 @@ export async function getUserLifecycle(userId: string) {
   const trainingTotal = assignments.length;
   const trainingCompleted = assignments.filter((a) => a.status === 'COMPLETED' || a.status === 'WAIVED').length;
   const trainingComplete = trainingTotal === 0 || trainingCompleted === trainingTotal;
+  const jd = liveJds[0] ?? null; // representative (latest) for display
+  const allJdsAcknowledged = liveJds.length > 0 && liveJds.every((j) => !!j.acknowledgedAt);
 
   return {
     userId,
     releaseStage: user.releaseStage,
     releasedAt: user.releasedAt,
     jd: jd ? { id: jd.id, title: jd.title, acknowledged: !!jd.acknowledgedAt, acknowledgedAt: jd.acknowledgedAt } : null,
-    jdAcknowledged: !!jd?.acknowledgedAt,
+    jdCount: liveJds.length,
+    jdAcknowledged: allJdsAcknowledged,
     cvCompleted: !!cv,
     tni: { total: tnis.length, approved: tnis.filter((t) => t.status === 'APPROVED').length, pending: tnis.filter((t) => t.status === 'PENDING').length },
     training: { total: trainingTotal, completed: trainingCompleted, complete: trainingComplete },
-    // Eligible to release once JD is acknowledged and all assigned training is complete.
-    eligibleForRelease: !!jd?.acknowledgedAt && trainingComplete,
+    // Eligible to release once ALL held JDs are acknowledged and all training is complete.
+    eligibleForRelease: allJdsAcknowledged && trainingComplete,
   };
 }
 

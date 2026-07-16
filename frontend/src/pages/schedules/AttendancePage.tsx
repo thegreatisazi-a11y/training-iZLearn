@@ -38,13 +38,13 @@ interface ScheduleDetail {
   trainees?: Trainee[];
 }
 interface UploadRow {
-  rowNumber: number;
+  row: number;
   employeeId: string;
   status: string;
 }
 interface UploadPreview {
   valid: UploadRow[];
-  errors: Array<{ rowNumber: number; message: string }>;
+  errors: Array<{ row: number; messages: string[] }>;
 }
 
 const STATUS_OPTS = [
@@ -213,8 +213,8 @@ export default function AttendancePage() {
                     {preview.valid.length > 0 && (
                       <ul className="mt-1 max-h-32 overflow-y-auto rounded border border-slate-200 p-2 text-slate-600">
                         {preview.valid.map((r) => (
-                          <li key={r.rowNumber}>
-                            Row {r.rowNumber}: {r.employeeId} → {r.status}
+                          <li key={r.row}>
+                            Row {r.row}: {r.employeeId} → {r.status}
                           </li>
                         ))}
                       </ul>
@@ -225,8 +225,8 @@ export default function AttendancePage() {
                       <p className="font-medium text-red-600">{preview.errors.length} error(s)</p>
                       <ul className="mt-1 max-h-32 overflow-y-auto rounded border border-red-200 bg-red-50 p-2 text-red-700">
                         {preview.errors.map((e) => (
-                          <li key={e.rowNumber}>
-                            Row {e.rowNumber}: {e.message}
+                          <li key={e.row}>
+                            Row {e.row}: {e.messages.join('; ')}
                           </li>
                         ))}
                       </ul>

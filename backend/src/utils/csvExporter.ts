@@ -4,7 +4,11 @@ export interface CsvColumn {
 }
 
 function escapeCsv(value: unknown): string {
-  const s = value === null || value === undefined ? '' : String(value);
+  let s = value === null || value === undefined ? '' : String(value);
+  // CSV formula-injection defence: a cell whose first character is = + - @ (or a
+  // leading tab/CR) is evaluated as a formula by Excel/LibreOffice. Prefix such values
+  // with an apostrophe so they are rendered as literal text, never executed.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

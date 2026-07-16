@@ -735,10 +735,17 @@ export async function exportReport(
     timezone: org.timezone,
     printedByName: isPrint ? user.fullName : undefined,
   };
-  const pdf = await renderPdfFromHtml(tableHtml(data.title, data.columns, data.rows), {
-    headerHtml: buildHeaderTemplate(cfg),
-    footerHtml: buildFooterTemplate(cfg),
-    landscape: true,
-  });
+  // RPT-1: PDF generation needs headless Chrome, which isn't on every host. Fail with a
+  // clear, actionable 503 (like the audit export) instead of an opaque 500.
+  let pdf: Buffer;
+  try {
+    pdf = await renderPdfFromHtml(tableHtml(data.title, data.columns, data.rows), {
+      headerHtml: buildHeaderTemplate(cfg),
+      footerHtml: buildFooterTemplate(cfg),
+      landscape: true,
+    });
+  } catch {
+    throw new AppError(503, 'PDF_UNAVAILABLE', 'PDF export is unavailable on this server. Please export as Excel or CSV instead.');
+  }
   return { contentType: 'application/pdf', filename: `${type}.pdf`, body: pdf, rowCount: data.rows.length };
 }

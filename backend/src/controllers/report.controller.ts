@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, AppError } from '../utils/response';
 import { hasPermission } from '../utils/permissions';
+import { toEndBound } from '../utils/dateUtils';
 import { recordEvent } from '../services/auditTrail.service';
 import { buildReport, exportReport, REPORT_TYPES, ReportType, ReportFilters } from '../services/report.service';
 
@@ -14,7 +15,7 @@ function parseFilters(src: Record<string, unknown>): ReportFilters {
     designationId: src.designationId ? String(src.designationId) : undefined,
     supervisorId: src.supervisorId ? String(src.supervisorId) : undefined,
     from: src.from ? new Date(String(src.from)) : undefined,
-    to: src.to ? new Date(String(src.to)) : undefined,
+    to: src.to ? toEndBound(String(src.to)) : undefined,
     includeInactive: String(src.includeInactive ?? 'false') === 'true',
   };
 }

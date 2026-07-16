@@ -117,11 +117,11 @@ export const deactivate = asyncHandler(async (req: Request, res: Response) => {
 
 // S5: edit / deactivate a team member from My Team (hierarchy-scoped in the service).
 export const updateTeamMember = asyncHandler(async (req: Request, res: Response) => {
-  await svc.assertTeamManageAccess({ id: req.user!.id, roleNames: req.user!.roleNames }, req.params.id);
+  await svc.assertTeamManageAccess({ id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> }, req.params.id);
   sendSuccess(res, await svc.updateUser(req.params.id, req.body, req), 'Team member updated');
 });
 export const deactivateTeamMember = asyncHandler(async (req: Request, res: Response) => {
-  await svc.assertTeamManageAccess({ id: req.user!.id, roleNames: req.user!.roleNames }, req.params.id);
+  await svc.assertTeamManageAccess({ id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> }, req.params.id);
   sendSuccess(res, await svc.deactivateUser(req.params.id, req), 'Team member deactivated');
 });
 
@@ -160,5 +160,5 @@ export const bulkPreview = asyncHandler(async (req: Request, res: Response) => {
 export const bulkCommit = asyncHandler(async (req: Request, res: Response) => {
   const rows = (req.body?.rows ?? []) as Parameters<typeof svc.bulkCommit>[0];
   if (!Array.isArray(rows) || rows.length === 0) throw AppError.badRequest('No rows to commit.');
-  sendSuccess(res, await svc.bulkCommit(rows, req.user!.id), 'Bulk user requests created');
+  sendSuccess(res, await svc.bulkCommit(rows, req.user!.id, req.user!.permissions as Parameters<typeof svc.bulkCommit>[2]), 'Bulk user requests created');
 });

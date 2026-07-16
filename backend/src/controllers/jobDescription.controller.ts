@@ -4,12 +4,19 @@ import { paginationQuery } from '@izlearn/shared';
 import * as svc from '../services/jobDescription.service';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
-  const q = { ...paginationQuery.parse(req.query), userId: req.query.userId as string | undefined };
-  const r = await svc.listJDs(q, { id: req.user!.id, roleNames: req.user!.roleNames });
+  const q = {
+    ...paginationQuery.parse(req.query),
+    userId: req.query.userId as string | undefined,
+    status: req.query.status as string | undefined,
+  };
+  const r = await svc.listJDs(q, { id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> });
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 
-export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.getJD(req.params.id)));
+// JD-3: single-JD read is viewer-scoped (owner / direct-report supervisor / org-wide).
+export const get = asyncHandler(async (req, res) =>
+  sendSuccess(res, await svc.getJDForViewer(req.params.id, { id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> })),
+);
 
 export const create = asyncHandler(async (req, res) =>
   sendCreated(res, await svc.createJD(req.body, req.user!.id), 'Job description created'),
@@ -48,11 +55,14 @@ export const fromTemplate = asyncHandler(async (req, res) => {
   sendCreated(res, await svc.createFromTemplate(userId, departmentId, roleId, req.user!.id), 'Job description created from template');
 });
 
-export const history = asyncHandler(async (req, res) => sendSuccess(res, await svc.getEmployeeJDHistory(req.params.userId)));
+// JD-4: history is viewer-scoped (was unscoped — any reader could pull any user's history).
+export const history = asyncHandler(async (req, res) =>
+  sendSuccess(res, await svc.getEmployeeJDHistoryForViewer(req.params.userId, { id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> })),
+);
 
 // Supervisor/owner/admin view of a user's JDs (gated in the service), mirroring CV.
 export const userJDs = asyncHandler(async (req, res) =>
-  sendSuccess(res, await svc.getUserJDsForViewer(req.params.userId, req.user!)),
+  sendSuccess(res, await svc.getUserJDsForViewer(req.params.userId, { id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> })),
 );
 
 export const listTemplates = asyncHandler(async (req, res) => {
