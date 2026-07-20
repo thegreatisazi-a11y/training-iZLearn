@@ -55,8 +55,12 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Dashboard',
     category: 'dashboard',
     actions: [
-      A('view', 'View Dashboard', 'Open the dashboard home page with its summary widgets and KPIs.'),
-      A('configure_widgets', 'Configure Widgets', 'Choose and rearrange which dashboard widgets are shown.'),
+      A('view', 'View Dashboard', 'Open the dashboard home page with its personal (and, if permitted, team) summary.'),
+      A(
+        'view_org',
+        'View Organisation Overview',
+        'Show the ORGANISATION-WIDE dashboard section (totals across all users, courses, requests, TNI, JDs, etc.). Turn this OFF for a supervisor/manager so their dashboard shows only their own team’s numbers, not the whole organisation.',
+      ),
     ],
   },
 

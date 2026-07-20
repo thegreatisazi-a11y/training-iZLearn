@@ -310,6 +310,15 @@ async function main() {
         p.certificates.view_others = true;
         changed = true;
       }
+      // "View Organisation Overview" (dashboard:view_org) is a NEW permission gating the
+      // org-wide dashboard section (previously derived from broad read access, so supervisors
+      // saw whole-org numbers). Grant it ONLY to the top admin so an existing deployment
+      // isn't locked out of org stats; every other role defaults to OFF — a team-only
+      // dashboard — and can be granted it explicitly in Roles & Access Control.
+      if (p.dashboard && p.dashboard.view_org === undefined) {
+        p.dashboard.view_org = role.id === roleIdByName.get('SUPER_ADMIN');
+        changed = true;
+      }
       // "Version History" (topicVersionHistory:view) is now enforced on the course
       // history route (previously it was inert — gated on courseManagement:view). Preserve
       // prior access: any role that can view courses keeps history unless explicitly

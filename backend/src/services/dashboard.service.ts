@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { hasPermission } from '../utils/permissions';
 import type { AuthUser } from '../types';
+import type { PermissionAction } from '@izlearn/shared';
 
 const MY_STATUSES = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE', 'BLOCKED', 'WAIVED'] as const;
 
@@ -38,8 +39,11 @@ export async function getDashboard(user: AuthUser) {
     where: { userId: user.id, isDeleted: false, status: 'COMPLETED', refresherDueDate: { not: null, lte: new Date() }, ...currentOnly },
   });
   const myCertificates = await prisma.certificate.count({ where: { userId: user.id, isDeleted: false } });
+  // Per-user dashboard layout (which section-widgets are shown and their order).
+  const prefRow = await prisma.user.findUnique({ where: { id: user.id }, select: { dashboardPrefs: true } });
 
   const payload: Record<string, unknown> = {
+    preferences: prefRow?.dashboardPrefs ?? null,
     me: {
       pending: myCounts.PENDING,
       inProgress: myCounts.IN_PROGRESS,
@@ -84,11 +88,11 @@ export async function getDashboard(user: AuthUser) {
     }
   }
 
-  // Organisation-wide section for users with reporting / admin visibility.
-  const showOrg =
-    hasPermission(user.permissions, 'reports', 'read') ||
-    hasPermission(user.permissions, 'userManagement', 'read') ||
-    hasPermission(user.permissions, 'auditTrail', 'read');
+  // Organisation-wide section — gated on the dedicated dashboard:view_org permission so a
+  // supervisor/manager (who has broad read access but should only see THEIR TEAM on the
+  // dashboard) can be limited by turning this off in Roles & Access Control. Managed
+  // entirely from R&AC, not by role name.
+  const showOrg = hasPermission(user.permissions, 'dashboard', 'view_org' as PermissionAction);
 
   if (showOrg) {
     const [
@@ -149,4 +153,17 @@ export async function getDashboard(user: AuthUser) {
   });
 
   return payload;
+}
+
+/**
+ * Save the signed-in user's dashboard layout (which section-widgets are visible and their
+ * order). Self-scoped personalization — no permission gate. Unknown/extra keys are dropped
+ * and values are coerced to a safe { order: string[], hidden: string[] } shape.
+ */
+export async function saveDashboardPreferences(userId: string, prefs: unknown): Promise<{ order: string[]; hidden: string[] }> {
+  const p = (prefs ?? {}) as { order?: unknown; hidden?: unknown };
+  const toStrings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 50) : []);
+  const clean = { order: toStrings(p.order), hidden: toStrings(p.hidden) };
+  await prisma.user.update({ where: { id: userId }, data: { dashboardPrefs: clean } });
+  return clean;
 }

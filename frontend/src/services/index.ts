@@ -61,7 +61,10 @@ export const svc = {
     terminatePrevious: () => api.delete('/auth/sessions/previous'),
   },
 
-  dashboard: { get: () => data(api.get('/dashboard')) },
+  dashboard: {
+    get: () => data(api.get('/dashboard')),
+    savePreferences: (prefs: { order: string[]; hidden: string[] }) => data(api.put('/dashboard/preferences', prefs)),
+  },
 
   users: {
     ...createCrud('/users'),

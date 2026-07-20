@@ -44,6 +44,7 @@ model User {
   releaseStage          ReleaseStage @default(ONBOARDING) // CR-15/16: onboarding -> ready -> released
   releasedAt            DateTime?
   releasedBy            String?
+  dashboardPrefs        Json?     // per-user dashboard widget layout: { order: string[], hidden: string[] }
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   createdBy             String
