@@ -235,9 +235,18 @@ export async function listMyTrainings(userId: string) {
   };
   // A revised course shows ONLY the current version: hide assignments whose topic has
   // been superseded by a newer version (the user gets a fresh assignment to it).
+  // Also: when a course is UNPUBLISHED (archived/draft), remove its still-actionable
+  // assignments from My Trainings instead of leaving a dead end where the user can open
+  // the course but "Continue to assessment" is refused. Already-COMPLETED/WAIVED rows are
+  // kept as the user's training history (their certificate stands); a pending row simply
+  // disappears and reappears if the course is re-published.
   const visible = assignments.filter((a) => {
     const topic = topicMap.get(a.topicId);
-    return !topic || !topic.supersededByTopicId;
+    if (!topic) return true;
+    if (topic.supersededByTopicId) return false;
+    const done = a.status === 'COMPLETED' || a.status === 'WAIVED';
+    if (topic.status !== 'PUBLISHED' && !done) return false;
+    return true;
   });
 
   // Item B: compute reading completion for ACTIONABLE assignments so the Assessments page

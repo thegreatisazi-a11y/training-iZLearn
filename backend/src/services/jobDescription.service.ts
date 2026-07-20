@@ -249,6 +249,14 @@ export async function assignJDFromTemplate(input: AssignJDFromTemplateInput, req
   // Controlled, direct assignment — two-component e-signature.
   await signFromRequest(req, 'User', input.userId, 'Approved');
 
+  // L-J2: obsolete any existing LIVE JD this user already holds FROM THIS SAME TEMPLATE, so
+  // a user never ends up with two live copies of the same JD (which a later template edit
+  // would then fan out to twice). JDs from OTHER templates are untouched (B1 allows several).
+  await prisma.jobDescription.updateMany({
+    where: { userId: input.userId, sourceTemplateId: template.id, isDeleted: false, status: { not: 'OBSOLETE' } },
+    data: { status: 'OBSOLETE' },
+  });
+
   // Item 2: a newly assigned JD is a new controlled document → it starts at v1. The
   // version only advances when this JD is later revised (see updateJD), so the number
   // the employee sees reflects the JD's own revision history, not a running count of
@@ -405,8 +413,17 @@ async function publishJdRevision(
   actorId: string,
 ) {
   // Preserve the current version as history (obsolete → hidden from "My JD").
+  // L-J1: obsolete CONDITIONALLY (only if still live) so two concurrent edits / a template
+  // fan-out racing a manual edit can't both supersede the same row and create two "v+1"
+  // successors. If it was already superseded, bail out instead of duplicating.
   auditContext.setActionOverride('UPDATE');
-  await prisma.jobDescription.update({ where: { id: current.id }, data: { status: 'OBSOLETE' } });
+  const superseded = await prisma.jobDescription.updateMany({
+    where: { id: current.id, status: { not: 'OBSOLETE' } },
+    data: { status: 'OBSOLETE' },
+  });
+  if (superseded.count === 0) {
+    throw AppError.conflict('This Job Description was just updated by someone else. Please refresh and try again.');
+  }
 
   // Publish the successor: assigned, awaiting (re-)acknowledgement.
   auditContext.setActionOverride('CREATE');
@@ -692,6 +709,13 @@ export async function listTemplates(q: PaginationQuery) {
     prisma.jDTemplate.count({ where }),
   ]);
   return { data, total, page: q.page, pageSize: q.pageSize };
+}
+
+/** L-J9: fetch a single JD template by id (the editor loads by id, not a capped list). */
+export async function getTemplate(id: string) {
+  const tpl = await prisma.jDTemplate.findFirst({ where: { id, isDeleted: false } });
+  if (!tpl) throw AppError.notFound('Job-description template not found');
+  return tpl;
 }
 
 export async function createTemplate(input: JDTemplateInput, createdBy: string) {

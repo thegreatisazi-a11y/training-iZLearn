@@ -12,6 +12,8 @@ export const markAttendanceSchema = z.object({
       }),
     )
     .min(1),
+  // ATT-2: required by the server only when a change corrects an already-marked record.
+  reasonForChange: z.string().trim().optional(),
 });
 export type MarkAttendanceInput = z.infer<typeof markAttendanceSchema>;
 

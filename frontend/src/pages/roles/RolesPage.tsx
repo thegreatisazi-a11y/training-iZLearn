@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Eye, Printer, Download, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { PERMISSION_CATALOG, PERMISSION_CATEGORIES, type PermModuleDef } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -200,7 +201,11 @@ function PermissionEditor({
                                 className={`flex items-center justify-between gap-2 rounded-md border px-3 py-2 ${on ? 'border-primary/30 bg-primary/5' : 'border-slate-200 bg-slate-50/50'}`}
                               >
                                 <span className="min-w-0">
-                                  <span className="block truncate text-sm text-slate-700">{a.label}</span>
+                                  <span className="flex items-center gap-1 text-sm text-slate-700">
+                                    <span className="truncate">{a.label}</span>
+                                    {/* ⓘ — reveals what this permission grants on hover AND click. */}
+                                    <InfoTooltip text={a.description} className="shrink-0" />
+                                  </span>
                                   <span className="block font-mono text-[10px] text-slate-400">{a.key}</span>
                                 </span>
                                 <Toggle on={on} disabled={readOnly} onClick={() => toggleAction(def.module, a.key)} />

@@ -82,6 +82,9 @@ export function InlineFileViewer({
     setLoading(true);
     setError('');
     setBlob(null);
+    // L-C4: reset the image zoom so a new file doesn't inherit the previous one's zoom.
+    setZoomMode('fit-width');
+    setZoomPct(100);
     // Presentations/legacy binaries fetch the server-converted PDF; everything else
     // (incl. docx/xlsx, which are converted in-browser) streams the raw file.
     const endpoint = usesServerPdf ? `/materials/${materialId}/view-pdf` : `/materials/${materialId}/download`;

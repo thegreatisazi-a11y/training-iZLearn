@@ -40,6 +40,16 @@ export async function createSession(
     },
   });
 
+  // L-A2: single-session integrity under a check-then-act race. Two concurrent logins
+  // could both pass the "no existing session" check; deactivating every OTHER active
+  // session right after creating ours makes the newest login deterministically win, so
+  // at most one session is ever active for a user (the durable Mongo flag is the source
+  // of truth consulted on every request).
+  await prisma.userSession.updateMany({
+    where: { userId, sessionId: { not: sessionId }, isActive: true },
+    data: { isActive: false },
+  });
+
   await setSession(
     userId,
     sessionId,

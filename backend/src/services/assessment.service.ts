@@ -195,6 +195,9 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     select: { submissionReason: true },
   });
   const completedCount = finalized.filter((a) => !a.submissionReason || failureReasonCountsAsAttempt(a.submissionReason as AssessmentFailureReason)).length;
+  // L-C3: `blockAfterMaxAttempts` is a deliberate per-topic toggle. When ON, hitting the
+  // limit blocks the trainee pending supervisor review; when OFF, maxAttempts is advisory
+  // and retries stay open — this is intended, not a bypass.
   if (topic.blockAfterMaxAttempts && completedCount >= effectiveMax) {
     if (assignmentId) await prisma.trainingAssignment.update({ where: { id: assignmentId }, data: { status: 'BLOCKED' } }).catch(() => undefined);
     throw AppError.conflict('Maximum attempts reached. This assessment is blocked pending supervisor review.');
@@ -826,7 +829,12 @@ export async function unblockAssignment(assignmentId: string, req: Request) {
   // because the used attempts still equal the max. Grant a fresh set of attempts (like
   // an approved retake) by raising extraAttempts to the attempts used so far, so the
   // user can actually take the assessment again after being unblocked.
-  const usedAttempts = await prisma.assessmentAttempt.count({ where: { userId: assignment.userId, topicId: assignment.topicId, isDeleted: false } });
+  // L-C2: count attempts on the CURRENT topic version only (the start-time limit does too),
+  // so stale prior-version attempts don't inflate extraAttempts and over-grant retakes.
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: assignment.topicId }, select: { currentVersion: true } });
+  const usedAttempts = await prisma.assessmentAttempt.count({
+    where: { userId: assignment.userId, topicId: assignment.topicId, topicVersion: topic?.currentVersion ?? undefined, isDeleted: false },
+  });
   return prisma.trainingAssignment.update({
     where: { id: assignmentId },
     data: { status: 'PENDING', extraAttempts: Math.max(assignment.extraAttempts ?? 0, usedAttempts) },

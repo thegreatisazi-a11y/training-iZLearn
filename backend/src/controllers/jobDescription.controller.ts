@@ -65,6 +65,8 @@ export const userJDs = asyncHandler(async (req, res) =>
   sendSuccess(res, await svc.getUserJDsForViewer(req.params.userId, { id: req.user!.id, permissions: req.user!.permissions as Record<string, Record<string, boolean>> })),
 );
 
+export const getTemplate = asyncHandler(async (req, res) => sendSuccess(res, await svc.getTemplate(req.params.id)));
+
 export const listTemplates = asyncHandler(async (req, res) => {
   const r = await svc.listTemplates(paginationQuery.parse(req.query));
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });

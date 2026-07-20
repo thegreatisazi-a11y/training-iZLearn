@@ -3,7 +3,7 @@ import * as c from '../controllers/role.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
-import { requireReasonForChange } from '../middlewares/reasonForChange.middleware';
+import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
 import { createRoleSchema, updateRoleSchema } from '@izlearn/shared';
 
 /**
@@ -17,7 +17,9 @@ router.use(authenticate);
 
 router.get('/', requirePermission('roleManagement', 'read'), c.list);
 router.get('/:id', requirePermission('roleManagement', 'read'), c.get);
-router.post('/', requirePermission('roleManagement', 'write'), validate(createRoleSchema), c.create);
+// L-A3: capture a reason-for-change when provided (a new role has no prior value, so it
+// isn't mandatory) — records it in the audit trail like the edit/delete paths.
+router.post('/', requirePermission('roleManagement', 'write'), captureReasonIfPresent, validate(createRoleSchema), c.create);
 router.patch(
   '/:id',
   requirePermission('roleManagement', 'write'),

@@ -270,6 +270,10 @@ export default function TNIPage() {
     onSuccess: () => {
       toast.success('Decision recorded');
       qc.invalidateQueries({ queryKey: ['tni'] });
+      // L-J6: clear the decision dialog + its state so it doesn't linger behind the modal.
+      setDecision(null);
+      setDueDate('');
+      setSignOpen(false);
     },
     onError: (e) => toast.error(apiError(e)),
   });

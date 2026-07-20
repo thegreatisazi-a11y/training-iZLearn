@@ -25,7 +25,17 @@ export async function createApp(): Promise<Express> {
   // Gzip API/JSON responses (the large report/list payloads compress well). Kept before
   // the routes so every response passes through it. Blob/file streams are already
   // compressed formats (pdf/png/mp4) and compression skips them by content-type.
-  app.use(compression());
+  // Gzip responses, but skip the file EXPORT/DOWNLOAD endpoints: compression strips
+  // Content-Length (chunked), which prevents the client showing a download progress %
+  // (L-S3). Their payloads are CSV/blobs the browser handles fine uncompressed.
+  app.use(
+    compression({
+      filter: (req, res) => {
+        if (/\/export$|\/download$/.test(req.path)) return false;
+        return compression.filter(req, res);
+      },
+    }),
+  );
 
   app.use(
     helmet({

@@ -43,24 +43,22 @@ export default function JDTemplateEditorPage() {
   const functionalRoleOptions = ((functionalRoles?.data ?? []) as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const departmentOptions = ((departments?.data ?? []) as { id: string; name: string }[]).map((d) => ({ value: d.id, label: d.name }));
 
-  // Edit mode: load the template from the (cached) templates list and seed the form once.
-  const { data: templates, isLoading } = useQuery({
-    queryKey: ['jd-templates'],
-    queryFn: () => svc.jds.listTemplates({ pageSize: 200 }),
-    enabled: isEdit,
+  // Edit mode: load the template BY ID (L-J9 — not from a 200-row list cache that would
+  // silently show a blank form beyond 200 templates).
+  const { data: tpl, isLoading } = useQuery({
+    queryKey: ['jd-template', id],
+    queryFn: () => svc.jds.getTemplate(id as string) as unknown as Promise<JDTemplate>,
+    enabled: isEdit && !!id,
   });
   useEffect(() => {
-    if (!isEdit || !templates) return;
-    const tpl = ((templates as { data?: JDTemplate[] }).data ?? []).find((t) => t.id === id);
-    if (tpl) {
-      setForm({
-        functionalRoleId: tpl.functionalRoleId ?? '',
-        departmentId: tpl.departmentId ?? '',
-        title: tpl.title,
-        content: tpl.content ?? '',
-      });
-    }
-  }, [isEdit, templates, id]);
+    if (!isEdit || !tpl) return;
+    setForm({
+      functionalRoleId: tpl.functionalRoleId ?? '',
+      departmentId: tpl.departmentId ?? '',
+      title: tpl.title,
+      content: tpl.content ?? '',
+    });
+  }, [isEdit, tpl]);
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -96,6 +94,8 @@ export default function JDTemplateEditorPage() {
           : 'Template updated.',
       );
       qc.invalidateQueries({ queryKey: ['jd-templates'] });
+      // L-J8: the fan-out publishes new JD versions, so refresh the admin JD list too.
+      qc.invalidateQueries({ queryKey: ['jds'] });
       navigate('/job-descriptions');
     },
     onError: (e) => toast.error(apiError(e)),

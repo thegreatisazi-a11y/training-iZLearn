@@ -11,9 +11,15 @@ export async function getDashboard(user: AuthUser) {
   // listMyTrainings). The dashboard must exclude those superseded-topic assignments too,
   // otherwise its counts are higher than what the user actually sees on My Trainings.
   // (Computed in JS — `supersededByTopicId` is optional and unreliable to filter on in Mongo.)
-  const allTopics = await prisma.trainingTopic.findMany({ where: { isDeleted: false }, select: { id: true, supersededByTopicId: true } });
+  const allTopics = await prisma.trainingTopic.findMany({ where: { isDeleted: false }, select: { id: true, supersededByTopicId: true, status: true } });
   const supersededTopicIds = allTopics.filter((t) => !!t.supersededByTopicId).map((t) => t.id);
   const currentOnly = supersededTopicIds.length ? { topicId: { notIn: supersededTopicIds } } : {};
+  // Keep counts in lockstep with My Trainings: an UNPUBLISHED (archived/draft) course's
+  // still-actionable assignments are hidden there, so exclude them from the actionable
+  // counts here too. Completed/waived history is unaffected (uses `currentOnly`).
+  const hiddenActionableTopicIds = allTopics.filter((t) => !!t.supersededByTopicId || t.status !== 'PUBLISHED').map((t) => t.id);
+  const actionableOnly = hiddenActionableTopicIds.length ? { topicId: { notIn: hiddenActionableTopicIds } } : {};
+  const ACTIONABLE = new Set(['PENDING', 'IN_PROGRESS', 'OVERDUE', 'BLOCKED']);
 
   // Personal training summary (every user has this). OVERDUE is authoritative on the
   // stored status (maintained by the daily due-reminder job); dueDate is optional and
@@ -21,7 +27,9 @@ export async function getDashboard(user: AuthUser) {
   const myCounts: Record<string, number> = {};
   await Promise.all(
     MY_STATUSES.map(async (s) => {
-      myCounts[s] = await prisma.trainingAssignment.count({ where: { userId: user.id, status: s, isDeleted: false, ...currentOnly } });
+      myCounts[s] = await prisma.trainingAssignment.count({
+        where: { userId: user.id, status: s, isDeleted: false, ...(ACTIONABLE.has(s) ? actionableOnly : currentOnly) },
+      });
     }),
   );
   // CR-42: a refresher is "due" once its date has arrived on the COMPLETED assignment

@@ -205,17 +205,19 @@ async function main() {
   console.log(`   ✓ ${Object.keys(DEFAULT_SYSTEM_CONFIG).length} system config keys`);
 
   // 2. Roles -----------------------------------------------------------------
-  // Match existing roles CASE-INSENSITIVELY so a role renamed via the UI (e.g.
-  // 'SUPERVISOR' → 'Supervisor') is never duplicated on re-seed. Previously the seed
-  // upserted by exact roleName, so after such a rename each seed run re-created the
-  // UPPERCASE role — leaving two 'Trainee'/'Supervisor' entries. A live role's
-  // permissions are PRESERVED (never clobbered); defaults are only applied on create.
+  // Match existing roles by a NORMALISED name so a role renamed via the UI is never
+  // duplicated on re-seed. Normalisation lower-cases AND treats underscores/spaces as
+  // equivalent (collapsing runs), so 'SUPER_ADMIN' and 'Super Admin' are the same role —
+  // previously only case was normalised, so an underscore→space rename (SUPER_ADMIN →
+  // 'Super Admin') slipped through and each seed run left TWO active 'Super Admin' roles.
+  // A live role's permissions/name are PRESERVED (never clobbered); defaults apply on create.
+  const normRole = (s: string) => s.trim().toLowerCase().replace(/[\s_]+/g, ' ');
   const roleIdByName = new Map<string, string>();
   const allRoles = await prisma.role.findMany();
   const activeLinks = (roleId: string) => prisma.userRole.count({ where: { roleId, isActive: true } });
 
   for (const def of ROLE_DEFINITIONS) {
-    const matches = allRoles.filter((r) => r.roleName.trim().toLowerCase() === def.roleName.toLowerCase());
+    const matches = allRoles.filter((r) => normRole(r.roleName) === normRole(def.roleName));
     if (matches.length === 0) {
       const created = await prisma.role.create({
         data: {

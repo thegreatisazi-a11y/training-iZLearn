@@ -20,6 +20,8 @@ router.post('/assign-functional-role', requirePermission('jobDescription', 'assi
 // I4/I5: assign a JD to a user from a template (editable copy), approved on create.
 router.post('/assign-from-template', requirePermission('jobDescription', 'assign'), validate(assignJDFromTemplateSchema), c.assignFromTemplate);
 router.get('/templates', requirePermission('jobDescription', 'read'), c.listTemplates);
+// Must precede GET '/:id' so "templates" isn't captured as an id. (L-J9)
+router.get('/templates/:id', requirePermission('jobDescription', 'read'), c.getTemplate);
 router.post('/templates', requirePermission('jobDescription', 'write'), validate(jdTemplateSchema), c.createTemplate);
 router.patch('/templates/:id', requirePermission('jobDescription', 'write'), requireReasonForChange, validate(jdTemplateSchema), c.updateTemplate);
 router.get('/user/:userId/history', requirePermission('jobDescription', 'read'), c.history);

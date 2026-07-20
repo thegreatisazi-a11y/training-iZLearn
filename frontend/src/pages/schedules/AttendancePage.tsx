@@ -70,6 +70,8 @@ export default function AttendancePage() {
 
   // Manual marking state, seeded from the schedule's trainees.
   const [marks, setMarks] = useState<Record<string, string>>({});
+  // ATT-2: reason for change — required by the server only when correcting an already-marked record.
+  const [reason, setReason] = useState('');
   useEffect(() => {
     const trainees = schedule.data?.trainees ?? [];
     setMarks((prev) => {
@@ -84,10 +86,12 @@ export default function AttendancePage() {
       svc.attendance.mark({
         scheduleId: id,
         entries: Object.entries(marks).map(([userId, status]) => ({ userId, status })),
+        reasonForChange: reason.trim() || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['attendance', id] });
       toast.success('Attendance recorded.');
+      setReason('');
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -180,7 +184,18 @@ export default function AttendancePage() {
                       </div>
                     ))}
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-4 space-y-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">
+                        Reason for change <span className="text-slate-400">(required when correcting an already-marked record)</span>
+                      </label>
+                      <input
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        placeholder="e.g. corrected after trainee produced a leave approval"
+                        className="w-full max-w-xl rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-primary"
+                      />
+                    </div>
                     <Button onClick={() => markMutation.mutate()} disabled={markMutation.isPending}>
                       {markMutation.isPending ? 'Saving…' : 'Save Attendance'}
                     </Button>

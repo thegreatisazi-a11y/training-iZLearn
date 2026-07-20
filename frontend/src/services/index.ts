@@ -238,6 +238,7 @@ export const svc = {
     /** Supervisor/admin: a team member's (non-obsolete) JDs — owner/supervisor/admin only. */
     user: (userId: string) => data(api.get(`/job-descriptions/user/${userId}`)),
     listTemplates: (params?: ListParams) => api.get('/job-descriptions/templates', { params }).then((r) => r.data),
+    getTemplate: (id: string) => data(api.get(`/job-descriptions/templates/${id}`)),
     createTemplate: (body: unknown) => data(api.post('/job-descriptions/templates', body)),
     updateTemplate: (id: string, body: unknown) => data(api.patch(`/job-descriptions/templates/${id}`, body)),
     fromTemplate: (body: unknown) => data(api.post('/job-descriptions/from-template', body)),

@@ -4,6 +4,8 @@ import { paginationQuery, userRequestDecisionSchema } from '@izlearn/shared';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
 import { recordEvent } from '../services/auditTrail.service';
+import { isOrgWideUserManager } from '../utils/accessScope';
+import type { PermissionMatrix } from '@izlearn/shared';
 import * as svc from '../services/user.service';
 
 /**
@@ -129,11 +131,12 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
 });
 
-// Team overview: a SUPER_ADMIN sees the whole organisation; every other user sees ONLY
-// their own IMMEDIATE direct reports (no indirect subordinates).
+// Team overview: org-wide user managers (permission-driven — SUPER_ADMIN and anyone
+// granted org-wide user management in R&AC) see the whole organisation; everyone else
+// sees ONLY their own IMMEDIATE direct reports (no indirect subordinates). (L-J4)
 export const team = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  const seeAll = req.user!.roleNames.includes('SUPER_ADMIN');
+  const seeAll = isOrgWideUserManager(req.user!.permissions as PermissionMatrix);
   const r = await svc.listMyTeam(req.user!.id, seeAll, q);
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });

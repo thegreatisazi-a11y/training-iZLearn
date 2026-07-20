@@ -131,9 +131,12 @@ export async function decideRetakeRequest(id: string, input: RetakeDecisionInput
     // attempts already used (effectiveMax = maxAttempts + used). OVERDUE_ACCESS just
     // re-opens the course (no extra attempts). Both unblock the assignment to PENDING
     // and clear the supervisor-approval gate.
+    // L-C2: count only current-version attempts so stale prior-version ones don't
+    // over-grant retakes (mirrors the start-time attempt limit).
+    const rtTopic = isOverdue ? null : await prisma.trainingTopic.findFirst({ where: { id: request.topicId }, select: { currentVersion: true } });
     const usedAttempts = isOverdue
       ? 0
-      : await prisma.assessmentAttempt.count({ where: { userId: request.userId, topicId: request.topicId, isDeleted: false } });
+      : await prisma.assessmentAttempt.count({ where: { userId: request.userId, topicId: request.topicId, topicVersion: rtTopic?.currentVersion ?? undefined, isDeleted: false } });
     const assignmentData = isOverdue
       ? {
           status: 'PENDING' as const,

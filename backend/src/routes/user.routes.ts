@@ -3,7 +3,7 @@ import * as c from '../controllers/user.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission, requireExactPermission } from '../middlewares/rbac.middleware';
 import { validate } from '../middlewares/validate.middleware';
-import { requireReasonForChange, captureReasonIfPresent } from '../middlewares/reasonForChange.middleware';
+import { requireReasonForChange } from '../middlewares/reasonForChange.middleware';
 import { uploadExcel } from '../middlewares/upload.middleware';
 import { createUserSchema, updateUserSchema, changeUserRolesSchema, setReleaseStageSchema } from '@izlearn/shared';
 
@@ -71,7 +71,9 @@ router.post(
 router.post(
   '/requests/:id/decision',
   requirePermission('userRequests', 'approve'),
-  captureReasonIfPresent,
+  // L-A4: approving/rejecting a request is a controlled action — require a reason for
+  // change (recorded in the audit trail), consistent with the other user-mutation routes.
+  requireReasonForChange,
   c.decideRequest,
 );
 

@@ -94,6 +94,29 @@ export async function createSchedule(input: CreateScheduleInput, createdBy: stri
     throw AppError.badRequest('The trainer cannot be a trainee in the same schedule.');
   }
 
+  // L-S2: sanity checks for a NEW schedule.
+  //  - Not in the past (a session is scheduled for today or later).
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  if (new Date(input.scheduledDate) < start) {
+    throw AppError.badRequest('The scheduled date cannot be in the past.');
+  }
+  //  - Trainee count within the venue capacity.
+  if (input.maxTrainees != null && input.traineeIds.length > input.maxTrainees) {
+    throw AppError.badRequest(`This schedule allows at most ${input.maxTrainees} trainees (${input.traineeIds.length} selected).`);
+  }
+  //  - The trainer isn't already running another session on the same day (double-booking).
+  if (input.trainerId) {
+    const dayStart = new Date(input.scheduledDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const clash = await prisma.trainingSchedule.findFirst({
+      where: { trainerId: input.trainerId, isDeleted: false, scheduledDate: { gte: dayStart, lt: dayEnd } },
+    });
+    if (clash) throw AppError.badRequest('This trainer already has a schedule on the selected day.');
+  }
+
   const schedule = await auditedTransaction(prisma, async (tx) => {
     const created = await tx.trainingSchedule.create({
       data: {
@@ -151,6 +174,14 @@ export async function createSchedule(input: CreateScheduleInput, createdBy: stri
 
 export async function updateSchedule(id: string, input: UpdateScheduleInput) {
   await getSchedule(id);
+  // L-S1: enforce the trainer-cannot-be-trainee rule on UPDATE too (not just create) —
+  // a trainer can't be set to someone already enrolled as a trainee on this schedule.
+  if (input.trainerId) {
+    const enrolled = await prisma.trainingAssignment.findFirst({
+      where: { scheduleId: id, userId: input.trainerId, isDeleted: false },
+    });
+    if (enrolled) throw AppError.badRequest('The trainer cannot be a trainee in the same schedule.');
+  }
   return prisma.trainingSchedule.update({
     where: { id },
     data: {

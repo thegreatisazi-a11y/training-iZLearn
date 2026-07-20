@@ -257,6 +257,20 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
     }
   }
 
+  // L-J5: pre-fetch existing assignments once (was a findFirst per cell × holder — an
+  // N+1). Key on `userId:topicId` for O(1) "already assigned?" checks in the loop below.
+  const allHolderIds = Array.from(new Set([...holdersByDesignation.values()].flat()));
+  const existing = new Set(
+    allHolderIds.length
+      ? (
+          await prisma.trainingAssignment.findMany({
+            where: { userId: { in: allHolderIds }, topicId: { in: topicIds }, isDeleted: false, status: { notIn: ['WAIVED'] } },
+            select: { userId: true, topicId: true },
+          })
+        ).map((a) => `${a.userId}:${a.topicId}`)
+      : [],
+  );
+
   // CR-57: assign-later keeps matrix assignments DEFERRED until activated.
   const deferred = !!input.activateLater;
   let created = 0;
@@ -264,10 +278,9 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
     if (!publishable.has(cell.topicId)) continue;
     const holderIds = holdersByDesignation.get(cell.designationId) ?? [];
     for (const userId of holderIds) {
-      const exists = await prisma.trainingAssignment.findFirst({
-        where: { userId, topicId: cell.topicId, isDeleted: false, status: { notIn: ['WAIVED'] } },
-      });
-      if (exists) continue;
+      const pairKey = `${userId}:${cell.topicId}`;
+      if (existing.has(pairKey)) continue; // already assigned (or added earlier this run)
+      existing.add(pairKey); // guard against duplicates when a user holds several roles
       const a = await prisma.trainingAssignment.create({
         data: {
           userId,

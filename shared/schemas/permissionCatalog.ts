@@ -8,6 +8,10 @@
  * granular actions are persisted together with the derived legacy flags
  * (read/write/approve/print/export — see deriveLegacyFlags), so every existing
  * backend route guard continues to enforce access.
+ *
+ * Every action carries a plain-language `description` — surfaced as an ⓘ tooltip in
+ * Roles & Access Control — so anyone configuring a role understands exactly what the
+ * permission grants.
  */
 
 export interface PermAction {
@@ -15,6 +19,8 @@ export interface PermAction {
   key: string;
   /** Business-friendly display name. */
   label: string;
+  /** Plain-language explanation of what granting this permission allows. */
+  description: string;
 }
 
 export interface PermModuleDef {
@@ -39,8 +45,8 @@ export const PERMISSION_CATEGORIES: { key: string; label: string }[] = [
   { key: 'system', label: 'System Configuration' },
 ];
 
-// Common action builders (friendly labels are overridden per module where useful).
-const A = (key: string, label: string): PermAction => ({ key, label });
+// Action builder: key, friendly label, and a plain-language description (ⓘ tooltip).
+const A = (key: string, label: string, description: string): PermAction => ({ key, label, description });
 
 export const PERMISSION_CATALOG: PermModuleDef[] = [
   // ----- Dashboard -----
@@ -48,7 +54,10 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     module: 'dashboard',
     label: 'Dashboard',
     category: 'dashboard',
-    actions: [A('view', 'View Dashboard'), A('configure_widgets', 'Configure Widgets')],
+    actions: [
+      A('view', 'View Dashboard', 'Open the dashboard home page with its summary widgets and KPIs.'),
+      A('configure_widgets', 'Configure Widgets', 'Choose and rearrange which dashboard widgets are shown.'),
+    ],
   },
 
   // ----- User & Access -----
@@ -57,26 +66,24 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Users',
     category: 'userAccess',
     actions: [
-      A('view', 'View Users'),
-      A('create', 'Create / New User Request'),
-      A('edit', 'Edit User'),
-      A('approve', 'Activate / Deactivate / Change Roles'),
-      A('assign', 'Assign Reporting Manager / Functional Role'),
-      A('reset_password', 'Reset Password'),
-      A('bulk_upload', 'Bulk Upload Users'),
-      A('print', 'Print Users'),
-      A('export', 'Export Users'),
+      A('view', 'View Users', "Open the Users list and view any user's profile details (all users, org-wide)."),
+      A('create', 'Create / New User Request', 'Raise a new-user request, which goes to the User Requests queue for approval.'),
+      A('edit', 'Edit User', "Edit any user's details (name, email, department, manager, functional role) org-wide."),
+      A('approve', 'Activate / Deactivate / Change Roles', 'Activate or deactivate a user and change their assigned roles (e-signed).'),
+      A('assign', 'Assign Reporting Manager / Functional Role', "Set a user's reporting manager and functional role."),
+      A('reset_password', 'Reset Password', "Reset a user's login and signature password to a temporary one."),
+      A('bulk_upload', 'Bulk Upload Users', 'Import many users at once from an Excel file.'),
+      A('print', 'Print Users', 'Print the users list.'),
+      A('export', 'Export Users', 'Download the users list as CSV or Excel.'),
     ],
   },
   {
-    // Split out from Users so the "User Requests" queue has its own permission. Raising a
-    // request stays a Users capability (userManagement:create); this controls the queue.
     module: 'userRequests',
     label: 'User Requests',
     category: 'userAccess',
     actions: [
-      A('view', 'View User Requests'),
-      A('approve', 'Approve / Reject User Request'),
+      A('view', 'View User Requests', 'Open the queue of pending new-user requests.'),
+      A('approve', 'Approve / Reject User Request', 'Approve or reject a pending new-user request (e-signed). You cannot grant roles beyond your own.'),
     ],
   },
   {
@@ -84,17 +91,13 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Team (Reporting Manager)',
     category: 'userAccess',
     actions: [
-      A('view', 'View Assigned Team'),
-      // Independent from the Users module's "Create / New User Request" so "Add Team
-      // Member" can be granted/restricted separately for My Team.
-      A('create', 'Add Team Member'),
-      // S5: edit / deactivate a team member from My Team. Scope is hierarchy-enforced —
-      // a supervisor may only act on their direct reports; admin/coordinator on anyone.
-      A('edit', 'Edit Team Member'),
-      A('deactivate', 'Deactivate Team Member'),
-      A('approve', 'Approve / Verify Team Training'),
-      A('print', 'Print Team Records'),
-      A('export', 'Export Team Records'),
+      A('view', 'View Assigned Team', 'See your assigned team / direct reports in My Team.'),
+      A('create', 'Add Team Member', 'Add a new team member (raises a user request for your team).'),
+      A('edit', 'Edit Team Member', 'Edit a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
+      A('deactivate', 'Deactivate Team Member', 'Deactivate a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
+      A('approve', 'Approve / Verify Team Training', "Approve or verify your team's training records."),
+      A('print', 'Print Team Records', 'Print team training records.'),
+      A('export', 'Export Team Records', 'Download team records as CSV or Excel.'),
     ],
   },
   {
@@ -102,12 +105,12 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Roles & Access Control',
     category: 'userAccess',
     actions: [
-      A('view', 'View Roles'),
-      A('create', 'Create Role'),
-      A('edit', 'Edit Role & Permission Matrix'),
-      A('archive', 'Activate / Deactivate Role'),
-      A('print', 'Print Permission Matrix'),
-      A('export', 'Export Permission Matrix'),
+      A('view', 'View Roles', 'Open Roles & Access Control and view roles and their permission matrices.'),
+      A('create', 'Create Role', 'Create a new role.'),
+      A('edit', 'Edit Role & Permission Matrix', 'Edit a role and toggle its permissions (e-signed).'),
+      A('archive', 'Activate / Deactivate Role', 'Activate or deactivate a role.'),
+      A('print', 'Print Permission Matrix', 'Print the permission matrix.'),
+      A('export', 'Export Permission Matrix', 'Download the permission matrix.'),
     ],
   },
 
@@ -117,12 +120,12 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Master Setup & Functional Roles',
     category: 'masterSetup',
     actions: [
-      A('view', 'View Master Data'),
-      A('create', 'Create Master Entry'),
-      A('edit', 'Edit Master Entry'),
-      A('archive', 'Activate / Deactivate Entry'),
-      A('print', 'Print Master Data'),
-      A('export', 'Export Master Data'),
+      A('view', 'View Master Data', 'View master data — training types, document types, and functional roles/designations.'),
+      A('create', 'Create Master Entry', 'Add a new master-data entry.'),
+      A('edit', 'Edit Master Entry', 'Edit an existing master-data entry.'),
+      A('archive', 'Activate / Deactivate Entry', 'Activate or deactivate a master-data entry.'),
+      A('print', 'Print Master Data', 'Print master data.'),
+      A('export', 'Export Master Data', 'Download master data.'),
     ],
   },
 
@@ -132,15 +135,15 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Courses / Training Topics',
     category: 'training',
     actions: [
-      A('view', 'View Courses'),
-      A('create', 'Create Topic'),
-      A('edit', 'Edit Topic'),
-      A('revise', 'Revise (New Version)'),
-      A('archive', 'Archive / Unpublish'),
-      A('approve', 'Publish (e-signed)'),
-      A('assign', 'Assign Topic'),
-      A('print', 'Print Course'),
-      A('export', 'Export Course'),
+      A('view', 'View Courses', 'Browse training topics / courses.'),
+      A('create', 'Create Topic', 'Create a new training topic.'),
+      A('edit', 'Edit Topic', 'Edit a topic. On a published topic, edits are staged until the e-signed publish.'),
+      A('revise', 'Revise (New Version)', 'Create a new version of a published topic (triggers re-training).'),
+      A('archive', 'Archive / Unpublish', 'Archive or unpublish a topic.'),
+      A('approve', 'Publish (e-signed)', 'Publish a topic or its staged changes — requires an electronic signature.'),
+      A('assign', 'Assign Topic', 'Assign a topic to users for training.'),
+      A('print', 'Print Course', 'Print a course.'),
+      A('export', 'Export Course', 'Export courses.'),
     ],
   },
   {
@@ -148,29 +151,32 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Material Library',
     category: 'training',
     actions: [
-      A('view', 'View Materials'),
-      A('create', 'Add / Upload Material'),
-      A('edit', 'Edit / Replace Material'),
-      A('archive', 'Archive Material'),
-      A('print', 'Print Material List'),
-      A('export', 'Export Material List'),
+      A('view', 'View Materials', 'View training materials in the library and within courses.'),
+      A('create', 'Add / Upload Material', 'Upload or add new training material.'),
+      A('edit', 'Edit / Replace Material', 'Replace or edit existing material (creates a new material version).'),
+      A('archive', 'Archive Material', 'Archive a material file.'),
+      A('print', 'Print Material List', 'Print the material list.'),
+      A('export', 'Export Material List', 'Export the material list.'),
     ],
   },
   {
     module: 'topicVersionHistory',
     label: 'Version History',
     category: 'training',
-    actions: [A('view', 'View Version History'), A('export', 'Export History')],
+    actions: [
+      A('view', 'View Version History', "View a course's version history."),
+      A('export', 'Export History', 'Export version history.'),
+    ],
   },
   {
     module: 'questionBank',
     label: 'Question Bank',
     category: 'training',
     actions: [
-      A('view', 'View Questions'),
-      A('create', 'Create Question'),
-      A('edit', 'Edit Question'),
-      A('archive', 'Archive Question'),
+      A('view', 'View Questions', "View a topic's assessment questions."),
+      A('create', 'Create Question', 'Add a new question to a topic.'),
+      A('edit', 'Edit Question', 'Edit an existing question.'),
+      A('archive', 'Archive Question', 'Archive a question.'),
     ],
   },
   // Hidden from the Roles & Access Control UI for now (commented out, not removed, so
@@ -180,48 +186,37 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
   //   module: 'bundleManagement',
   //   label: 'Bundles',
   //   category: 'training',
-  //   actions: [
-  //     A('view', 'View Bundles'),
-  //     A('create', 'Create Bundle'),
-  //     A('edit', 'Edit Bundle'),
-  //     A('archive', 'Archive Bundle'),
-  //     A('assign', 'Assign Bundle'),
-  //     A('print', 'Print'),
-  //     A('export', 'Export'),
-  //   ],
+  //   actions: [ ... ],
   // },
   // {
   //   module: 'trainingAssignment',
   //   label: 'Training Assignments',
   //   category: 'training',
-  //   actions: [
-  //     A('view', 'View Assignments'),
-  //     A('create', 'Create Assignment'),
-  //     A('edit', 'Edit / Assign Later'),
-  //     A('assign', 'Assign Training'),
-  //     A('approve', 'Approve Assignment'),
-  //     A('print', 'Print Assignments'),
-  //     A('export', 'Export Assignments'),
-  //   ],
+  //   actions: [ ... ],
   // },
   {
     module: 'scheduling',
     label: 'Scheduling',
     category: 'training',
     actions: [
-      A('view', 'View Schedules'),
-      A('create', 'Create Schedule'),
-      A('edit', 'Edit Schedule'),
-      A('assign', 'Assign Trainees'),
-      A('print', 'Print'),
-      A('export', 'Export'),
+      A('view', 'View Schedules', 'View training schedules.'),
+      A('create', 'Create Schedule', 'Create a training schedule (classroom, OJT, or offline).'),
+      A('edit', 'Edit Schedule', 'Edit an existing schedule.'),
+      A('assign', 'Assign Trainees', 'Assign trainees to a schedule.'),
+      A('print', 'Print', 'Print schedules.'),
+      A('export', 'Export', 'Export schedules.'),
     ],
   },
   {
     module: 'attendance',
     label: 'Attendance',
     category: 'training',
-    actions: [A('view', 'View Attendance'), A('create', 'Mark Attendance'), A('edit', 'Edit Attendance'), A('export', 'Export')],
+    actions: [
+      A('view', 'View Attendance', 'View attendance for a schedule.'),
+      A('create', 'Mark Attendance', 'Mark attendance manually or by Excel import.'),
+      A('edit', 'Edit Attendance', 'Correct or re-mark existing attendance — requires a reason for change.'),
+      A('export', 'Export', 'Export attendance.'),
+    ],
   },
 
   // ----- TNI / JD / CV -----
@@ -230,13 +225,13 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Training Needs (TNI)',
     category: 'tniJdCv',
     actions: [
-      A('view', 'View TNI'),
-      A('create', 'Create TNI'),
-      A('edit', 'Edit TNI Matrix'),
-      A('assign', 'Assign Training from TNI'),
-      A('approve', 'Approve TNI'),
-      A('print', 'Print TNI'),
-      A('export', 'Export TNI'),
+      A('view', 'View TNI', 'View Training Needs Identification records and the requirement matrix.'),
+      A('create', 'Create TNI', 'Create a TNI record.'),
+      A('edit', 'Edit TNI Matrix', 'Edit the TNI requirement matrix.'),
+      A('assign', 'Assign Training from TNI', 'Assign training identified by TNI.'),
+      A('approve', 'Approve TNI', 'Approve a TNI (e-signed).'),
+      A('print', 'Print TNI', 'Print TNI.'),
+      A('export', 'Export TNI', 'Export TNI.'),
     ],
   },
   {
@@ -244,14 +239,14 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Job Descriptions',
     category: 'tniJdCv',
     actions: [
-      A('view', 'View JDs / Templates'),
-      A('create', 'Create JD Template'),
-      A('edit', 'Edit JD Template'),
-      A('approve', 'Approve JD'),
-      A('assign', 'Assign JD / Functional Role'),
-      A('acknowledge', 'Acknowledge Own JD'),
-      A('print', 'Print JD'),
-      A('export', 'Export JD'),
+      A('view', 'View JDs / Templates', "View job descriptions and JD templates (your reports' JDs unless you manage users org-wide)."),
+      A('create', 'Create JD Template', 'Create a JD template.'),
+      A('edit', 'Edit JD Template', 'Edit a JD template — republishes a new version to every assigned employee to re-acknowledge.'),
+      A('approve', 'Approve JD', 'Approve a job description.'),
+      A('assign', 'Assign JD / Functional Role', 'Assign a JD or functional role to a user (your direct reports unless you manage users org-wide).'),
+      A('acknowledge', 'Acknowledge Own JD', 'Acknowledge your own assigned job description.'),
+      A('print', 'Print JD', 'Print a JD.'),
+      A('export', 'Export JD', 'Export a JD.'),
     ],
   },
   {
@@ -259,10 +254,10 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Curriculum Vitae',
     category: 'tniJdCv',
     actions: [
-      A('view', 'View Own CV'),
-      A('edit', 'Create / Edit Own CV'),
-      A('print', 'Print CV'),
-      A('export', 'Export CV'),
+      A('view', 'View Own CV', 'View your own CV.'),
+      A('edit', 'Create / Edit Own CV', 'Create or edit your own CV.'),
+      A('print', 'Print CV', 'Print your CV.'),
+      A('export', 'Export CV', 'Export your CV.'),
     ],
   },
 
@@ -272,17 +267,15 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Assessments',
     category: 'assessmentCert',
     actions: [
-      A('view', 'View Assessments'),
-      // Grants the "Team Assessments" view. Scope is role-based (server-enforced): a
-      // supervisor sees their team's; admin / training coordinator see everyone's.
-      A('view_others', "View Others' Assessments"),
-      A('take', 'Take Assessment (Start / Submit)'),
-      A('create', 'Create Assessment'),
-      A('edit', 'Edit Assessment'),
-      A('archive', 'Archive Assessment'),
-      A('approve', 'Review / Unblock'),
-      A('print', 'Print'),
-      A('export', 'Export'),
+      A('view', 'View Assessments', 'View your own assessments and results.'),
+      A('view_others', "View Others' Assessments", "View other users' assessment attempts — your team's (supervisor) or everyone's (org-wide user managers)."),
+      A('take', 'Take Assessment (Start / Submit)', 'Start and submit assessments assigned to you.'),
+      A('create', 'Create Assessment', 'Create assessments and questions.'),
+      A('edit', 'Edit Assessment', 'Edit assessments.'),
+      A('archive', 'Archive Assessment', 'Archive an assessment.'),
+      A('approve', 'Review / Unblock', 'Review attempts and unblock a trainee who is locked out after max attempts.'),
+      A('print', 'Print', 'Print assessments.'),
+      A('export', 'Export', 'Export assessments.'),
     ],
   },
   {
@@ -290,24 +283,21 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Certificates',
     category: 'assessmentCert',
     actions: [
-      A('view', 'View Certificates'),
-      // Grants the "Other Certificates" view. Scope is role-based (server-enforced): a
-      // supervisor sees their team's; admin / training coordinator see everyone's.
-      A('view_others', "View Others' Certificates"),
-      A('create', 'Generate Certificate'),
-      A('print', 'Print Certificate'),
-      A('export', 'Export Certificate'),
+      A('view', 'View Certificates', 'View your own certificates.'),
+      A('view_others', "View Others' Certificates", "View other users' certificates — your team's (supervisor) or everyone's (org-wide user managers)."),
+      A('create', 'Generate Certificate', 'Generate a certificate.'),
+      A('print', 'Print Certificate', 'Print a certificate.'),
+      A('export', 'Export Certificate', 'Export certificates.'),
     ],
   },
   {
-    // Split out from Certificates so the "Certificate Templates" menu item has its own permission.
     module: 'certificateTemplates',
     label: 'Certificate Templates',
     category: 'assessmentCert',
     actions: [
-      A('view', 'View Templates'),
-      A('create', 'Create Template'),
-      A('edit', 'Edit Template'),
+      A('view', 'View Templates', 'View certificate templates.'),
+      A('create', 'Create Template', 'Create a certificate template.'),
+      A('edit', 'Edit Template', 'Edit a certificate template.'),
     ],
   },
 
@@ -316,25 +306,33 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     module: 'reports',
     label: 'Reports',
     category: 'reportsAudit',
-    actions: [A('view', 'View / Generate Reports'), A('print', 'Print Reports'), A('export', 'Export Reports')],
+    actions: [
+      A('view', 'View / Generate Reports', 'Generate and view reports.'),
+      A('print', 'Print Reports', 'Print reports.'),
+      A('export', 'Export Reports', 'Export reports as CSV, Excel, or PDF.'),
+    ],
   },
   {
     module: 'auditTrail',
     label: 'Audit Trail',
     category: 'reportsAudit',
-    actions: [A('view', 'View Audit Trail'), A('print', 'Print Audit Trail'), A('export', 'Export Audit Trail')],
+    actions: [
+      A('view', 'View Audit Trail', 'View the system audit trail.'),
+      A('print', 'Print Audit Trail', 'Print the audit trail.'),
+      A('export', 'Export Audit Trail', 'Export the audit trail as CSV, Excel, or PDF.'),
+    ],
   },
   {
     module: 'feedback',
     label: 'Feedback',
     category: 'reportsAudit',
     actions: [
-      A('view', 'View Feedback'),
-      A('create', 'Create Feedback Form'),
-      A('edit', 'Edit / Respond'),
-      A('archive', 'Archive Feedback'),
-      A('print', 'Print'),
-      A('export', 'Export'),
+      A('view', 'View Feedback', 'View feedback forms and their analysis.'),
+      A('create', 'Create Feedback Form', 'Create a feedback form. (Submitting a response needs no permission — any user can.)'),
+      A('edit', 'Edit Feedback Form', 'Edit an existing feedback form.'),
+      A('archive', 'Archive Feedback', 'Archive/deactivate a feedback form.'),
+      A('print', 'Print', 'Print feedback.'),
+      A('export', 'Export', 'Export feedback.'),
     ],
   },
   {
@@ -342,12 +340,12 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     label: 'Announcements',
     category: 'reportsAudit',
     actions: [
-      A('view', 'View Announcements'),
-      A('create', 'Create Announcement'),
-      A('edit', 'Edit Announcement'),
-      A('archive', 'Archive Announcement'),
-      A('print', 'Print'),
-      A('export', 'Export'),
+      A('view', 'View Announcements', 'View announcements in the management list. (Every user sees their own targeted feed regardless.)'),
+      A('create', 'Create Announcement', 'Create an announcement targeted at chosen roles.'),
+      A('edit', 'Edit Announcement', 'Edit an existing announcement.'),
+      A('archive', 'Archive Announcement', 'Archive/deactivate an announcement.'),
+      A('print', 'Print', 'Print announcements.'),
+      A('export', 'Export', 'Export announcements.'),
     ],
   },
 
@@ -356,13 +354,20 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     module: 'systemConfig',
     label: 'System Configuration',
     category: 'system',
-    actions: [A('view', 'View Configuration'), A('edit', 'Edit Configuration')],
+    actions: [
+      A('view', 'View Configuration', 'View system configuration.'),
+      A('edit', 'Edit Configuration', 'Edit system configuration — policies, notifications, and security settings.'),
+    ],
   },
   {
     module: 'backup',
     label: 'Backup & Restore',
     category: 'system',
-    actions: [A('view', 'View Backups'), A('create', 'Trigger Backup'), A('approve', 'Restore (e-signed)')],
+    actions: [
+      A('view', 'View Backups', 'View the list of backups.'),
+      A('create', 'Trigger Backup', 'Trigger a new backup.'),
+      A('approve', 'Restore (e-signed)', 'Restore the system from a backup — requires an electronic signature.'),
+    ],
   },
 ];
 

@@ -344,6 +344,8 @@ export async function publishDraftChanges(id: string, req: Request) {
       readTimeChanges += 1;
     }
   }
+  // Every publish of pending changes is a new controlled version: bump currentVersion
+  // ONCE (regardless of how many changes are batched) and clear the staged metadata.
   const promoted = await prisma.trainingTopic.update({
     where: { id },
     data: { ...draft, draftMeta: null, currentVersion: { increment: 1 } },

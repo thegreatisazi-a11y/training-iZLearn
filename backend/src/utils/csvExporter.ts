@@ -3,7 +3,7 @@ export interface CsvColumn {
   key: string;
 }
 
-function escapeCsv(value: unknown): string {
+export function escapeCsv(value: unknown): string {
   let s = value === null || value === undefined ? '' : String(value);
   // CSV formula-injection defence: a cell whose first character is = + - @ (or a
   // leading tab/CR) is evaluated as a formula by Excel/LibreOffice. Prefix such values

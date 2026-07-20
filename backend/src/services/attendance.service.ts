@@ -1,4 +1,6 @@
 import { prisma } from '../config/prisma';
+import { AppError } from '../utils/response';
+import { auditContext } from '../utils/auditContext';
 import { parseExcel } from '../utils/excelExporter';
 import { recordEvent } from './auditTrail.service';
 import type { MarkAttendanceInput } from '@izlearn/shared';
@@ -24,18 +26,37 @@ async function upsertAttendance(
   status: 'PRESENT' | 'ABSENT',
   markedBy: string,
   method: 'MANUAL' | 'EXCEL_UPLOAD' | 'ONLINE_AUTO',
+  reasonForChange?: string,
 ) {
   const existing = await prisma.attendance.findFirst({ where: { scheduleId, userId, isDeleted: false } });
   if (existing) {
+    // ATT-2: correcting an already-marked record (a status change) is a controlled GxP
+    // change — require a reason and record it in the audit trail. First-time marking and
+    // idempotent re-saves (same status) need none.
+    if (existing.status !== status) {
+      if (!reasonForChange || !reasonForChange.trim()) {
+        throw AppError.badRequest('A reason for change is required to correct an already-marked attendance record.');
+      }
+      auditContext.setReason(reasonForChange.trim());
+    }
     return prisma.attendance.update({ where: { id: existing.id }, data: { status, markedBy, method } });
   }
   return prisma.attendance.create({ data: { scheduleId, userId, status, markedBy, method, createdBy: markedBy } });
 }
 
 export async function markAttendance(input: MarkAttendanceInput, markedBy: string) {
+  // L-S5: only accept attendance for users actually enrolled as trainees on this schedule.
+  const enrolled = new Set(
+    (await prisma.trainingAssignment.findMany({ where: { scheduleId: input.scheduleId, isDeleted: false }, select: { userId: true } })).map(
+      (a) => a.userId,
+    ),
+  );
+  const stray = input.entries.find((e) => !enrolled.has(e.userId));
+  if (stray) throw AppError.badRequest('Attendance can only be marked for trainees enrolled in this schedule.');
+
   const results = [];
   for (const e of input.entries) {
-    results.push(await upsertAttendance(input.scheduleId, e.userId, e.status, markedBy, 'MANUAL'));
+    results.push(await upsertAttendance(input.scheduleId, e.userId, e.status, markedBy, 'MANUAL', input.reasonForChange));
   }
   return results;
 }

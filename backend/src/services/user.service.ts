@@ -532,15 +532,15 @@ export async function updateUser(id: string, input: UpdateUserInput, req: Reques
 /** Best-effort: create a DRAFT JD from the master template for the user's primary role. */
 async function provisionJdFromTemplate(userId: string, departmentId: string, createdBy: string) {
   try {
-    const primaryRole = await prisma.userRole.findFirst({
-      where: { userId, isActive: true },
-      orderBy: { assignedAt: 'desc' },
-    });
-    if (!primaryRole) return;
+    // L-J7: JD templates are keyed by FUNCTIONAL ROLE (designationId), which is what
+    // createFromTemplate actually uses — gate on that, not on an active RBAC userRole, so
+    // a transferred user with a functional role but no active userRole still gets a draft JD.
+    const user = await prisma.user.findFirst({ where: { id: userId }, select: { designationId: true } });
+    if (!user?.designationId) return;
     const { createFromTemplate } = await import('./jobDescription.service');
-    await createFromTemplate(userId, departmentId, primaryRole.roleId, createdBy);
+    await createFromTemplate(userId, departmentId, user.designationId, createdBy);
   } catch {
-    // No template for this department+role — nothing to provision. Transfer still succeeds.
+    // No template for this department+functional role — nothing to provision. Transfer still succeeds.
   }
 }
 
@@ -805,9 +805,14 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
       ? { OR: [{ fullName: { contains: q.search, mode: 'insensitive' } }, { employeeId: { contains: q.search, mode: 'insensitive' } }] }
       : {}),
   };
-  const users = await prisma.user.findMany({ where, orderBy: { fullName: 'asc' } });
+  // L-J4: paginate server-side so an org-wide view never loads the whole organisation
+  // into memory at once. The per-user aggregations below are scoped to this page's ids.
+  const [total, users] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.findMany({ where, orderBy: { fullName: 'asc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+  ]);
   const ids = users.map((u) => u.id);
-  if (!ids.length) return { data: [], total: 0, page: q.page, pageSize: q.pageSize };
+  if (!ids.length) return { data: [], total, page: q.page, pageSize: q.pageSize };
 
   const [assignments, jds, cvs, certs, tnis, passedAttempts] = await Promise.all([
     prisma.trainingAssignment.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'DEFERRED' } } }),
@@ -860,7 +865,7 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
       tniPending: tniPending.get(u.id) ?? 0,
     };
   });
-  return { data, total: data.length, page: q.page, pageSize: q.pageSize };
+  return { data, total, page: q.page, pageSize: q.pageSize };
 }
 
 /**
