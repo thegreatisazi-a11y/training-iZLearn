@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Download, Printer } from 'lucide-react';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Input, Field } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuthStore } from '@/store/authStore';
 import { svc, downloadBlob } from '@/services';
+import { printPdfBlob } from '@/lib/print';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 
@@ -85,10 +86,17 @@ export default function ReportsPage() {
     mutationFn: async ({ format, print }: { format: string; print?: boolean }) => {
       setExportPct(0);
       const res = await svc.reports.export(type, { ...filters(), format, ...(print ? { print: true } : {}) }, setExportPct);
-      return { blob: res.data as Blob, format };
+      return { blob: res.data as Blob, format, print: !!print };
     },
     onSettled: () => setExportPct(null),
-    onSuccess: ({ blob, format }) => downloadBlob(blob, `${type}.${EXT[format] ?? format}`),
+    onSuccess: ({ blob, format, print }) => {
+      // Print opens the PDF in the browser's print dialog; every other format downloads a file.
+      if (print) {
+        if (!printPdfBlob(blob)) toast.error('Please allow pop-ups to print this report.');
+      } else {
+        downloadBlob(blob, `${type}.${EXT[format] ?? format}`);
+      }
+    },
     onError: (e) => toast.error(apiError(e)),
   });
 
@@ -152,23 +160,17 @@ export default function ReportsPage() {
               <Button onClick={() => run.mutate()} disabled={!type || run.isPending}>
                 {run.isPending ? 'Running…' : 'Run'}
               </Button>
-              {canExport && (
-                <>
-                  <Button variant="outline" disabled={!type || exportMutation.isPending} onClick={() => exportMutation.mutate({ format: 'csv' })}>
-                    <Download className="h-4 w-4" /> CSV
-                  </Button>
-                  <Button variant="outline" disabled={!type || exportMutation.isPending} onClick={() => exportMutation.mutate({ format: 'xlsx' })}>
-                    <Download className="h-4 w-4" /> Excel
-                  </Button>
-                  <Button variant="outline" disabled={!type || exportMutation.isPending} onClick={() => exportMutation.mutate({ format: 'pdf' })}>
-                    <Download className="h-4 w-4" /> PDF
-                  </Button>
-                </>
-              )}
-              {canPrint && (
-                <Button variant="outline" disabled={!type || exportMutation.isPending} onClick={() => exportMutation.mutate({ format: 'pdf', print: true })}>
-                  <Printer className="h-4 w-4" /> Print
-                </Button>
+              {(canExport || canPrint) && (
+                <ExportMenu
+                  disabled={!type}
+                  busy={exportMutation.isPending}
+                  formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                  onSelect={(f) =>
+                    exportMutation.mutate(
+                      f === 'csv' ? { format: 'csv' } : f === 'excel' ? { format: 'xlsx' } : f === 'pdf' ? { format: 'pdf' } : { format: 'pdf', print: true },
+                    )
+                  }
+                />
               )}
               {exportMutation.isPending && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}
             </div>

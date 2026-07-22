@@ -18,6 +18,7 @@ function parseFilters(src: Record<string, unknown>) {
     action: src.action ? String(src.action) : undefined,
     entityType: src.entityType ? String(src.entityType) : undefined,
     entityId: src.entityId ? String(src.entityId) : undefined,
+    search: src.search ? String(src.search) : undefined,
     page: src.page ? parseInt(String(src.page), 10) : 1,
     pageSize: src.pageSize ? parseInt(String(src.pageSize), 10) : 50,
   };

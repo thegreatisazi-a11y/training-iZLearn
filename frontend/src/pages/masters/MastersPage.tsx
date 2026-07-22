@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -65,7 +65,7 @@ function statusWantsInactive(status: StatusFilter): boolean {
 }
 
 /** Filter the currently loaded rows by free-text (displayName/code/name) and status. */
-function filterMasterRows<T extends { isActive: boolean; displayName?: string; code?: string; name?: string }>(
+function filterMasterRows<T extends { isActive: boolean; displayName?: string; code?: string; name?: string; description?: string }>(
   rows: T[],
   search: string,
   status: StatusFilter,
@@ -75,7 +75,8 @@ function filterMasterRows<T extends { isActive: boolean; displayName?: string; c
     if (status === 'active' && !r.isActive) return false;
     if (status === 'inactive' && r.isActive) return false;
     if (!q) return true;
-    return (r.displayName ?? '').toLowerCase().includes(q) || (r.code ?? '').toLowerCase().includes(q) || (r.name ?? '').toLowerCase().includes(q);
+    // Search across all visible text columns of the master row (name/code + description).
+    return [r.displayName, r.code, r.name, r.description].some((v) => (v ?? '').toLowerCase().includes(q));
   });
 }
 
@@ -87,6 +88,7 @@ function MasterToolbar({
   onStatus,
   shown,
   total,
+  action,
 }: {
   search: string;
   onSearch: (v: string) => void;
@@ -94,6 +96,8 @@ function MasterToolbar({
   onStatus: (v: StatusFilter) => void;
   shown: number;
   total: number;
+  /** Right-aligned action (e.g. the "Add …" button), kept on the same row as the search. */
+  action?: ReactNode;
 }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -102,6 +106,7 @@ function MasterToolbar({
       <span className="text-sm text-slate-500">
         {shown} of {total}
       </span>
+      {action && <div className="ml-auto">{action}</div>}
     </div>
   );
 }
@@ -173,14 +178,19 @@ function LocationsTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-3 flex justify-end">
+      <MasterToolbar
+        search={search}
+        onSearch={setSearch}
+        status={status}
+        onStatus={setStatus}
+        shown={rows.length}
+        total={allRows.length}
+        action={canWrite && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Add Location
           </Button>
-        </div>
-      )}
-      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
+        )}
+      />
       <DataTable
         columns={columns}
         rows={rows}
@@ -196,12 +206,13 @@ function LocationsTab({ canWrite }: { canWrite: boolean }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add Location"
+        onSubmit={() => { if (!createMutation.isPending && form.name) createMutation.mutate({ name: form.name, description: form.description || undefined }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>
               Cancel
             </Button>
-            <Button disabled={createMutation.isPending || !form.name} onClick={() => createMutation.mutate({ name: form.name, description: form.description || undefined })}>
+            <Button type="submit" disabled={createMutation.isPending || !form.name}>
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
@@ -219,12 +230,13 @@ function LocationsTab({ canWrite }: { canWrite: boolean }) {
         open={!!edit}
         onClose={() => setEdit(null)}
         title={`Edit Location — ${edit?.name ?? ''}`}
+        onSubmit={() => { if (editForm.name && edit) setReasonAction({ type: 'edit', row: edit }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEdit(null)}>
+            <Button type="button" variant="outline" onClick={() => setEdit(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.name} onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}>
+            <Button type="submit" disabled={!editForm.name}>
               Save…
             </Button>
           </>
@@ -333,14 +345,19 @@ function DepartmentsTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-3 flex justify-end">
+      <MasterToolbar
+        search={search}
+        onSearch={setSearch}
+        status={status}
+        onStatus={setStatus}
+        shown={rows.length}
+        total={allRows.length}
+        action={canWrite && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Add Department
           </Button>
-        </div>
-      )}
-      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
+        )}
+      />
       <DataTable
         columns={columns}
         rows={rows}
@@ -356,12 +373,13 @@ function DepartmentsTab({ canWrite }: { canWrite: boolean }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add Department"
+        onSubmit={() => { if (!createMutation.isPending && form.name && form.locationId) createMutation.mutate({ name: form.name, locationId: form.locationId }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>
               Cancel
             </Button>
-            <Button disabled={createMutation.isPending || !form.name || !form.locationId} onClick={() => createMutation.mutate({ name: form.name, locationId: form.locationId })}>
+            <Button type="submit" disabled={createMutation.isPending || !form.name || !form.locationId}>
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
@@ -379,12 +397,13 @@ function DepartmentsTab({ canWrite }: { canWrite: boolean }) {
         open={!!edit}
         onClose={() => setEdit(null)}
         title={`Edit Department — ${edit?.name ?? ''}`}
+        onSubmit={() => { if (editForm.name && editForm.locationId && edit) setReasonAction({ type: 'edit', row: edit }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEdit(null)}>
+            <Button type="button" variant="outline" onClick={() => setEdit(null)}>
               Cancel
             </Button>
-            <Button disabled={!editForm.name || !editForm.locationId} onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}>
+            <Button type="submit" disabled={!editForm.name || !editForm.locationId}>
               Save…
             </Button>
           </>
@@ -486,14 +505,19 @@ function TrainingTypesTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-3 flex justify-end">
+      <MasterToolbar
+        search={search}
+        onSearch={setSearch}
+        status={status}
+        onStatus={setStatus}
+        shown={rows.length}
+        total={allRows.length}
+        action={canWrite && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Add Training Type
           </Button>
-        </div>
-      )}
-      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
+        )}
+      />
       <DataTable
         columns={columns}
         rows={rows}
@@ -509,13 +533,11 @@ function TrainingTypesTab({ canWrite }: { canWrite: boolean }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add Training Type"
+        onSubmit={() => { if (!createMutation.isPending && form.displayName) createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
-            <Button
-              disabled={createMutation.isPending || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
-            >
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
+            <Button type="submit" disabled={createMutation.isPending || !form.displayName}>
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
@@ -534,13 +556,11 @@ function TrainingTypesTab({ canWrite }: { canWrite: boolean }) {
         open={!!edit}
         onClose={() => setEdit(null)}
         title={`Edit Training Type — ${edit?.displayName ?? ''}`}
+        onSubmit={() => { if (editForm.displayName && edit) setReasonAction({ type: 'edit', row: edit }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              disabled={!editForm.displayName}
-              onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}
-            >
+            <Button type="button" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+            <Button type="submit" disabled={!editForm.displayName}>
               Save…
             </Button>
           </>
@@ -641,14 +661,19 @@ function DocumentTypesTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-3 flex justify-end">
+      <MasterToolbar
+        search={search}
+        onSearch={setSearch}
+        status={status}
+        onStatus={setStatus}
+        shown={rows.length}
+        total={allRows.length}
+        action={canWrite && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Add Document Type
           </Button>
-        </div>
-      )}
-      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
+        )}
+      />
       <DataTable
         columns={columns}
         rows={rows}
@@ -664,13 +689,11 @@ function DocumentTypesTab({ canWrite }: { canWrite: boolean }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add Document Type"
+        onSubmit={() => { if (!createMutation.isPending && form.displayName) createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
-            <Button
-              disabled={createMutation.isPending || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
-            >
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
+            <Button type="submit" disabled={createMutation.isPending || !form.displayName}>
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
@@ -689,13 +712,11 @@ function DocumentTypesTab({ canWrite }: { canWrite: boolean }) {
         open={!!edit}
         onClose={() => setEdit(null)}
         title={`Edit Document Type — ${edit?.displayName ?? ''}`}
+        onSubmit={() => { if (editForm.displayName && edit) setReasonAction({ type: 'edit', row: edit }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-            <Button
-              disabled={!editForm.displayName}
-              onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}
-            >
+            <Button type="button" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+            <Button type="submit" disabled={!editForm.displayName}>
               Save…
             </Button>
           </>
@@ -796,14 +817,19 @@ function DesignationsTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      {canWrite && (
-        <div className="mb-3 flex justify-end">
+      <MasterToolbar
+        search={search}
+        onSearch={setSearch}
+        status={status}
+        onStatus={setStatus}
+        shown={rows.length}
+        total={allRows.length}
+        action={canWrite && (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4" /> Add Functional Role
           </Button>
-        </div>
-      )}
-      <MasterToolbar search={search} onSearch={setSearch} status={status} onStatus={setStatus} shown={rows.length} total={allRows.length} />
+        )}
+      />
       <DataTable
         columns={columns}
         rows={rows}
@@ -819,13 +845,11 @@ function DesignationsTab({ canWrite }: { canWrite: boolean }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Add Functional Role"
+        onSubmit={() => { if (!createMutation.isPending && form.displayName) createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
-            <Button
-              disabled={createMutation.isPending || !form.displayName}
-              onClick={() => createMutation.mutate({ code: form.displayName.trim().toUpperCase().replace(/\s+/g, '_'), displayName: form.displayName, description: form.description || undefined })}
-            >
+            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>Cancel</Button>
+            <Button type="submit" disabled={createMutation.isPending || !form.displayName}>
               {createMutation.isPending ? 'Saving…' : 'Create'}
             </Button>
           </>
@@ -844,10 +868,11 @@ function DesignationsTab({ canWrite }: { canWrite: boolean }) {
         open={!!edit}
         onClose={() => setEdit(null)}
         title={`Edit Functional Role — ${edit?.displayName ?? ''}`}
+        onSubmit={() => { if (editForm.displayName && edit) setReasonAction({ type: 'edit', row: edit }); }}
         footer={
           <>
-            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
-            <Button disabled={!editForm.displayName} onClick={() => edit && setReasonAction({ type: 'edit', row: edit })}>
+            <Button type="button" variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+            <Button type="submit" disabled={!editForm.displayName}>
               Save…
             </Button>
           </>

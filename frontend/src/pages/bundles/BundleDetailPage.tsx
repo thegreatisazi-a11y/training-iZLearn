@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BookOpen, Building2, Shield, Users, BadgeCheck, Pencil, Send, Archive, RotateCcw, Download, Printer } from 'lucide-react';
+import { ArrowLeft, BookOpen, Building2, Shield, Users, BadgeCheck, Pencil, Send, Archive, RotateCcw } from 'lucide-react';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
@@ -156,7 +157,7 @@ export default function BundleDetailPage() {
 
   const topicColumns: Column<BundleTopic>[] = [
     { key: 'num', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber || r.topicCode}</span> },
-    { key: 'title', header: 'Topic', render: (r) => <button className="text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>{r.title}</button> },
+    { key: 'title', header: 'Topic', render: (r) => <button className="text-left text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>{r.title}</button> },
     { key: 'trainingType', header: 'Type', render: (r) => r.trainingType.replace(/_/g, ' ') },
     { key: 'currentVersion', header: 'Version', render: (r) => `v${r.currentVersion}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status}</Badge> },
@@ -179,8 +180,12 @@ export default function BundleDetailPage() {
             {canArchive && (b.isActive
               ? <Button variant="outline" onClick={() => setArchiveOpen(true)}><Archive className="h-4 w-4" /> Archive</Button>
               : <Button variant="outline" onClick={() => setArchiveOpen(true)}><RotateCcw className="h-4 w-4" /> Restore</Button>)}
-            {canExport && <Button variant="outline" onClick={exportCsv}><Download className="h-4 w-4" /> Export</Button>}
-            {canPrint && <Button variant="outline" onClick={printDetail}><Printer className="h-4 w-4" /> Print</Button>}
+            {(canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => (f === 'csv' ? exportCsv() : printDetail())}
+              />
+            )}
           </div>
         }
       />

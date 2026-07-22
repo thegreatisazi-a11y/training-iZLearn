@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Send, Pencil, Archive, RotateCcw, Download, Printer } from 'lucide-react';
+import { Plus, Send, Pencil, Archive, RotateCcw, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
@@ -188,8 +189,14 @@ export default function BundlesPage() {
         description="Group training topics and assign them to departments, designations and users together."
         actions={
           <div className="flex flex-wrap gap-2">
-            {canExport && <Button variant="outline" onClick={() => svc.bundles.exportCsv({ search: search || undefined }).catch((e) => toast.error(apiError(e)))}><Download className="h-4 w-4" /> Export</Button>}
-            {canPrint && <Button variant="outline" onClick={printList}><Printer className="h-4 w-4" /> Print</Button>}
+            {(canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) =>
+                  f === 'csv' ? svc.bundles.exportCsv({ search: search || undefined }).catch((e) => toast.error(apiError(e))) : printList()
+                }
+              />
+            )}
             {canCreate && (
               <Button onClick={() => { setForm(EMPTY_BUNDLE_FORM); setCreateOpen(true); }}>
                 <Plus className="h-4 w-4" /> New Bundle

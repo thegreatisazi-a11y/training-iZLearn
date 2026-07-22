@@ -15,7 +15,14 @@ export async function listAnnouncements(q: PaginationQuery) {
   const where: Prisma.AnnouncementWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
-    ...(q.search ? { title: { contains: q.search, mode: 'insensitive' } } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { title: { contains: q.search, mode: 'insensitive' } },
+            { content: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
   const [data, total] = await Promise.all([
     prisma.announcement.findMany({

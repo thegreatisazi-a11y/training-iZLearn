@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useOnEscape } from '@/hooks/useOnEscape';
 import { ChevronRight, UserPlus, KeyRound, Pencil, UserX } from 'lucide-react';
 import { userType as userTypeEnum } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -249,6 +250,7 @@ export default function MyTeamPage() {
   // #5: reset a direct report's password (e-signed); shows the temporary password once.
   const [resetTarget, setResetTarget] = useState<TeamMember | null>(null);
   const [resetResult, setResetResult] = useState<{ username: string; tempPassword: string } | null>(null);
+  useOnEscape(!!resetResult, () => setResetResult(null));
 
   const { data, isLoading } = useQuery({
     queryKey: ['my-team', search],

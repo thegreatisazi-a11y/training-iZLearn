@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Download } from 'lucide-react';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Card, CardContent } from '@/components/ui/card';
@@ -248,14 +248,11 @@ export default function AuditTrailPage() {
       }
     };
   }, [topicsForNames.data, rolesForNames.data, frForNames.data, userNameById]);
-  // CR-10: let the user pick the export format. Excel/CSV are generated server-side
-  // with no browser dependency; PDF needs headless Chrome and may be unavailable.
-  const [format, setFormat] = useState<'xlsx' | 'csv' | 'pdf'>('xlsx');
   // Item 7: live export progress percentage.
   const [exportPct, setExportPct] = useState<number | null>(null);
 
   // Applied filters (drive the query); the form mutates draft state then commits via Search.
-  const [filters, setFilters] = useState({ from: '', to: '', userId: '', action: '', entityType: '' });
+  const [filters, setFilters] = useState({ from: '', to: '', userId: '', action: '', entityType: '', search: '' });
   const [draft, setDraft] = useState(filters);
 
   const { data, isLoading } = useQuery({
@@ -269,29 +266,31 @@ export default function AuditTrailPage() {
         userId: filters.userId || undefined,
         action: filters.action || undefined,
         entityType: filters.entityType || undefined,
+        search: filters.search || undefined,
       }),
   });
 
   const exportMutation = useMutation({
     // Item 6: audit-trail export no longer requires an e-signature.
-    mutationFn: async () => {
+    mutationFn: async (fmt: 'xlsx' | 'csv' | 'pdf') => {
       setExportPct(0);
       const res = await svc.audit.export(
-        format,
+        fmt,
         {
           from: filters.from || undefined,
           to: filters.to || undefined,
           userId: filters.userId || undefined,
           action: filters.action || undefined,
           entityType: filters.entityType || undefined,
+          search: filters.search || undefined,
         },
         setExportPct,
       );
-      return res.data as Blob;
+      return { blob: res.data as Blob, fmt };
     },
     onSettled: () => setExportPct(null),
-    onSuccess: (blob) => {
-      downloadBlob(blob, `audit-trail.${format}`);
+    onSuccess: ({ blob, fmt }) => {
+      downloadBlob(blob, `audit-trail.${fmt}`);
       toast.success('Audit trail exported.');
     },
     onError: async (e) => {
@@ -353,46 +352,50 @@ export default function AuditTrailPage() {
         description="Immutable record of all system actions (21 CFR Part 11)."
         actions={
           canExport && (
-            <div className="flex items-center gap-2">
-              <Select
-                className="w-32"
-                value={format}
-                onChange={(e) => setFormat(e.target.value as 'xlsx' | 'csv' | 'pdf')}
-                options={[
-                  { value: 'xlsx', label: 'Excel (.xlsx)' },
-                  { value: 'csv', label: 'CSV' },
-                  { value: 'pdf', label: 'PDF' },
-                ]}
-              />
-              <Button variant="outline" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
-                <Download className="h-4 w-4" />{' '}
-                {exportMutation.isPending ? `Exporting… ${exportPct ?? 0}%` : 'Export'}
-              </Button>
-            </div>
+            <ExportMenu
+              busy={exportMutation.isPending}
+              formats={['csv', 'excel', 'pdf']}
+              onSelect={(f) => exportMutation.mutate(f === 'excel' ? 'xlsx' : (f as 'csv' | 'pdf'))}
+            />
           )
         }
       />
 
       <Card className="mb-6">
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            <Field label="From">
-              <Input type="date" value={draft.from} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} />
-            </Field>
-            <Field label="To">
-              <Input type="date" value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} />
-            </Field>
-            <Field label="Action">
-              <Select options={ACTIONS} value={draft.action} onChange={(e) => setDraft((d) => ({ ...d, action: e.target.value }))} placeholder="Any action" />
-            </Field>
-            <Field label="User">
-              <Select options={userOpts} value={draft.userId} onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))} placeholder="All users" />
-            </Field>
-            <Field label="Entity type">
-              <Input value={draft.entityType} onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))} placeholder="Optional" />
-            </Field>
-          </div>
-          <Button onClick={applyFilters}>Search</Button>
+          {/* Wrapped in a form so pressing Enter in any field applies the filters. */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              applyFilters();
+            }}
+          >
+            <div className="grid gap-4 md:grid-cols-3">
+              <Field label="From">
+                <Input type="date" value={draft.from} onChange={(e) => setDraft((d) => ({ ...d, from: e.target.value }))} />
+              </Field>
+              <Field label="To">
+                <Input type="date" value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} />
+              </Field>
+              <Field label="Action">
+                <Select options={ACTIONS} value={draft.action} onChange={(e) => setDraft((d) => ({ ...d, action: e.target.value }))} placeholder="Any action" />
+              </Field>
+              <Field label="User">
+                <Select options={userOpts} value={draft.userId} onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))} placeholder="All users" />
+              </Field>
+              <Field label="Entity type">
+                <Input value={draft.entityType} onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))} placeholder="Optional" />
+              </Field>
+              <Field label="Search">
+                <Input
+                  value={draft.search}
+                  onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
+                  placeholder="User, action, record type, reason, IP…"
+                />
+              </Field>
+            </div>
+            <Button type="submit">Search</Button>
+          </form>
         </CardContent>
       </Card>
 

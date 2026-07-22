@@ -425,7 +425,14 @@ export async function listMaterials(
     ...(q.onlyCurrent ? { isCurrentVersion: true, isObsolete: false } : {}),
     ...(q.topicIds ? { topicId: { in: q.topicIds } } : q.topicId ? { topicId: q.topicId } : {}),
     ...(q.fileType ? { fileType: q.fileType } : {}),
-    ...(q.search ? { originalFileName: { contains: q.search, mode: 'insensitive' } } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { originalFileName: { contains: q.search, mode: 'insensitive' } },
+            { fileType: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
   const [data, total] = await Promise.all([
     prisma.trainingMaterial.findMany({

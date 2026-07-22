@@ -57,6 +57,8 @@ export async function listTopics(q: PaginationQuery & { status?: string }, canMa
             { title: { contains: q.search, mode: 'insensitive' } },
             { topicCode: { contains: q.search, mode: 'insensitive' } },
             { topicNumber: { contains: q.search, mode: 'insensitive' } },
+            { sopNumber: { contains: q.search, mode: 'insensitive' } },
+            { description: { contains: q.search, mode: 'insensitive' } },
           ],
         }
       : {}),

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Eye, Pencil, Archive, Download, Printer, Trash2, RotateCcw } from 'lucide-react';
 import { trainingType } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
@@ -230,7 +231,7 @@ export default function TopicsPage() {
       key: 'title',
       header: 'Title',
       render: (r) => (
-        <button className="font-medium text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>
+        <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>
           {r.title}
         </button>
       ),
@@ -274,8 +275,16 @@ export default function TopicsPage() {
         description="Controlled course catalogue"
         actions={
           <div className="flex flex-wrap gap-2">
-            {canExport && <Button variant="outline" onClick={() => svc.topics.exportCsv({ status: statusFilter, search: search || undefined }).catch((e) => toast.error(apiError(e)))}><Download className="h-4 w-4" /> Export</Button>}
-            {canPrint && <Button variant="outline" onClick={printList}><Printer className="h-4 w-4" /> Print</Button>}
+            {(canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) =>
+                  f === 'csv'
+                    ? svc.topics.exportCsv({ status: statusFilter, search: search || undefined }).catch((e) => toast.error(apiError(e)))
+                    : printList()
+                }
+              />
+            )}
             {canCreate && (
               <Button onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" /> New Topic

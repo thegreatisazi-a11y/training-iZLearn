@@ -48,6 +48,9 @@ function RequirementMatrix() {
   const [assignLater, setAssignLater] = useState(false);
   const [activateOn, setActivateOn] = useState('');
   const [q, setQ] = useState('');
+  // Filter the matrix down to the topics Required for one functional role — answers
+  // "which courses is this role assigned?" (the reverse of the per-topic view).
+  const [roleFilter, setRoleFilter] = useState('');
   // J1: permission-style layout — each topic is an expandable card of per-role toggles.
   const [openTopics, setOpenTopics] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
@@ -86,9 +89,13 @@ function RequirementMatrix() {
   const reqSet = new Set(data.cells.filter((c) => c.isRequired).map((c) => `${c.designationId}|${c.topicId}`));
   const isRequired = (d: string, t: string) => reqSet.has(`${d}|${t}`);
   const term = q.trim().toLowerCase();
-  const topics = term
-    ? data.topics.filter((t) => t.title.toLowerCase().includes(term) || (t.topicNumber || t.topicCode || '').toLowerCase().includes(term))
-    : data.topics;
+  const topics = data.topics.filter((t) => {
+    if (term && !(t.title.toLowerCase().includes(term) || (t.topicNumber || t.topicCode || '').toLowerCase().includes(term))) return false;
+    if (roleFilter && !isRequired(roleFilter, t.id)) return false;
+    return true;
+  });
+  const roleFilterOptions = [{ value: '', label: 'All functional roles' }, ...data.designations.map((d) => ({ value: d.id, label: d.displayName }))];
+  const roleFilterName = data.designations.find((d) => d.id === roleFilter)?.displayName ?? '';
   const rowCount = (t: string) => data.designations.filter((d) => isRequired(d.id, t)).length;
   const busy = setMut.isPending || bulkMut.isPending;
   const setRow = (topicId: string, on: boolean) => bulkMut.mutate(data.designations.map((d) => ({ designationId: d.id, topicId, isRequired: on })));
@@ -128,11 +135,19 @@ function RequirementMatrix() {
         )}
       </div>
 
-      {/* Toolbar: search + legend */}
+      {/* Toolbar: search + role filter + legend */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
-          <Search className="h-4 w-4 text-slate-400" />
-          <input className="bg-transparent text-sm outline-none" placeholder="Filter topics…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
+            <Search className="h-4 w-4 text-slate-400" />
+            <input className="bg-transparent text-sm outline-none" placeholder="Filter topics…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <Select className="w-56" options={roleFilterOptions} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} />
+          {roleFilter && (
+            <span className="text-xs text-slate-500">
+              {topics.length} course(s) required for <span className="font-medium text-slate-700">{roleFilterName}</span>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1"><span className="inline-flex h-4 w-4 items-center justify-center rounded bg-green-100 text-green-700"><Check className="h-3 w-3" /></span> Required</span>
@@ -144,6 +159,12 @@ function RequirementMatrix() {
         <p className="py-8 text-center text-sm text-slate-500">No Functional Roles defined. Add them under Master Setup → Functional Roles first.</p>
       ) : noTopics ? (
         <p className="py-8 text-center text-sm text-slate-500">No published topics yet.</p>
+      ) : topics.length === 0 ? (
+        <p className="py-8 text-center text-sm text-slate-500">
+          {roleFilter
+            ? `No courses are marked Required for ${roleFilterName} yet.`
+            : 'No topics match your filter.'}
+        </p>
       ) : (
         // J1: permission-matrix style — each topic is a card; expand to toggle Required per functional role.
         <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
@@ -443,12 +464,13 @@ export default function TNIPage() {
         open={!!decision && decision.type === 'APPROVE'}
         onClose={() => setDecision(null)}
         title="Approve TNI"
+        onSubmit={() => setSignOpen(true)}
         footer={
           <>
-            <Button variant="outline" onClick={() => setDecision(null)}>
+            <Button type="button" variant="outline" onClick={() => setDecision(null)}>
               Cancel
             </Button>
-            <Button onClick={() => setSignOpen(true)}>Continue to sign</Button>
+            <Button type="submit">Continue to sign</Button>
           </>
         }
       >

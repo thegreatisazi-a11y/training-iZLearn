@@ -377,7 +377,7 @@ export default function TeamMemberPage() {
               disabled={!cvData?.cv}
               onClick={() => cvData?.header && printCurriculumVitae(cvData.header, cvData.cv)}
             >
-              <Printer className="h-4 w-4" /> Download CV
+              <Printer className="h-4 w-4" /> Print CV
             </Button>
             <Button onClick={() => setCvOpen(false)}>Close</Button>
           </>

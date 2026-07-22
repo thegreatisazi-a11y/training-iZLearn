@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useOnEscape } from '@/hooks/useOnEscape';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, Upload, ClipboardList, Printer, Download } from 'lucide-react';
+import { UserPlus, Upload, ClipboardList } from 'lucide-react';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { userType as userTypeEnum } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -214,6 +216,7 @@ export default function UsersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [usernameTouched, setUsernameTouched] = useState(false);
   const [resetPwdDialog, setResetPwdDialog] = useState<{ username: string; tempPassword: string } | null>(null);
+  useOnEscape(!!resetPwdDialog, () => setResetPwdDialog(null));
 
   // CR-12: read-only View dialog
   const [viewUser, setViewUser] = useState<UserRow | null>(null);
@@ -482,22 +485,14 @@ export default function UsersPage() {
                 </Button>
               </Link>
             )}
-            {canPrint && (
-              <Button variant="outline" onClick={handlePrint}>
-                <Printer className="h-4 w-4" /> Print
-              </Button>
+            {(canExport || canPrint) && (
+              <ExportMenu
+                busy={exporting}
+                formats={[...(canExport ? (['csv', 'excel'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => (f === 'csv' ? handleExport('csv') : f === 'excel' ? handleExport('xlsx') : handlePrint())}
+              />
             )}
-            {canExport && (
-              <>
-                <Button variant="outline" disabled={exporting} onClick={() => handleExport('xlsx')}>
-                  <Download className="h-4 w-4" /> Excel
-                </Button>
-                <Button variant="outline" disabled={exporting} onClick={() => handleExport('csv')}>
-                  <Download className="h-4 w-4" /> CSV
-                </Button>
-                {exporting && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}
-              </>
-            )}
+            {exporting && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}
             {canCreateRequest && (
               <Button onClick={() => setCreateOpen(true)}>
                 <UserPlus className="h-4 w-4" /> New User Request
@@ -510,7 +505,7 @@ export default function UsersPage() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input
           className="max-w-xs"
-          placeholder="Search users…"
+          placeholder="Search name, ID, email, type, role…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);

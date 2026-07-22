@@ -60,7 +60,8 @@ export default function TeamCVsPage() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return allRows.filter((r) => {
-      if (q && !(`${r.fullName} ${r.employeeId}`.toLowerCase().includes(q))) return false;
+      // Search across all visible text columns (name, employee id, functional role, department).
+      if (q && !`${r.fullName} ${r.employeeId} ${r.functionalRole ?? ''} ${r.departmentName ?? ''}`.toLowerCase().includes(q)) return false;
       if (deptFilter && r.departmentName !== deptFilter) return false;
       if (frFilter && r.functionalRole !== frFilter) return false;
       if (cvFilter === 'yes' && !r.hasCv) return false;

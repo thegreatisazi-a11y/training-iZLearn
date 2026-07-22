@@ -45,7 +45,14 @@ export async function listBundles(q: PaginationQuery) {
   const where: Prisma.TopicBundleWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
-    ...(q.search ? { name: { contains: q.search, mode: 'insensitive' } } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { name: { contains: q.search, mode: 'insensitive' } },
+            { description: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
   const [rows, total] = await Promise.all([
     prisma.topicBundle.findMany({

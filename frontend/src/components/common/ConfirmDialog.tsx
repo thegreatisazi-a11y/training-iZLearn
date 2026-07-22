@@ -45,12 +45,15 @@ export function ConfirmDialog({
       open={open}
       onClose={onClose}
       title={title}
+      // Enter-to-confirm: with a single-line Input as children, Enter submits; a Textarea keeps
+      // Enter as newline (no accidental confirm); message-only dialogs are unaffected.
+      onSubmit={() => { if (!loading && !disabled) go(); }}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={go} disabled={loading || disabled}>
+          <Button type="submit" variant={danger ? 'danger' : 'primary'} disabled={loading || disabled}>
             {loading ? 'Working…' : confirmLabel}
           </Button>
         </>

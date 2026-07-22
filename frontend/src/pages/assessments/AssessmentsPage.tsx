@@ -347,7 +347,7 @@ export default function AssessmentsPage() {
               View Test
             </Button>
             <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id)}>
-              Download
+              {downloadingId === r.id ? 'Preparing…' : 'Print'}
             </Button>
           </div>
         ) : null,
@@ -372,7 +372,7 @@ export default function AssessmentsPage() {
             View Test
           </Button>
           <Button size="sm" variant="outline" disabled={downloadingId === r.id} onClick={() => downloadReview(r.id)}>
-            Download
+            {downloadingId === r.id ? 'Preparing…' : 'Print'}
           </Button>
         </div>
       ),

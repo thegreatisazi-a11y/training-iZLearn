@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useOnEscape } from '@/hooks/useOnEscape';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
@@ -31,10 +33,12 @@ export default function UserRequestsPage() {
   const canApprove = useAuthStore((s) => s.hasPermission)('userRequests', 'approve');
 
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
   const [decision, setDecision] = useState<{ open: boolean; kind: Decision; req?: RequestRow }>({ open: false, kind: 'APPROVE' });
   const [createdUser, setCreatedUser] = useState<{ username: string; tempPassword: string } | null>(null);
+  useOnEscape(!!createdUser, () => setCreatedUser(null));
 
-  const params = { page, pageSize: 50 };
+  const params = { page, pageSize: 50, search: search || undefined };
   const { data, isLoading } = useQuery({ queryKey: ['user-requests', params], queryFn: () => svc.users.listRequests(params) });
 
   const decideMutation = useMutation({
@@ -94,6 +98,18 @@ export default function UserRequestsPage() {
   return (
     <div>
       <PageHeader title="User Requests" description="Pending account creation requests awaiting approval." />
+
+      <div className="mb-4">
+        <Input
+          className="max-w-xs"
+          placeholder="Search name, employee ID, username…"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
 
       <DataTable
         columns={columns}

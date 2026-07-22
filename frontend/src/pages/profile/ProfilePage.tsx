@@ -108,13 +108,14 @@ function SignaturePasswordDialog({ open, onClose }: { open: boolean; onClose: ()
       open={open}
       onClose={onClose}
       title="Set Signature Password"
+      onSubmit={() => { if (!mutation.isPending && loginPassword && signaturePassword && confirmSignaturePassword && !mismatch) submit(); }}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </Button>
           <Button
-            onClick={submit}
+            type="submit"
             disabled={mutation.isPending || !loginPassword || !signaturePassword || !confirmSignaturePassword || mismatch}
           >
             {mutation.isPending ? 'Saving…' : 'Save'}

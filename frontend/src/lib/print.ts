@@ -44,6 +44,37 @@ ${bodyHtml}
   win.document.close();
 }
 
+/**
+ * Open a server-rendered PDF blob in a new tab and trigger the browser's print dialog.
+ * Unlike client-side printHtml, this keeps the server's audited "PRINT" event and the
+ * "printed by" stamp baked into the PDF. Returns false if the pop-up was blocked so the
+ * caller can surface a message. Used to make "Print" behave differently from "Download PDF".
+ */
+export function printPdfBlob(blob: Blob): boolean {
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (!win) {
+    URL.revokeObjectURL(url);
+    return false;
+  }
+  let printed = false;
+  const trigger = () => {
+    if (printed) return;
+    printed = true;
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      /* the embedded PDF viewer provides its own print control */
+    }
+  };
+  win.addEventListener('load', trigger);
+  // Fallback: some browsers don't fire load for the embedded PDF viewer.
+  setTimeout(trigger, 1500);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
+}
+
 /** Escape a string for safe insertion into the printable HTML. */
 export function escapeHtml(value: unknown): string {
   return String(value ?? '')

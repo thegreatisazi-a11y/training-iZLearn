@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserType } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
@@ -221,7 +221,15 @@ export async function createUserRequest(input: CreateUserInput, createdBy: strin
 export async function listRequests(q: PaginationQuery) {
   const where: Prisma.UserCreationRequestWhereInput = {
     isDeleted: false,
-    ...(q.search ? { fullName: { contains: q.search, mode: 'insensitive' } } : {}),
+    ...(q.search
+      ? {
+          OR: [
+            { fullName: { contains: q.search, mode: 'insensitive' } },
+            { employeeId: { contains: q.search, mode: 'insensitive' } },
+            { windowsUsername: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
   };
   const [rows, total] = await Promise.all([
     prisma.userCreationRequest.findMany({
@@ -373,21 +381,46 @@ function userScopeWhere(scope: UserListScope): Prisma.UserWhereInput {
   };
 }
 
+/**
+ * Build the search OR-clauses for the users list. Covers the plain text columns plus the
+ * two "special" columns shown in the table: Type (a UserType enum — matched by substring
+ * against the enum values, since Prisma can't `contains` an enum) and Roles (a relation —
+ * resolved to the users holding an active role whose name matches).
+ */
+async function userSearchOr(search?: string): Promise<Prisma.UserWhereInput[] | undefined> {
+  if (!search) return undefined;
+  const or: Prisma.UserWhereInput[] = [
+    { fullName: { contains: search, mode: 'insensitive' } },
+    { employeeId: { contains: search, mode: 'insensitive' } },
+    { windowsUsername: { contains: search, mode: 'insensitive' } },
+    { email: { contains: search, mode: 'insensitive' } },
+  ];
+  const q = search.toLowerCase();
+  const matchingTypes = Object.values(UserType).filter((t) => t.toLowerCase().includes(q));
+  if (matchingTypes.length) or.push({ userType: { in: matchingTypes } });
+  const roles = await prisma.role.findMany({
+    where: { roleName: { contains: search, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (roles.length) {
+    const userRoles = await prisma.userRole.findMany({
+      where: { roleId: { in: roles.map((r) => r.id) }, isActive: true },
+      select: { userId: true },
+    });
+    const userIds = Array.from(new Set(userRoles.map((ur) => ur.userId)));
+    if (userIds.length) or.push({ id: { in: userIds } });
+  }
+  return or;
+}
+
 export async function listUsers(q: PaginationQuery, scope: UserListScope = {}) {
+  const searchOr = await userSearchOr(q.search);
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
     // Department-scoped (self excluded) unless the caller has org-wide access.
     ...userScopeWhere(scope),
-    ...(q.search
-      ? {
-          OR: [
-            { fullName: { contains: q.search, mode: 'insensitive' } },
-            { employeeId: { contains: q.search, mode: 'insensitive' } },
-            { windowsUsername: { contains: q.search, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
+    ...(searchOr ? { OR: searchOr } : {}),
   };
   const [rows, total] = await Promise.all([
     prisma.user.findMany({
@@ -408,19 +441,12 @@ export async function listUsers(q: PaginationQuery, scope: UserListScope = {}) {
  * mirrors the same location scoping applied to `listUsers`.
  */
 export async function listUsersForExport(q: PaginationQuery, scope: UserListScope = {}) {
+  const searchOr = await userSearchOr(q.search);
   const where: Prisma.UserWhereInput = {
     isDeleted: false,
     ...(q.includeInactive ? {} : { isActive: true }),
     ...userScopeWhere(scope),
-    ...(q.search
-      ? {
-          OR: [
-            { fullName: { contains: q.search, mode: 'insensitive' } },
-            { employeeId: { contains: q.search, mode: 'insensitive' } },
-            { windowsUsername: { contains: q.search, mode: 'insensitive' } },
-          ],
-        }
-      : {}),
+    ...(searchOr ? { OR: searchOr } : {}),
   };
   const rows = await prisma.user.findMany({ where, orderBy: { [q.sortBy || 'fullName']: q.sortDir } });
   return withRoleNames(await withNames(rows));
@@ -802,7 +828,14 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
     ...(seeAll ? {} : { supervisorId }),
     ...(q.includeInactive ? {} : { isActive: true }),
     ...(q.search
-      ? { OR: [{ fullName: { contains: q.search, mode: 'insensitive' } }, { employeeId: { contains: q.search, mode: 'insensitive' } }] }
+      ? {
+          OR: [
+            { fullName: { contains: q.search, mode: 'insensitive' } },
+            { employeeId: { contains: q.search, mode: 'insensitive' } },
+            { windowsUsername: { contains: q.search, mode: 'insensitive' } },
+            { email: { contains: q.search, mode: 'insensitive' } },
+          ],
+        }
       : {}),
   };
   // L-J4: paginate server-side so an org-wide view never loads the whole organisation

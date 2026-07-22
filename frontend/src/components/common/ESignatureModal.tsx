@@ -83,12 +83,15 @@ export function ESignatureModal({
       open={open}
       onClose={onClose}
       title={title}
+      onSubmit={() => {
+        if (canSign && !loading) submit();
+      }}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={loading || !canSign}>
+          <Button type="submit" disabled={loading || !canSign}>
             {loading ? 'Signing…' : 'Sign'}
           </Button>
         </>
@@ -123,6 +126,14 @@ export function ESignatureModal({
           className="mt-0.5"
           checked={confirmed}
           onChange={(e) => setConfirmed(e.target.checked)}
+          // Space toggles natively; also toggle on Enter (and stop it submitting the form)
+          // so a keyboard user tabbing to the box can tick it the way they expect.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              setConfirmed((c) => !c);
+            }
+          }}
         />
         <span>I confirm that I am applying my electronic signature and that this action is attributable to me.</span>
       </label>

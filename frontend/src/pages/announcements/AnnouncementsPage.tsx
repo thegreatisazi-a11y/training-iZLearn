@@ -34,6 +34,7 @@ export default function AnnouncementsPage() {
   const canManage = useAuthStore((s) => s.hasPermission)('announcements', 'write');
 
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Announcement | null>(null);
   const [viewing, setViewing] = useState<Announcement | null>(null);
@@ -44,7 +45,7 @@ export default function AnnouncementsPage() {
   const feed = useQuery({ queryKey: ['announcements', 'feed'], queryFn: () => svc.announcements.feed() });
 
   // Managers see active AND inactive announcements (so deactivated ones can be reactivated).
-  const params = { page, pageSize: 50, includeInactive: true };
+  const params = { page, pageSize: 50, includeInactive: true, search: search || undefined };
   const manage = useQuery({
     queryKey: ['announcements', params],
     queryFn: () => svc.announcements.list(params),
@@ -173,6 +174,17 @@ export default function AnnouncementsPage() {
       {canManage && (
         <section className="mb-8">
           <h2 className="mb-2 text-sm font-semibold uppercase text-slate-500">Manage</h2>
+          <div className="mb-4">
+            <Input
+              className="max-w-xs"
+              placeholder="Search title or content…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
           <DataTable
             columns={columns}
             rows={(manage.data?.data ?? []) as unknown as Announcement[]}

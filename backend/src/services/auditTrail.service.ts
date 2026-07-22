@@ -49,6 +49,7 @@ export interface AuditQueryFilters {
   action?: string;
   entityType?: string;
   entityId?: string;
+  search?: string;
   page?: number;
   pageSize?: number;
 }
@@ -61,6 +62,18 @@ export async function queryAuditTrail(filters: AuditQueryFilters) {
   if (filters.action) where.action = filters.action;
   if (filters.entityType) where.entityType = filters.entityType;
   if (filters.entityId) where.entityId = filters.entityId;
+  // Free-text search across the stored, human-readable columns (the entity's resolved
+  // "Record" label is computed after the query, so it isn't part of the DB filter).
+  if (filters.search) {
+    const s = filters.search;
+    where.OR = [
+      { userFullName: { contains: s, mode: 'insensitive' } },
+      { action: { contains: s, mode: 'insensitive' } },
+      { entityType: { contains: s, mode: 'insensitive' } },
+      { reasonForChange: { contains: s, mode: 'insensitive' } },
+      { ipAddress: { contains: s, mode: 'insensitive' } },
+    ];
+  }
   if (filters.from || filters.to) {
     where.timestamp = {};
     if (filters.from) (where.timestamp as Prisma.DateTimeFilter).gte = filters.from;

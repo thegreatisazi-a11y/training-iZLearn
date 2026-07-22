@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useOnEscape } from '@/hooks/useOnEscape';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Eye, Printer } from 'lucide-react';
@@ -71,6 +72,7 @@ export default function JDPage() {
   const [editSignOpen, setEditSignOpen] = useState(false);
   const [signTarget, setSignTarget] = useState<{ jd: JD; action: 'APPROVE' | 'REJECT' | 'OBSOLETE' | 'REACTIVATE' } | null>(null);
   const [drawer, setDrawer] = useState<JD | null>(null);
+  useOnEscape(!!drawer, () => setDrawer(null)); // the detail drawer isn't a shared Dialog — close on Esc
   const [viewing, setViewing] = useState<JD | null>(null);
   const [viewingTemplate, setViewingTemplate] = useState<JDTemplate | null>(null);
 
@@ -234,7 +236,7 @@ export default function JDPage() {
       key: 'title',
       header: 'Functional Role / Title',
       render: (r) => (
-        <button className="font-medium text-primary hover:underline" onClick={() => setDrawer(r)}>
+        <button className="text-left font-medium text-primary hover:underline" onClick={() => setDrawer(r)}>
           {r.functionalRoleId ? frName.get(r.functionalRoleId) ?? r.title : r.title}
         </button>
       ),
@@ -377,7 +379,7 @@ export default function JDPage() {
           <div className="my-4 flex flex-wrap items-center gap-3">
             <Input
               className="max-w-xs"
-              placeholder="Search…"
+              placeholder="Search user, title, status, approver…"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);

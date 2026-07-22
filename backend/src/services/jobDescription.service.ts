@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { Prisma } from '@prisma/client';
+import { Prisma, DocStatus } from '@prisma/client';
 import DOMPurify from 'isomorphic-dompurify';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
@@ -34,6 +34,30 @@ import type {
 
 // ---- Job descriptions -------------------------------------------------------
 
+/**
+ * Build the search OR-clauses for the JD list. Covers the columns shown in the table:
+ * Title, the User and Approved-By people (relations — resolved from name → id), and
+ * Status (a DocStatus enum — matched by substring against the display text, so
+ * "under review" matches UNDER_REVIEW).
+ */
+async function jdSearchOr(search?: string): Promise<Prisma.JobDescriptionWhereInput[] | undefined> {
+  if (!search) return undefined;
+  const or: Prisma.JobDescriptionWhereInput[] = [{ title: { contains: search, mode: 'insensitive' } }];
+  const people = await prisma.user.findMany({
+    where: { fullName: { contains: search, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (people.length) {
+    const ids = people.map((p) => p.id);
+    or.push({ userId: { in: ids } });
+    or.push({ approvedBy: { in: ids } });
+  }
+  const norm = search.trim().toLowerCase().replace(/\s+/g, '_');
+  const matchingStatuses = Object.values(DocStatus).filter((s) => s.toLowerCase().includes(norm));
+  if (matchingStatuses.length) or.push({ status: { in: matchingStatuses } });
+  return or;
+}
+
 export async function listJDs(
   q: PaginationQuery & { userId?: string; status?: string },
   requester?: { id: string; permissions?: Record<string, Record<string, boolean>> },
@@ -47,10 +71,11 @@ export async function listJDs(
       : q.status === 'inactive'
         ? { status: { in: ['DRAFT', 'OBSOLETE', 'REJECTED'] } }
         : { status: { in: ['APPROVED', 'UNDER_REVIEW'] } };
+  const searchOr = await jdSearchOr(q.search);
   const where: Prisma.JobDescriptionWhereInput = {
     isDeleted: false,
     ...statusFilter,
-    ...(q.search ? { title: { contains: q.search, mode: 'insensitive' } } : {}),
+    ...(searchOr ? { OR: searchOr } : {}),
   };
   // Item 9 (permission-driven, no role names): an org-wide user manager sees every JD;
   // anyone else is limited to their direct reports' JDs. A new custom role scopes from
