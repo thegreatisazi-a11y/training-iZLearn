@@ -23,22 +23,29 @@ export function Dialog({
   onSubmit?: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Escape-to-close. Re-subscribing the listener when `onClose` changes is harmless.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
-    // Autofocus the first field/control so the dialog is immediately keyboard-usable.
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // Autofocus the first field ONCE, only when the dialog transitions to open. This must NOT
+  // depend on `onClose`: callers pass an inline `onClose={() => setX(null)}` whose reference
+  // changes on every render, so including it here would re-run the focus on every keystroke
+  // and snap the cursor back to the first field.
+  useEffect(() => {
+    if (!open) return;
     const t = setTimeout(() => {
       const el = panelRef.current?.querySelector<HTMLElement>(
         'input:not([type=hidden]), textarea, select, [contenteditable=true]',
       );
       el?.focus();
     }, 0);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      clearTimeout(t);
-    };
-  }, [open, onClose]);
+    return () => clearTimeout(t);
+  }, [open]);
 
   if (!open) return null;
   const Body = (

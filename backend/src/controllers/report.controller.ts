@@ -3,7 +3,7 @@ import { asyncHandler, sendSuccess, AppError } from '../utils/response';
 import { hasPermission } from '../utils/permissions';
 import { toEndBound } from '../utils/dateUtils';
 import { recordEvent } from '../services/auditTrail.service';
-import { buildReport, exportReport, REPORT_TYPES, ReportType, ReportFilters } from '../services/report.service';
+import { buildReport, exportReport, REPORT_TYPES, REPORT_FILTERS, ReportType, ReportFilters } from '../services/report.service';
 
 function parseFilters(src: Record<string, unknown>): ReportFilters {
   return {
@@ -24,7 +24,10 @@ function assertType(type: string): asserts type is ReportType {
   if (!(REPORT_TYPES as readonly string[]).includes(type)) throw AppError.notFound(`Unknown report type: ${type}`);
 }
 
-export const listTypes = asyncHandler(async (_req, res) => sendSuccess(res, REPORT_TYPES));
+// Each report ships the filter controls it actually uses, so the UI can render only those.
+export const listTypes = asyncHandler(async (_req, res) =>
+  sendSuccess(res, REPORT_TYPES.map((type) => ({ type, filters: REPORT_FILTERS[type] }))),
+);
 
 export const get = asyncHandler(async (req: Request, res: Response) => {
   const { type } = req.params;

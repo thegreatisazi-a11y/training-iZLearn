@@ -31,8 +31,11 @@ export default function ReportsPage() {
   const canExport = useAuthStore((s) => s.hasPermission)('reports', 'export');
   const canPrint = useAuthStore((s) => s.hasPermission)('reports', 'print');
 
-  const types = useQuery({ queryKey: ['reports', 'types'], queryFn: () => svc.reports.types() as unknown as Promise<string[]> });
-  const typeOpts = useMemo(() => (types.data ?? []).map((t) => ({ value: t, label: labelFor(t) })), [types.data]);
+  // Each report declares the filters it actually uses (backend is the source of truth), so we
+  // render only those and never show a control the report would silently ignore.
+  const types = useQuery({ queryKey: ['reports', 'types'], queryFn: () => svc.reports.types() as unknown as Promise<Array<{ type: string; filters: string[] }>> });
+  const typeMeta = useMemo(() => types.data ?? [], [types.data]);
+  const typeOpts = useMemo(() => typeMeta.map((t) => ({ value: t.type, label: labelFor(t.type) })), [typeMeta]);
 
   // R1: dropdown data for the filters (replaces the old free-text ID inputs).
   const topicsQ = useQuery({ queryKey: ['reports', 'topics'], queryFn: () => svc.topics.list({ pageSize: 500 }) });
@@ -60,17 +63,22 @@ export default function ReportsPage() {
   const [supervisorId, setSupervisorId] = useState('');
   const [result, setResult] = useState<ReportResult | null>(null);
 
+  // The filters the currently-selected report supports. Drives which controls render AND which
+  // values are actually sent, so the panel and the query can never disagree.
+  const activeFilters = useMemo(() => new Set(typeMeta.find((t) => t.type === type)?.filters ?? []), [typeMeta, type]);
+  const has = (key: string) => activeFilters.has(key);
+
   function filters() {
     return {
-      from: from || undefined,
-      to: to || undefined,
-      includeInactive: includeInactive || undefined,
-      topicId: topicId || undefined,
-      departmentId: departmentId || undefined,
-      userId: userId || undefined,
-      locationId: locationId || undefined,
-      designationId: designationId || undefined,
-      supervisorId: supervisorId || undefined,
+      from: has('dateRange') ? from || undefined : undefined,
+      to: has('dateRange') ? to || undefined : undefined,
+      includeInactive: has('includeInactive') ? includeInactive || undefined : undefined,
+      topicId: has('topic') ? topicId || undefined : undefined,
+      departmentId: has('department') ? departmentId || undefined : undefined,
+      userId: has('user') ? userId || undefined : undefined,
+      locationId: has('location') ? locationId || undefined : undefined,
+      designationId: has('designation') ? designationId || undefined : undefined,
+      supervisorId: has('supervisor') ? supervisorId || undefined : undefined,
     };
   }
 
@@ -123,39 +131,57 @@ export default function ReportsPage() {
       <Card className="mb-6">
         <CardContent>
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Report type">
+            <Field label="Report type" hint={!type ? 'Choose a report to see its filters.' : undefined}>
               <Select options={typeOpts} value={type} onChange={(e) => { setType(e.target.value); setResult(null); }} placeholder="Select a report…" />
             </Field>
-            <Field label="From">
-              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </Field>
-            <Field label="To">
-              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            </Field>
-            <Field label="Topic">
-              <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="All topics" />
-            </Field>
-            <Field label="Department">
-              <Select options={deptOpts} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} placeholder="All departments" />
-            </Field>
-            <Field label="User">
-              <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="All users" />
-            </Field>
-            <Field label="Location">
-              <Select options={locOpts} value={locationId} onChange={(e) => setLocationId(e.target.value)} placeholder="All locations" />
-            </Field>
-            <Field label="Functional Role">
-              <Select options={desigOpts} value={designationId} onChange={(e) => setDesignationId(e.target.value)} placeholder="All functional roles" />
-            </Field>
-            <Field label="Reporting Manager">
-              <Select options={userOpts} value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} placeholder="All managers" />
-            </Field>
+            {has('dateRange') && (
+              <Field label="From">
+                <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              </Field>
+            )}
+            {has('dateRange') && (
+              <Field label="To">
+                <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              </Field>
+            )}
+            {has('topic') && (
+              <Field label="Topic">
+                <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="All topics" />
+              </Field>
+            )}
+            {has('department') && (
+              <Field label="Department">
+                <Select options={deptOpts} value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} placeholder="All departments" />
+              </Field>
+            )}
+            {has('user') && (
+              <Field label="User">
+                <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="All users" />
+              </Field>
+            )}
+            {has('location') && (
+              <Field label="Location">
+                <Select options={locOpts} value={locationId} onChange={(e) => setLocationId(e.target.value)} placeholder="All locations" />
+              </Field>
+            )}
+            {has('designation') && (
+              <Field label="Functional Role">
+                <Select options={desigOpts} value={designationId} onChange={(e) => setDesignationId(e.target.value)} placeholder="All functional roles" />
+              </Field>
+            )}
+            {has('supervisor') && (
+              <Field label="Reporting Manager">
+                <Select options={userOpts} value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} placeholder="All managers" />
+              </Field>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
-              Include inactive users
-            </label>
+            {has('includeInactive') && (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
+                Include inactive users
+              </label>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => run.mutate()} disabled={!type || run.isPending}>
                 {run.isPending ? 'Running…' : 'Run'}

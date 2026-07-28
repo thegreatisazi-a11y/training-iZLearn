@@ -108,20 +108,25 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
-    // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
-    // (or archived) content, even by guessing a material id.
-    const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
-    if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
-      throw AppError.forbidden('This material is not currently available.');
-    }
-    // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
-    // training, material access is revoked (enable via material.lock_after_completion).
-    if (await getBool('material.lock_after_completion', false)) {
-      const completed = await prisma.trainingAssignment.findFirst({
-        where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
-      });
-      if (completed) {
-        throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+    // The global training instruction is a Library file with no parent topic and is shown to
+    // every trainee before starting; exempt it from the topic-published / completion gates
+    // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+    if (!material.isInstruction) {
+      // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+      // (or archived) content, even by guessing a material id.
+      const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
+      if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
+        throw AppError.forbidden('This material is not currently available.');
+      }
+      // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
+      // training, material access is revoked (enable via material.lock_after_completion).
+      if (await getBool('material.lock_after_completion', false)) {
+        const completed = await prisma.trainingAssignment.findFirst({
+          where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
+        });
+        if (completed) {
+          throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+        }
       }
     }
   }
@@ -141,18 +146,23 @@ export const viewPdf = asyncHandler(async (req: Request, res: Response) => {
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
-    // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
-    // (or archived) content, even by guessing a material id.
-    const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
-    if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
-      throw AppError.forbidden('This material is not currently available.');
-    }
-    if (await getBool('material.lock_after_completion', false)) {
-      const completed = await prisma.trainingAssignment.findFirst({
-        where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
-      });
-      if (completed) {
-        throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+    // The global training instruction is a Library file with no parent topic and is shown to
+    // every trainee before starting; exempt it from the topic-published / completion gates
+    // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+    if (!material.isInstruction) {
+      // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+      // (or archived) content, even by guessing a material id.
+      const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
+      if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
+        throw AppError.forbidden('This material is not currently available.');
+      }
+      if (await getBool('material.lock_after_completion', false)) {
+        const completed = await prisma.trainingAssignment.findFirst({
+          where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
+        });
+        if (completed) {
+          throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+        }
       }
     }
   }

@@ -49,6 +49,47 @@ export const REPORT_TYPES = [
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
+/**
+ * The filter controls each report actually USES. The Reports UI renders only these for the
+ * selected report (so no filter is ever silently ignored — e.g. Topic has no effect on the
+ * aggregate department/designation reports, so it isn't offered there). Keep this in sync with
+ * the filter logic in `buildReport` below — this is the single source of truth the UI reads.
+ */
+export type ReportFilterKey =
+  | 'dateRange'
+  | 'includeInactive'
+  | 'topic'
+  | 'department'
+  | 'user'
+  | 'location'
+  | 'designation'
+  | 'supervisor';
+
+// Org-scope filters honoured by every report that runs through `userPasses` (active gate +
+// matchesUserScope): department / location / functional role / reporting manager / user, plus
+// the include-inactive toggle.
+const ORG_SCOPE: ReportFilterKey[] = ['includeInactive', 'department', 'location', 'designation', 'supervisor', 'user'];
+
+export const REPORT_FILTERS: Record<ReportType, ReportFilterKey[]> = {
+  'topic-wise-status': ['dateRange', 'topic', ...ORG_SCOPE],
+  'department-wise-status': ORG_SCOPE,
+  'pending-completed': ORG_SCOPE,
+  'role-wise-status': ORG_SCOPE,
+  'designation-wise-status': ORG_SCOPE,
+  'version-wise-topic': ['topic', ...ORG_SCOPE],
+  'employee-jd-history': ORG_SCOPE,
+  'training-competency': ['topic', ...ORG_SCOPE],
+  overdue: ORG_SCOPE,
+  'audit-trail': ['dateRange'],
+  induction: [],
+  'employee-dashboard': ['user'],
+  'feedback-analysis': ['topic'],
+  'bundle-assignment-status': [],
+  'employee-training-history': ['topic', ...ORG_SCOPE],
+  'effective-to-completion-days': ['topic', ...ORG_SCOPE],
+  'training-type-wise-status': ORG_SCOPE,
+};
+
 async function maps() {
   const [users, topics, depts, locations, designations] = await Promise.all([
     prisma.user.findMany({ where: { isDeleted: false } }),
@@ -145,6 +186,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           employeeId: m.users.get(x.userId)?.employeeId ?? '',
           ...userOrgCols(m, x.userId),
           status: x.status,
+          assignedOn: formatDate(x.createdAt),
           dueDate: formatDate(x.dueDate),
         }));
       return {
@@ -159,6 +201,9 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Functional Role', key: 'functionalRole' },
           { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Status', key: 'status' },
+          // Assigned On is the date the date-range filter matches against (assignment createdAt),
+          // so the filtered result shows which date each record belongs to.
+          { header: 'Assigned On', key: 'assignedOn' },
           { header: 'Due Date', key: 'dueDate' },
         ],
         rows,

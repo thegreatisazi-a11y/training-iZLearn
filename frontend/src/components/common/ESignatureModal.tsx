@@ -112,11 +112,11 @@ export function ESignatureModal({
         </Field>
       )}
       {requireReason && (
-        <Field label="Reason for Change" required hint="Minimum 5 characters — required to enable Sign.">
+        <Field label="Reason" required hint="Minimum 5 characters — required to enable Sign.">
           <Textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Why is this change being made? (minimum 5 characters)"
+            placeholder="Reason for this action (minimum 5 characters)"
           />
         </Field>
       )}
