@@ -5,6 +5,7 @@ import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
 import { generateTopicCode } from '../utils/certificateNumber';
 import { generateStoredName } from '../utils/fileUtils';
+import { startOfDay } from '../utils/dateUtils';
 import { toCsv } from '../utils/csv';
 import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
@@ -182,6 +183,7 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       materialViewSeconds: input.materialViewSeconds ?? null,
       effectiveDate: input.effectiveDate ?? null,
       reviewDate: input.reviewDate ?? null,
+      dueDate: input.dueDate ?? null,
       currentVersion: 1,
       createdBy,
     },
@@ -241,6 +243,7 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
       ...(input.materialViewSeconds !== undefined ? { materialViewSeconds: input.materialViewSeconds ?? null } : {}),
       ...(input.effectiveDate !== undefined ? { effectiveDate: input.effectiveDate ?? null } : {}),
       ...(input.reviewDate !== undefined ? { reviewDate: input.reviewDate ?? null } : {}),
+      ...(input.dueDate !== undefined ? { dueDate: input.dueDate ?? null } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
   };
 
@@ -352,6 +355,18 @@ export async function publishDraftChanges(id: string, req: Request) {
     where: { id },
     data: { ...draft, draftMeta: null, currentVersion: { increment: 1 } },
   });
+  // When the course-level due date was changed in this edit, reflect it on the users already
+  // assigned this course (open assignments only) — otherwise a due date added/changed after
+  // publish would never reach the people already working on it. A past/removed date clears it
+  // so no one is pushed straight into "overdue".
+  if ('dueDate' in draft) {
+    const today = startOfDay(new Date());
+    const due = promoted.dueDate && promoted.dueDate >= today ? promoted.dueDate : null;
+    await prisma.trainingAssignment.updateMany({
+      where: { topicId: id, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      data: { dueDate: due },
+    });
+  }
   // Recompute course duration from the now-current materials' reading times (a staged
   // read-time change only takes effect here, on the controlled publish).
   {
@@ -440,12 +455,15 @@ function functionalRoleIdsOf(u: { designationId?: string | null; designationIds?
  * Best-effort — never blocks the publish transition.
  */
 async function assignToFunctionalRoleHolders(
-  topic: { id: string; designationId?: string | null; designationIds?: unknown },
+  topic: { id: string; designationId?: string | null; designationIds?: unknown; dueDate?: Date | null },
   actorId: string,
 ) {
   try {
     const targets = new Set(functionalRoleIdsOf(topic));
     if (!targets.size) return; // no target functional role → nothing to auto-assign.
+    // Apply the course-level due date to these role-based assignments; drop a past date so a
+    // freshly-published course never lands its role holders straight into "overdue".
+    const dueDate = topic.dueDate && topic.dueDate >= startOfDay(new Date()) ? topic.dueDate : null;
     const users = await prisma.user.findMany({
       where: { isActive: true, isDeleted: false },
       select: { id: true, designationId: true, designationIds: true },
@@ -457,9 +475,9 @@ async function assignToFunctionalRoleHolders(
       });
       if (exists) continue;
       const a = await prisma.trainingAssignment.create({
-        data: { userId: u.id, topicId: topic.id, assignmentType: 'ROLE_SPECIFIC', status: 'PENDING', assignedBy: actorId, createdBy: actorId },
+        data: { userId: u.id, topicId: topic.id, assignmentType: 'ROLE_SPECIFIC', status: 'PENDING', dueDate, assignedBy: actorId, createdBy: actorId },
       });
-      await notifyTrainingAssigned(a.userId, a.topicId, null);
+      await notifyTrainingAssigned(a.userId, a.topicId, a.dueDate);
     }
   } catch {
     /* best-effort: a notification/assignment hiccup must not block publish */

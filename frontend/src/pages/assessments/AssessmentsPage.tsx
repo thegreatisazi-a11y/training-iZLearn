@@ -47,6 +47,7 @@ interface AttemptReview {
   readingTimeSeconds?: number | null;
   submissionReason?: string | null;
   submissionReasonLabel?: string | null;
+  completedAt?: string | null;
 }
 
 /** Pretty-print a stored answer (mirrors the post-submit result screen). */
@@ -117,21 +118,49 @@ function fmtDuration(s?: number | null): string {
  *  action on both a learner's own test and (for managers) a team member's test. */
 function printAttemptReview(data: AttemptReview): void {
   const heading = `${data.topicNumber ? `${data.topicNumber} – ` : ''}${data.topicTitle ?? 'Assessment'}`;
-  const summary =
-    `<table>` +
-    // S2: identify the assessed employee at the top of the printout.
-    (data.employeeName ? `<tr><th>Employee Name</th><td>${escapeHtml(data.employeeName)}</td></tr>` : '') +
-    (data.employeeId ? `<tr><th>Employee ID</th><td>${escapeHtml(data.employeeId)}</td></tr>` : '') +
-    (data.department ? `<tr><th>Department</th><td>${escapeHtml(data.department)}</td></tr>` : '') +
-    `<tr><th>Result</th><td>${data.isPassed ? 'Passed' : 'Failed'}</td></tr>` +
-    `<tr><th>Score</th><td>${data.score}%</td></tr>` +
-    `<tr><th>Passing score</th><td>${data.passingScorePercent}%</td></tr>` +
-    `<tr><th>Correct</th><td>${data.correctCount}</td></tr>` +
-    `<tr><th>Incorrect</th><td>${data.incorrectCount}</td></tr>` +
-    `<tr><th>Attempt</th><td>${data.attemptNumber} of ${data.maxAttempts}</td></tr>` +
-    `<tr><th>Time on assessment</th><td>${fmtDuration(data.timeSpentSeconds)}</td></tr>` +
-    `<tr><th>Time on reading</th><td>${fmtDuration(data.readingTimeSeconds)}</td></tr>` +
+  const completedOn = data.completedAt ? formatDateTime(data.completedAt) : '—';
+  const passed = data.isPassed;
+  const accent = passed ? '#15803d' : '#b91c1c';
+  const accentBg = passed ? '#dcfce7' : '#fee2e2';
+
+  // A prominent pass/fail banner with the headline score.
+  const banner =
+    `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
+    `border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
+    `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">${passed ? 'PASSED' : 'FAILED'}</div>` +
+    `<div style="text-align:right;color:#334155;">` +
+    `<div style="font-size:22px;font-weight:700;line-height:1;">${data.score}%</div>` +
+    `<div style="font-size:11px;color:#64748b;margin-top:2px;">Passing score ${data.passingScorePercent}%</div>` +
+    `</div></div>`;
+
+  // A clean, readable key/value grid (labels muted + uppercase, values bold).
+  const cell = (label: string, value: string) =>
+    `<td style="padding:8px 10px;vertical-align:top;border-bottom:1px solid #eef2f7;width:33%;">` +
+    `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:2px;">${escapeHtml(label)}</div>` +
+    `<div style="font-size:13px;font-weight:600;color:#1e293b;">${value}</div></td>`;
+  const row = (...cells: string[]) => `<tr>${cells.join('')}</tr>`;
+
+  // Result / Score / Passing score already live in the banner above — the grid only carries
+  // the identity, timing and correct/incorrect counts, to avoid repeating them.
+  const details =
+    `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
+    row(
+      cell('Employee', escapeHtml(data.employeeName || '—')),
+      cell('Employee ID', escapeHtml(data.employeeId || '—')),
+      cell('Department', escapeHtml(data.department || '—')),
+    ) +
+    row(
+      cell('Completed On', escapeHtml(completedOn)),
+      cell('Attempt', `${data.attemptNumber} of ${data.maxAttempts}`),
+      cell('Correct', String(data.correctCount)),
+    ) +
+    row(
+      cell('Incorrect', String(data.incorrectCount)),
+      cell('Time on Assessment', fmtDuration(data.timeSpentSeconds)),
+      cell('Time on Reading', fmtDuration(data.readingTimeSeconds)),
+    ) +
     `</table>`;
+  const summary = banner + details;
   const review = data.allDetails?.length ? data.allDetails : data.incorrectDetails ?? [];
   const questions = review
     .map(
@@ -144,7 +173,10 @@ function printAttemptReview(data: AttemptReview): void {
         `</div>`,
     )
     .join('');
-  printHtml('Assessment Result', `<h2>${escapeHtml(heading)}</h2>${summary}${questions ? `<h3>Questions</h3>${questions}` : ''}`);
+  printHtml(
+    'Assessment Result',
+    `<h1>${escapeHtml(heading)}</h1><div class="sub">Assessment Result</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
+  );
 }
 
 /**

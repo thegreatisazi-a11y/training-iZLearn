@@ -38,6 +38,7 @@ export const createTopicSchema = z.object({
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),
   reviewDate: z.coerce.date().optional(),
+  dueDate: z.coerce.date().optional(), // course-level default completion deadline for assignments
   status: topicStatus.optional(), // DRAFT (default) when omitted; "Create & Publish" sets PUBLISHED
 });
 export type CreateTopicInput = z.infer<typeof createTopicSchema>;
@@ -76,6 +77,7 @@ export const updateTopicSchema = z.object({
   materialViewSeconds: z.coerce.number().int().min(0).optional(),
   effectiveDate: z.coerce.date().optional(),
   reviewDate: z.coerce.date().optional(),
+  dueDate: z.coerce.date().nullable().optional(), // course-level default completion deadline (null clears)
   isActive: z.boolean().optional(),
   // Edits on a published course are STAGED; the reason (+ e-signature) is collected once
   // at "Publish changes", so it is optional here.

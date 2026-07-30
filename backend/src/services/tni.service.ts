@@ -6,6 +6,7 @@ import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
+import { startOfDay } from '../utils/dateUtils';
 import type {
   CreateTNIInput,
   UpdateTNIInput,
@@ -120,6 +121,11 @@ export async function decideTNI(id: string, input: TNIDecisionInput, req: Reques
   auditContext.setActionOverride(input.decision === 'APPROVE' ? 'APPROVE' : 'REJECT');
 
   if (input.decision === 'APPROVE') {
+    // An explicit due date (from the approve dialog) wins; otherwise fall back to the course's
+    // default due date. A past date is dropped so the assignment never starts already-overdue.
+    const topic = await prisma.trainingTopic.findUnique({ where: { id: tni.topicId }, select: { dueDate: true } });
+    const rawDue = input.dueDate ?? topic?.dueDate ?? null;
+    const dueDate = rawDue && rawDue >= startOfDay(new Date()) ? rawDue : null;
     const { updated } = await auditedTransaction(prisma, async (tx) => {
       const updatedTni = await tx.tNI.update({
         where: { id },
@@ -131,7 +137,7 @@ export async function decideTNI(id: string, input: TNIDecisionInput, req: Reques
           topicId: tni.topicId,
           assignmentType: 'TNI_BASED',
           tniId: id,
-          dueDate: input.dueDate ?? null,
+          dueDate,
           assignedBy: req.user!.id,
           status: 'PENDING',
           createdBy: req.user!.id,
@@ -238,9 +244,14 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
   if (!cells.length) return { created: 0 };
 
   const topicIds = Array.from(new Set(cells.map((c) => c.topicId)));
-  const publishable = new Set(
-    (await prisma.trainingTopic.findMany({ where: { id: { in: topicIds }, isDeleted: false, status: 'PUBLISHED' }, select: { id: true } })).map((t) => t.id),
-  );
+  const publishedTopics = await prisma.trainingTopic.findMany({
+    where: { id: { in: topicIds }, isDeleted: false, status: 'PUBLISHED' },
+    select: { id: true, dueDate: true },
+  });
+  const publishable = new Set(publishedTopics.map((t) => t.id));
+  // Course-level default due date per topic (applied unless the matrix specifies its own).
+  const topicDueDate = new Map(publishedTopics.map((t) => [t.id, t.dueDate]));
+  const today = startOfDay(new Date());
 
   // Resolve functional-role holders once: designationId -> Set<userId>. A user may
   // hold several functional roles (primary designationId + designationIds array).
@@ -281,12 +292,13 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
       const pairKey = `${userId}:${cell.topicId}`;
       if (existing.has(pairKey)) continue; // already assigned (or added earlier this run)
       existing.add(pairKey); // guard against duplicates when a user holds several roles
+      const rawDue = input.dueDate ?? topicDueDate.get(cell.topicId) ?? null;
       const a = await prisma.trainingAssignment.create({
         data: {
           userId,
           topicId: cell.topicId,
           assignmentType: 'ROLE_SPECIFIC',
-          dueDate: input.dueDate ?? null,
+          dueDate: rawDue && rawDue >= today ? rawDue : null,
           activateOn: deferred ? input.activateOn ?? null : null,
           assignedBy,
           status: deferred ? 'DEFERRED' : 'PENDING',

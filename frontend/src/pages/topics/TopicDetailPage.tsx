@@ -239,7 +239,7 @@ export default function TopicDetailPage() {
   const [editTopicForm, setEditTopicForm] = useState({
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM', trainingTypes: [] as string[],
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
-    questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '',
+    questionLimit: '', refresherIntervalMonths: '', materialViewSeconds: '', effectiveDate: '', reviewDate: '', dueDate: '',
     requiresAssessment: true, assessmentTimeMinutes: '', passingScorePercent: '',
     signatories: [] as { userId: string; role: string; date: string }[],
     randomizeQuestions: true, showExplanations: true, blockAfterMaxAttempts: true,
@@ -461,6 +461,7 @@ export default function TopicDetailPage() {
         materialViewSeconds: editTopicForm.materialViewSeconds ? Number(editTopicForm.materialViewSeconds) : undefined,
         effectiveDate: editTopicForm.effectiveDate || undefined,
         reviewDate: editTopicForm.reviewDate || undefined,
+        dueDate: editTopicForm.dueDate || undefined,
         randomizeQuestions: editTopicForm.randomizeQuestions,
         showExplanations: editTopicForm.showExplanations,
         blockAfterMaxAttempts: editTopicForm.blockAfterMaxAttempts,
@@ -575,6 +576,7 @@ export default function TopicDetailPage() {
       materialViewSeconds: src.materialViewSeconds != null ? String(src.materialViewSeconds) : '',
       effectiveDate: toDateInput(src.effectiveDate as string | null | undefined),
       reviewDate: toDateInput(src.reviewDate as string | null | undefined),
+      dueDate: toDateInput(src.dueDate as string | null | undefined),
       requiresAssessment: src.requiresAssessment !== false,
       assessmentTimeMinutes: src.assessmentTimeMinutes != null ? String(src.assessmentTimeMinutes) : '',
       passingScorePercent: src.passingScorePercent != null ? String(src.passingScorePercent) : '',
@@ -1131,7 +1133,7 @@ export default function TopicDetailPage() {
         {isMc && (
           <div className="mb-3">
             <div className="mb-1 flex items-center justify-between">
-              <span className="iz-label">Options (tick the correct {qForm.questionType === 'MULTIPLE_CHOICE_MULTI' ? 'answers' : 'answer'})</span>
+              <span className="iz-label">Options (tick the correct {qForm.questionType === 'MULTIPLE_CHOICE_MULTI' ? 'answers' : 'answer'})<span className="text-red-500"> *</span></span>
               <Button
                 size="sm"
                 variant="outline"
@@ -1195,7 +1197,7 @@ export default function TopicDetailPage() {
         )}
 
         {qForm.questionType === 'FILL_IN_THE_BLANKS' && (
-          <Field label="Accepted answers (comma-separated variants)">
+          <Field label="Accepted answers (comma-separated variants)" required>
             <Input value={qForm.fillVariants} onChange={(e) => setQForm({ ...qForm, fillVariants: e.target.value })} placeholder="e.g. 7, seven" />
           </Field>
         )}
@@ -1521,6 +1523,7 @@ export default function TopicDetailPage() {
             <Input type="number" min={0} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} placeholder="e.g. 30" />
           </Field>
           <Field label="Effective Date"><Input type="date" value={editTopicForm.effectiveDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></Field>
+          <Field label="Due Date"><Input type="date" value={editTopicForm.dueDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, dueDate: e.target.value }))} /></Field>
         </div>
         <div className="space-y-1.5 rounded border border-slate-200 p-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.randomizeQuestions} onChange={(e) => setEditTopicForm((f) => ({ ...f, randomizeQuestions: e.target.checked }))} /> Randomize questions</label>

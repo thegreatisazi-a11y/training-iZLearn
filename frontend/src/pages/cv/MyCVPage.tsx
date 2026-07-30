@@ -283,6 +283,7 @@ export default function MyCVPage() {
       {/* #4: structured Language(s) Known — name + Read / Write / Understand */}
       <RepeatableSection
         title="Language(s) Known"
+        required
         rows={form.languages}
         onChange={(rows) => upd('languages', rows)}
         blank={{}}
@@ -328,7 +329,7 @@ export default function MyCVPage() {
         <CardContent>
           <div className="mb-2 text-sm font-semibold uppercase text-slate-500">Current Role</div>
           <div className="grid grid-cols-3 gap-2">
-            <Field label="Current Role / Designation"><Input value={form.currentRole} onChange={(e) => upd('currentRole', e.target.value)} /></Field>
+            <Field label="Current Role / Designation" required><Input value={form.currentRole} onChange={(e) => upd('currentRole', e.target.value)} /></Field>
             <Field label="From (MM-YYYY)"><Input value={form.currentTenureFrom} onChange={(e) => upd('currentTenureFrom', e.target.value)} placeholder="01-2024" /></Field>
             <Field label="To (MM-YYYY)"><Input value={form.currentTenureTo} onChange={(e) => upd('currentTenureTo', e.target.value)} placeholder="present" /></Field>
           </div>

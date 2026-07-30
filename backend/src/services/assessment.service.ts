@@ -369,8 +369,11 @@ export async function submitAttempt(
   if (attempt.completedAt) throw AppError.conflict('This attempt has already been submitted.');
 
   // CR-38: a submission arriving after the server deadline is recorded as an
-  // auto-submission (the answers captured so far are still graded normally).
-  const expired = Boolean(attempt.expiresAt && new Date() > attempt.expiresAt);
+  // auto-submission (the answers captured so far are still graded normally). A small grace
+  // window absorbs client-timer + network latency, so submitting *exactly* at the deadline
+  // (e.g. at 2:00 on a 2-minute test) is treated as on-time, not "time limit exceeded".
+  const SUBMIT_GRACE_MS = 5000;
+  const expired = Boolean(attempt.expiresAt && new Date().getTime() > attempt.expiresAt.getTime() + SUBMIT_GRACE_MS);
   const wasAutoSubmitted = autoSubmitted || expired;
 
   // Determine the distinct submission/failure reason for the audit trail. The server is

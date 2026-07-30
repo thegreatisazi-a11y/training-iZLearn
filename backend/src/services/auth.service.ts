@@ -40,7 +40,10 @@ export async function login(
   userAgent: string | undefined,
   terminateExisting = false,
 ): Promise<LoginResult> {
-  const user = await prisma.user.findFirst({ where: { windowsUsername: input.windowsUsername, isDeleted: false } });
+  // Username is matched case-insensitively so a user can sign in as "JDoe", "jdoe", etc.
+  const user = await prisma.user.findFirst({
+    where: { windowsUsername: { equals: input.windowsUsername, mode: 'insensitive' }, isDeleted: false },
+  });
 
   if (!user) {
     await recordEvent({

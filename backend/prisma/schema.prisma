@@ -185,6 +185,7 @@ model TrainingTopic {
   materialViewSeconds     Int? // minimum seconds the material must stay open before the assessment unlocks
   effectiveDate           DateTime? // date the (published) version becomes effective
   reviewDate              DateTime? // next scheduled review date for the SOP/topic
+  dueDate                 DateTime? // course-level default completion deadline used when the course is assigned (except new-joiner auto-assign)
   currentVersion          Int          @default(1)
   // G4: edits to a PUBLISHED topic are staged here as a draft working copy. The live
   // published version is unchanged until "Publish changes" promotes this to the columns.

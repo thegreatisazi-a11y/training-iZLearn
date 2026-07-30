@@ -14,6 +14,8 @@ import { InlineFileViewer } from '@/components/common/InlineFileViewer';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
+import { useAuthStore } from '@/store/authStore';
+import { formatDateTime } from '@/lib/format';
 
 interface ReadingItem {
   materialId: string;
@@ -497,20 +499,56 @@ export default function TakeAssessmentPage() {
   if (result) {
     // BUG-07: the printout must mirror the full on-screen result — summary AND every
     // question with the user's answer, the correct answer and any explanation.
-    const printResult = () => {
+    const printResult = async () => {
       const head = start.data?.topicNumber ?? start.data?.topicCode;
       const heading = `${head ? `${head} – ` : ''}${(start.data?.topicTitle ?? topicTitle) || 'Assessment'}`;
-      const summary =
-        `<table>` +
-        `<tr><th>Result</th><td>${result.isPassed ? 'Passed' : 'Failed'}</td></tr>` +
-        `<tr><th>Score</th><td>${result.score}%</td></tr>` +
-        `<tr><th>Passing score</th><td>${result.passingScorePercent}%</td></tr>` +
-        `<tr><th>Correct</th><td>${result.correctCount}</td></tr>` +
-        `<tr><th>Incorrect</th><td>${result.incorrectCount}</td></tr>` +
-        `<tr><th>Attempt</th><td>${result.attemptNumber} of ${result.maxAttempts}</td></tr>` +
-        `<tr><th>Time on assessment</th><td>${fmtDuration(result.timeSpentSeconds)}</td></tr>` +
-        `<tr><th>Time on reading</th><td>${fmtDuration(result.readingTimeSeconds)}</td></tr>` +
+      const me = useAuthStore.getState().user;
+      // Pull the signed-in user's profile so the printout can show their Department (name),
+      // matching the completed-attempts print. Self-scoped endpoint — falls back gracefully.
+      const profile = (await svc.users.myProfile().catch(() => null)) as
+        | { fullName?: string; employeeId?: string; departmentName?: string | null }
+        | null;
+      const employeeName = profile?.fullName || me?.fullName || '—';
+      const employeeCode = profile?.employeeId || me?.employeeId || '—';
+      const department = profile?.departmentName || '—';
+      const completedOn = formatDateTime(new Date().toISOString());
+      const passed = result.isPassed;
+      const accent = passed ? '#15803d' : '#b91c1c';
+      const accentBg = passed ? '#dcfce7' : '#fee2e2';
+      // Prominent pass/fail banner with the headline score (score + passing score live here,
+      // so they're intentionally not repeated in the grid below).
+      const banner =
+        `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
+        `border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
+        `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">${passed ? 'PASSED' : 'FAILED'}</div>` +
+        `<div style="text-align:right;color:#334155;">` +
+        `<div style="font-size:22px;font-weight:700;line-height:1;">${result.score}%</div>` +
+        `<div style="font-size:11px;color:#64748b;margin-top:2px;">Passing score ${result.passingScorePercent}%</div>` +
+        `</div></div>`;
+      const cell = (label: string, value: string) =>
+        `<td style="padding:8px 10px;vertical-align:top;border-bottom:1px solid #eef2f7;width:33%;">` +
+        `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:2px;">${escapeHtml(label)}</div>` +
+        `<div style="font-size:13px;font-weight:600;color:#1e293b;">${value}</div></td>`;
+      const row = (...cells: string[]) => `<tr>${cells.join('')}</tr>`;
+      const details =
+        `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
+        row(
+          cell('Employee', escapeHtml(employeeName)),
+          cell('Employee ID', escapeHtml(employeeCode)),
+          cell('Department', escapeHtml(department)),
+        ) +
+        row(
+          cell('Completed On', escapeHtml(completedOn)),
+          cell('Attempt', `${result.attemptNumber} of ${result.maxAttempts}`),
+          cell('Correct', String(result.correctCount)),
+        ) +
+        row(
+          cell('Incorrect', String(result.incorrectCount)),
+          cell('Time on Assessment', fmtDuration(result.timeSpentSeconds)),
+          cell('Time on Reading', fmtDuration(result.readingTimeSeconds)),
+        ) +
         `</table>`;
+      const summary = banner + details;
       const review = result.allDetails?.length ? result.allDetails : result.incorrectDetails ?? [];
       const questions = review
         .map(
@@ -523,7 +561,10 @@ export default function TakeAssessmentPage() {
             `</div>`,
         )
         .join('');
-      printHtml('Assessment Result', `<h2>${escapeHtml(heading)}</h2>${summary}${questions ? `<h3>Questions</h3>${questions}` : ''}`);
+      printHtml(
+        'Assessment Result',
+        `<h1>${escapeHtml(heading)}</h1><div class="sub">Assessment Result</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
+      );
     };
     return (
       <div>

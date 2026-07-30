@@ -122,7 +122,7 @@ function CreateFormDialog({ open, onClose }: { open: boolean; onClose: () => voi
       </Field>
 
       <div className="mb-2 flex items-center justify-between">
-        <span className="iz-label mb-0">Questions</span>
+        <span className="iz-label mb-0">Questions<span className="text-red-500"> *</span></span>
         <Button size="sm" variant="outline" onClick={() => setQuestions((qs) => [...qs, { id: newQid(), text: '', type: 'RATING', options: [] }])}>
           <Plus className="h-4 w-4" /> Add question
         </Button>

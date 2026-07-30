@@ -92,6 +92,7 @@ const EMPTY_FORM = {
 
 type StatusFilter = 'active' | 'inactive' | 'all';
 
+/* Lifecycle removed from the Users module (kept commented for easy restore).
 interface Lifecycle {
   releaseStage: string;
   releasedAt?: string | null;
@@ -103,10 +104,8 @@ interface Lifecycle {
   eligibleForRelease: boolean;
 }
 
-/**
- * CR-15/16: user onboarding lifecycle — JD acknowledgement, CV, TNI, training
- * completion, and the release stage (advanced by an e-signed action).
- */
+// CR-15/16: user onboarding lifecycle — JD acknowledgement, CV, TNI, training
+// completion, and the release stage (advanced by an e-signed action).
 function LifecycleDialog({ user, canApprove, onClose }: { user: { id: string; fullName: string }; canApprove: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [signStage, setSignStage] = useState<'READY_FOR_RELEASE' | 'RELEASED' | 'ONBOARDING' | null>(null);
@@ -180,6 +179,7 @@ function LifecycleDialog({ user, canApprove, onClose }: { user: { id: string; fu
     </Dialog>
   );
 }
+*/
 
 export default function UsersPage() {
   const qc = useQueryClient();
@@ -220,7 +220,8 @@ export default function UsersPage() {
 
   // CR-12: read-only View dialog
   const [viewUser, setViewUser] = useState<UserRow | null>(null);
-  const [lifecycleUser, setLifecycleUser] = useState<UserRow | null>(null);
+  // Lifecycle removed from the Users module (kept commented for easy restore):
+  // const [lifecycleUser, setLifecycleUser] = useState<UserRow | null>(null);
 
   // Phase 3: edit details (write, e-signed per CR-14) + change roles (approve, e-signed)
   const [editUser, setEditUser] = useState<UserRow | null>(null);
@@ -436,9 +437,10 @@ export default function UsersPage() {
           <Button size="sm" variant="outline" onClick={() => setViewUser(r)}>
             View
           </Button>
+          {/* Lifecycle removed from the Users module (kept commented for easy restore):
           <Button size="sm" variant="outline" onClick={() => setLifecycleUser(r)}>
             Lifecycle
-          </Button>
+          </Button> */}
           {canWrite && (
             <Button size="sm" variant="outline" onClick={() => openEditUser(r)}>
               Edit
@@ -558,10 +560,10 @@ export default function UsersPage() {
         requireReason
       />
 
-      {/* CR-12 read-only View dialog */}
+      {/* Lifecycle dialog removed from the Users module (kept commented for easy restore):
       {lifecycleUser && (
         <LifecycleDialog user={lifecycleUser} canApprove={canApprove} onClose={() => setLifecycleUser(null)} />
-      )}
+      )} */}
 
       <Dialog
         open={!!viewUser}

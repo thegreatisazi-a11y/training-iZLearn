@@ -94,9 +94,11 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
   const topicIds = Array.from(new Set(targets.map((t) => t.topicId)));
   const assignable = await prisma.trainingTopic.findMany({
     where: { id: { in: topicIds }, isDeleted: false, status: 'PUBLISHED' },
-    select: { id: true },
+    select: { id: true, dueDate: true },
   });
   const publishedIds = new Set(assignable.map((t) => t.id));
+  // Course-level default due date, used when the assignment doesn't specify its own.
+  const topicDueDate = new Map(assignable.map((t) => [t.id, t.dueDate]));
   const blocked = topicIds.filter((id) => !publishedIds.has(id));
   if (blocked.length) {
     throw AppError.badRequest('One or more selected topics are not published and cannot be assigned.');
@@ -105,7 +107,9 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
   // CR-56: never stamp an already-expired due date (e.g. a user added to a
   // role-based course after the due date would have passed) — leave it open.
   const today = startOfDay(new Date());
-  const safeDueDate = input.dueDate && input.dueDate >= today ? input.dueDate : null;
+  // An explicit due date wins; otherwise fall back to the course-level default. Either way a
+  // past date is dropped so a new assignment never starts already-overdue.
+  const safeDue = (d: Date | null | undefined) => (d && d >= today ? d : null);
   // CR-57: assign-later keeps the assignment DEFERRED (invisible to the trainee).
   const deferred = !!input.activateLater;
   const status = deferred ? 'DEFERRED' : 'PENDING';
@@ -120,7 +124,7 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
           topicId: t.topicId,
           assignmentType: input.assignmentType,
           scheduleId: input.scheduleId ?? null,
-          dueDate: safeDueDate,
+          dueDate: safeDue(input.dueDate ?? topicDueDate.get(t.topicId) ?? null),
           activateOn: deferred ? input.activateOn ?? null : null,
           tniId: input.tniId ?? null,
           assignedBy,

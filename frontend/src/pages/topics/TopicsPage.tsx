@@ -66,6 +66,7 @@ const emptyForm = {
   materialViewSeconds: '',
   effectiveDate: '',
   reviewDate: '',
+  dueDate: '',
   // Mirror the edit form so create/edit expose the same fields (item 2).
   requiresAssessment: true, // CR-41: false = SOP, completes via read + T&C
   assessmentTimeMinutes: '', // CR-38: countdown limit (blank = no timer)
@@ -130,6 +131,7 @@ export default function TopicsPage() {
         materialViewSeconds: form.materialViewSeconds ? Number(form.materialViewSeconds) : undefined,
         effectiveDate: form.effectiveDate || undefined,
         reviewDate: form.reviewDate || undefined,
+        dueDate: form.dueDate || undefined,
         sequenceIndex: form.sequenceIndex ? Number(form.sequenceIndex) : undefined,
         signatories: form.signatories.filter((s) => s.userId),
       }),
@@ -441,6 +443,9 @@ export default function TopicsPage() {
           </Field>
           <Field label="Effective Date">
             <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
+          </Field>
+          <Field label="Due Date" hint="Optional. Default completion deadline applied when this course is assigned (not to new-joiner auto-assignments).">
+            <Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
           </Field>
         </div>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
