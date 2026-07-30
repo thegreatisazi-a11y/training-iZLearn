@@ -256,13 +256,6 @@ export default function AssessmentsPage() {
     enabled: canManage,
   });
 
-  // BUG-01: a user may not initiate training until their JD is approved and CV exists.
-  const myJds = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<{ status: string }[]> });
-  const myCv = useQuery({ queryKey: ['my-cv'], queryFn: () => svc.cv.mine() as unknown as Promise<{ cv: unknown | null }> });
-  const jdApproved = (myJds.data ?? []).some((j) => j.status === 'APPROVED');
-  const cvReady = !!myCv.data?.cv;
-  const canInitiate = jdApproved && cvReady;
-
   // BUG-08: topics the user has already passed must not be startable again.
   const passedTopicIds = useMemo(() => new Set((mine.data ?? []).filter((a) => a.isPassed).map((a) => a.topicId)), [mine.data]);
   // Item B: only genuinely-remaining assessments. Include an assignment when it is
@@ -407,14 +400,10 @@ export default function AssessmentsPage() {
             <div className="min-w-64">
               <Select options={topicOpts} value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} placeholder="Choose an assigned topic…" />
             </div>
-            <Button disabled={!selectedTopic || selectedPassed || !canInitiate} onClick={() => navigate(`/assessments/take/${selectedTopic}`)}>
+            <Button disabled={!selectedTopic || selectedPassed} onClick={() => navigate(`/assessments/take/${selectedTopic}`)}>
               Start Assessment
             </Button>
           </div>
-          {/* BUG-01: JD/CV must be ready before any training can be initiated. */}
-          {!canInitiate && (myJds.isSuccess || myCv.isSuccess) && (
-            <p className="text-sm text-red-600">Please complete the JD and CV to initiate the training.</p>
-          )}
           {/* BUG-08: a passed assessment cannot be restarted. */}
           {selectedPassed && <p className="text-sm text-amber-600">You have already completed and passed this assessment.</p>}
         </CardContent>

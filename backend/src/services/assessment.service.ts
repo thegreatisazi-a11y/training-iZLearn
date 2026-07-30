@@ -118,18 +118,6 @@ function sanitizeForClient(q: SnapshotQuestion) {
   return { ...base, options: q.options };
 }
 
-/**
- * BUG-01: a user may not initiate any training until their Job Description is APPROVED
- * and their CV has been created. Throws a forbidden error with the required message.
- */
-async function assertJdAndCvReady(userId: string) {
-  const [jd, cv] = await Promise.all([
-    prisma.jobDescription.findFirst({ where: { userId, status: 'APPROVED', isDeleted: false } }),
-    prisma.curriculumVitae.findFirst({ where: { userId, isDeleted: false } }),
-  ]);
-  if (!jd || !cv) throw AppError.forbidden('Please complete the JD and CV to initiate the training.');
-}
-
 /** Start (generate) an assessment attempt. */
 export async function startAttempt(userId: string, topicId: string, assignmentId?: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
@@ -140,8 +128,6 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   if (topic.status !== 'PUBLISHED') {
     throw AppError.conflict('This training is not currently published and cannot be assessed.');
   }
-
-  await assertJdAndCvReady(userId);
 
   // UR-43: restriction criteria / quiz accessibility. A blocked assignment locks
   // the quiz until a coordinator unblocks it, and (when configured) a quiz can be
@@ -552,8 +538,6 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
     throw AppError.conflict('This training is not currently published and cannot be completed.');
   }
   if (topic.requiresAssessment) throw AppError.badRequest('This training requires an assessment and cannot be completed by acknowledgement.');
-
-  await assertJdAndCvReady(userId);
 
   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
   if (!readingDone) throw AppError.forbidden('You must finish the required reading time before completing this training.');
