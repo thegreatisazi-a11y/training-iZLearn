@@ -1040,6 +1040,13 @@ model CurriculumVitae {
   trainingsNotApplicable    Boolean @default(false)
   publicationsNotApplicable Boolean @default(false)
   attachmentPath String? // optional uploaded CV document
+  // CV review workflow: a Draft is a private work-in-progress; submitting the final copy
+  // (SUBMITTED) sends it to the owner's supervisor, who APPROVES or REJECTS (with a comment).
+  status        String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REJECTED
+  submittedAt   DateTime?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  reviewComment String?
   isDeleted     Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

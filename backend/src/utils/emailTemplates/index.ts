@@ -17,7 +17,9 @@ export type EmailType =
   | 'scheduleCreated'
   | 'courseRevised'
   | 'retakeRequested'
-  | 'retakeDecision';
+  | 'retakeDecision'
+  | 'cvSubmitted'
+  | 'cvReviewed';
 
 export interface RenderedEmail {
   subject: string;
@@ -188,6 +190,24 @@ export function renderEmail(type: EmailType, orgName: string, data: Data): Rende
             (data.decision === 'approved'
               ? paragraph('You may now start the assessment again from your "My Trainings" page.')
               : ''),
+        ),
+      };
+    case 'cvSubmitted':
+      return {
+        subject: `CV submitted for review: ${data.userName ?? ''}`,
+        html: layout(
+          'CV Submitted for Review',
+          paragraph(`${escape(data.userName)} has submitted their CV for your review. Please open Team CVs to approve it or send it back with a comment.`),
+        ),
+      };
+    case 'cvReviewed':
+      return {
+        subject: `Your CV was ${data.decision ?? 'reviewed'}`,
+        html: layout(
+          'CV Review Decision',
+          paragraph(`Your submitted CV has been ${escape(data.decision)}.`) +
+            (data.remarks ? paragraph(`Comment: ${escape(data.remarks)}`) : '') +
+            (data.decision === 'rejected' ? paragraph('Please update your CV from the "My CV" page and submit it again.') : ''),
         ),
       };
     default:

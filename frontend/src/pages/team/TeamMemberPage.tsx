@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify';
 import { printJobDescription } from '@/lib/jdPrint';
 import { printCurriculumVitae } from '@/lib/cvPrint';
 import { CvDocument } from '@/components/common/CvDocument';
+import { CvReviewActions } from '@/components/common/CvReviewActions';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
@@ -83,6 +84,8 @@ interface CvData {
   experience?: { organisation?: string; role?: string; tenureFrom?: string; tenureTo?: string; responsibilities?: string }[];
   trainings?: { detail?: string }[];
   publications?: { detail?: string }[];
+  status?: string | null;
+  reviewComment?: string | null;
 }
 
 const STATUS_TONE: Record<string, string> = {
@@ -388,7 +391,16 @@ export default function TeamMemberPage() {
         ) : !cvData?.cv ? (
           <p className="text-sm text-slate-500">This team member has not created a CV yet.</p>
         ) : (
-          <CvDocument header={cvData.header} cv={cvData.cv} />
+          <>
+            {/* Option A: same shared review block used on the Team CVs page. */}
+            <CvReviewActions
+              userId={userId}
+              status={cvData.cv.status}
+              reviewComment={cvData.cv.reviewComment}
+              onReviewed={() => qc.invalidateQueries({ queryKey: ['team-member-cv', userId] })}
+            />
+            <CvDocument header={cvData.header} cv={cvData.cv} />
+          </>
         )}
       </Dialog>
 

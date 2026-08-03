@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess } from '../utils/response';
-import { paginationQuery } from '@izlearn/shared';
+import { paginationQuery, reviewCvSchema } from '@izlearn/shared';
 import * as svc from '../services/cv.service';
 
 export const mine = asyncHandler(async (req: Request, res: Response) => sendSuccess(res, await svc.getMyCV(req.user!.id)));
@@ -17,4 +17,9 @@ export const getUser = asyncHandler(async (req: Request, res: Response) =>
 
 export const team = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.listTeamCVs(req.user!, paginationQuery.parse(req.query))),
+);
+
+// Supervisor approves/rejects a submitted CV (scope enforced in the service).
+export const reviewUser = asyncHandler(async (req: Request, res: Response) =>
+  sendSuccess(res, await svc.reviewCV(req.params.userId, reviewCvSchema.parse(req.body), req.user!), 'CV review recorded'),
 );

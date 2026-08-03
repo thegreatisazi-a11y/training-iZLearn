@@ -721,6 +721,10 @@ export default function TopicDetailPage() {
   const activeMaterials = allMaterials.filter((m) => m.isCurrentVersion && !m.isObsolete && !m.isStaged);
   const stagedMaterials = allMaterials.filter((m) => m.isStaged);
   const archivedMaterials = allMaterials.filter((m) => m.isObsolete);
+  // A read time set on a staged (not-yet-live) file is held in draftMeta.materialReadTimes
+  // (the file's own requiredViewSeconds only updates on publish), so read it from there to
+  // show the pending value in the Pending Changes table.
+  const stagedReadTimes = (((t.draftMeta as { materialReadTimes?: Record<string, number> } | null) ?? {}).materialReadTimes ?? {});
   // G4: split questions into live and staged (pending) for a published topic.
   const allQuestions = (questions?.data ?? []) as unknown as Question[];
   const liveQuestions = allQuestions.filter((q) => !q.isStaged); // includes pending-removal (still live until publish)
@@ -898,6 +902,20 @@ export default function TopicDetailPage() {
                     key: 'replaces',
                     header: 'Change',
                     render: (r) => (r.replacesMaterialId ? `Replaces ${materialNameById(r.replacesMaterialId) ?? 'a current file'}` : 'New file'),
+                  },
+                  {
+                    key: 'readTime',
+                    header: 'Read time',
+                    render: (r) => {
+                      // Prefer the staged (pending) read time; fall back to the file's own value.
+                      const secs = stagedReadTimes[r.id] ?? r.requiredViewSeconds ?? 0;
+                      const label = secs > 0 ? `${Math.round((secs / 60) * 10) / 10} min` : '—';
+                      return canMaterialWrite ? (
+                        <button type="button" className="text-primary hover:underline" onClick={() => { setReadTimeTarget(r); setReadTimeMin(secs ? String(Math.round((secs / 60) * 10) / 10) : ''); }}>
+                          {label} <Pencil className="ml-1 inline h-3 w-3" />
+                        </button>
+                      ) : label;
+                    },
                   },
                   {
                     key: 'actions',

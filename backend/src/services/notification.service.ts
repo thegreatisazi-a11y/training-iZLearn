@@ -189,6 +189,19 @@ export async function notifyRetakeDecision(traineeUserId: string, topicId: strin
   await send('retakeDecision', trainee, { topicTitle: t.title, decision: approved ? 'approved' : 'rejected', remarks: remarks ?? undefined });
 }
 
+/** Notify the owner's supervisor that a CV has been submitted for review. */
+export async function notifyCvSubmitted(ownerUserId: string) {
+  const supervisor = await supervisorRecipient(ownerUserId);
+  const owner = await userRecipient(ownerUserId);
+  await send('cvSubmitted', supervisor, { userName: owner?.fullName });
+}
+
+/** Notify the employee that their submitted CV was approved/rejected. */
+export async function notifyCvReviewed(ownerUserId: string, approved: boolean, comment?: string | null) {
+  const owner = await userRecipient(ownerUserId);
+  await send('cvReviewed', owner, { decision: approved ? 'approved' : 'rejected', remarks: comment ?? undefined });
+}
+
 export async function notifyUserRequestSubmitted(fullName: string, employeeId: string, requestedBy: string) {
   for (const r of await usersWithPermission('userManagement', 'approve')) {
     await send('userRequestSubmitted', r, { fullName, employeeId, requestedBy });

@@ -46,5 +46,20 @@ export const upsertCvSchema = z.object({
   experienceNotApplicable: z.coerce.boolean().optional(),
   trainingsNotApplicable: z.coerce.boolean().optional(),
   publicationsNotApplicable: z.coerce.boolean().optional(),
+  // Draft = private work-in-progress; Submitted = final copy sent to the supervisor for review.
+  status: z.enum(['DRAFT', 'SUBMITTED']).optional(),
 });
 export type UpsertCvInput = z.infer<typeof upsertCvSchema>;
+
+/** Supervisor's review decision on a submitted CV. A rejection requires a comment. */
+export const reviewCvSchema = z
+  .object({
+    decision: z.enum(['APPROVE', 'REJECT']),
+    comment: optionalString,
+  })
+  .superRefine((v, ctx) => {
+    if (v.decision === 'REJECT' && !(v.comment ?? '').trim()) {
+      ctx.addIssue({ code: 'custom', message: 'A comment is required when rejecting a CV.', path: ['comment'] });
+    }
+  });
+export type ReviewCvInput = z.infer<typeof reviewCvSchema>;

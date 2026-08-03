@@ -53,7 +53,7 @@ const STATUS_TONE: Record<string, string> = {
 export default function MyTrainingsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'overdue'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'blocked'>('all');
   const [retakeFor, setRetakeFor] = useState<MyTraining | null>(null);
   const [justification, setJustification] = useState('');
 
@@ -89,6 +89,7 @@ export default function MyTrainingsPage() {
     if (filter === 'pending') return all.filter((t) => ['PENDING', 'IN_PROGRESS'].includes(t.status));
     if (filter === 'completed') return all.filter((t) => t.status === 'COMPLETED' || t.result?.isPassed);
     if (filter === 'overdue') return all.filter((t) => t.status === 'OVERDUE');
+    if (filter === 'blocked') return all.filter((t) => t.status === 'BLOCKED');
     return all;
   }, [data, filter]);
 
@@ -99,6 +100,7 @@ export default function MyTrainingsPage() {
       pending: all.filter((t) => ['PENDING', 'IN_PROGRESS'].includes(t.status)).length,
       completed: all.filter((t) => t.status === 'COMPLETED' || t.result?.isPassed).length,
       overdue: all.filter((t) => t.status === 'OVERDUE').length,
+      blocked: all.filter((t) => t.status === 'BLOCKED').length,
     };
   }, [data]);
 
@@ -174,6 +176,7 @@ export default function MyTrainingsPage() {
         <Tab k="pending" label="Pending" n={counts.pending} />
         <Tab k="completed" label="Completed" n={counts.completed} />
         <Tab k="overdue" label="Overdue" n={counts.overdue} />
+        <Tab k="blocked" label="Blocked" n={counts.blocked} />
       </div>
 
       <DataTable
@@ -188,7 +191,7 @@ export default function MyTrainingsPage() {
       <Dialog
         open={!!retakeFor}
         onClose={() => setRetakeFor(null)}
-        title={`${retakeFor?.status === 'OVERDUE' ? 'Request Access' : 'Request Retake'} — ${retakeFor?.topic?.title ?? ''}`}
+        title={`${retakeFor?.status === 'OVERDUE' ? 'Request Access' : 'Request Retake'} — ${[retakeFor?.topic?.topicNumber || retakeFor?.topic?.topicCode, retakeFor?.topic?.title].filter(Boolean).join(' – ')}`}
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setRetakeFor(null)}>Cancel</Button>
@@ -203,7 +206,7 @@ export default function MyTrainingsPage() {
       >
         <p className="mb-3 text-sm text-slate-600">
           {retakeFor?.status === 'OVERDUE'
-            ? 'This training is past its due date and is locked. Explain why you still need to take it — your request will be sent to your supervisor for approval.'
+            ? 'This training is past its due date and is locked. You need to submit the request to your supervisor for approval.'
             : 'You have reached the maximum attempts for this assessment. Explain why you should be allowed to retake it — your request will be sent to your supervisor for approval.'}
         </p>
         <textarea

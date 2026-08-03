@@ -6,6 +6,22 @@
   color-scheme: light;
 }
 
+/* Remove the browser's built-in "reveal password" / clear controls (Edge/IE) so a password
+   can never be shown on screen. */
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
+
+/* Screenshot deterrent: blank the app when the browser's own Print (Ctrl+P → "Save as PDF")
+   is used, so it can't be used to capture the screen. The dedicated print/export features open
+   their own windows, so this does not affect them. Not a substitute for OS-level controls. */
+/* @media print {
+  body * {
+    visibility: hidden !important;
+  }
+} */
+
 html,
 body,
 #root {

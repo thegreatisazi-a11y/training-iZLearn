@@ -264,6 +264,7 @@ export const svc = {
     // payload, letting the page read data.data as the rows array (matches createCrud).
     team: (params?: ListParams) => api.get('/cv/team', { params }).then((r) => r.data.data),
     user: (userId: string) => data(api.get(`/cv/user/${userId}`)),
+    review: (userId: string, body: unknown) => data(api.post(`/cv/user/${userId}/review`, body)),
   },
 
   tni: {

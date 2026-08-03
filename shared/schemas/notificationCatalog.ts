@@ -24,6 +24,8 @@ export const NOTIFICATION_TYPES = [
   'courseRevised',
   'retakeRequested',
   'retakeDecision',
+  'cvSubmitted',
+  'cvReviewed',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -54,6 +56,10 @@ export const NOTIFICATION_CATALOG: NotificationDef[] = [
   { type: 'assessmentBlocked', module: 'assessments', moduleLabel: 'Assessments', label: 'Assessment Blocked', description: 'Sent when a trainee is blocked after reaching the maximum attempts.', defaultSubject: 'Assessment blocked: {{topicTitle}}', variables: [...COMMON, 'topicTitle'] },
   { type: 'retakeRequested', module: 'assessments', moduleLabel: 'Assessments', label: 'Retake Requested', description: 'Sent to a supervisor when a trainee requests an assessment retake.', defaultSubject: 'Retake request: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'justification'] },
   { type: 'retakeDecision', module: 'assessments', moduleLabel: 'Assessments', label: 'Retake Decision', description: 'Sent to a trainee when their retake request is approved/rejected.', defaultSubject: 'Your retake request was {{decision}}: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'decision', 'remarks'] },
+
+  // ---- CV ----
+  { type: 'cvSubmitted', module: 'cv', moduleLabel: 'CV', label: 'CV Submitted for Review', description: "Sent to a supervisor when a team member submits their CV for review.", defaultSubject: 'CV submitted for review: {{userName}}', variables: [...COMMON] },
+  { type: 'cvReviewed', module: 'cv', moduleLabel: 'CV', label: 'CV Reviewed', description: 'Sent to an employee when their submitted CV is approved or rejected.', defaultSubject: 'Your CV was {{decision}}', variables: [...COMMON, 'decision', 'remarks'] },
 
   // ---- Users & Access ----
   { type: 'userRequestSubmitted', module: 'userManagement', moduleLabel: 'Users', label: 'User Request Submitted', description: 'Sent to approvers when a new user-creation request is submitted.', defaultSubject: 'New user creation request awaiting approval', variables: [...COMMON, 'fullName', 'employeeId', 'requestedBy'] },

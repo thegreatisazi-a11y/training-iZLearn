@@ -25,5 +25,8 @@ router.post('/mine', validate(upsertCvSchema), c.upsertMine);
 // scope is still enforced in the service.
 router.get('/team', requirePermission('team', 'view'), c.team);
 router.get('/user/:userId', requirePermission('cv', 'view'), c.getUser);
+// Supervisor review of a submitted CV — gated on cv:view; the service enforces that the
+// requester is the owner's supervisor (or an admin).
+router.post('/user/:userId/review', requirePermission('cv', 'view'), c.reviewUser);
 
 export default router;

@@ -2,7 +2,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import type { AuthUser } from '../types';
-import type { UpsertCvInput, PaginationQuery } from '@izlearn/shared';
+import type { UpsertCvInput, ReviewCvInput, PaginationQuery } from '@izlearn/shared';
+import { notifyCvSubmitted, notifyCvReviewed } from './notification.service';
 
 /**
  * CV module (CR-52 / D-CV1) — ONE live CV per user; history is preserved through
@@ -93,12 +94,51 @@ export async function upsertMyCV(userId: string, input: UpsertCvInput) {
     trainingsNotApplicable: !!input.trainingsNotApplicable,
     publicationsNotApplicable: !!input.publicationsNotApplicable,
   };
+  // Draft = stays private; Submitting the final copy sends it for supervisor review and
+  // stamps submittedAt, clearing any prior review so the supervisor sees a fresh submission.
+  const submitting = input.status === 'SUBMITTED';
+  const review = submitting
+    ? { status: 'SUBMITTED', submittedAt: new Date(), reviewedBy: null, reviewedAt: null, reviewComment: null }
+    : { status: 'DRAFT' };
   const existing = await prisma.curriculumVitae.findFirst({ where: { userId } });
   // Each save is a new version of the CV (history is preserved in the audit trail).
   // Computed explicitly (not { increment }) so a pre-existing CV whose version field is
   // absent still advances visibly: a CV shown as v1 becomes v2 on the next save.
-  if (existing) return prisma.curriculumVitae.update({ where: { id: existing.id }, data: { ...data, version: (existing.version ?? 1) + 1 } });
-  return prisma.curriculumVitae.create({ data: { ...data, userId, createdBy: userId } });
+  const saved = existing
+    ? await prisma.curriculumVitae.update({ where: { id: existing.id }, data: { ...data, ...review, version: (existing.version ?? 1) + 1 } })
+    : await prisma.curriculumVitae.create({ data: { ...data, ...review, userId, createdBy: userId } });
+  // On submitting the final copy, notify the owner's supervisor that a review is pending.
+  if (submitting) await notifyCvSubmitted(userId).catch(() => undefined);
+  return saved;
+}
+
+/**
+ * Supervisor review of a submitted CV. Only the owner's supervisor (or an admin) may act,
+ * and only a CV in SUBMITTED state can be decided. Reject requires a comment (schema-enforced).
+ */
+export async function reviewCV(targetUserId: string, input: ReviewCvInput, requester: AuthUser) {
+  if (!isAdmin(requester)) {
+    const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
+    if (!target) throw AppError.notFound('User not found');
+    if (target.supervisorId !== requester.id) {
+      throw AppError.forbidden('You may only review the CVs of your direct reports.');
+    }
+  }
+  const cv = await prisma.curriculumVitae.findFirst({ where: { userId: targetUserId, isDeleted: false } });
+  if (!cv) throw AppError.notFound('CV not found');
+  if (cv.status !== 'SUBMITTED') throw AppError.conflict('Only a submitted CV can be reviewed.');
+  const updated = await prisma.curriculumVitae.update({
+    where: { id: cv.id },
+    data: {
+      status: input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      reviewedBy: requester.id,
+      reviewedAt: new Date(),
+      reviewComment: input.comment?.trim() || null,
+    },
+  });
+  // Let the employee know the outcome (and any comment) of the review.
+  await notifyCvReviewed(targetUserId, input.decision === 'APPROVE', input.comment).catch(() => undefined);
+  return updated;
 }
 
 /** Visibility-gated read of another user's CV (owner / supervisor / admin only). */
@@ -128,11 +168,12 @@ export async function listTeamCVs(requester: AuthUser, q: PaginationQuery) {
   ]);
   const ids = users.map((u) => u.id);
   const [cvs, depts, frs] = await Promise.all([
-    ids.length ? prisma.curriculumVitae.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }) : Promise.resolve([]),
+    ids.length ? prisma.curriculumVitae.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true, status: true } }) : Promise.resolve([]),
     prisma.department.findMany({ where: { id: { in: users.map((u) => u.departmentId) } } }),
     prisma.designationMaster.findMany({ where: { id: { in: users.map((u) => u.designationId).filter(Boolean) as string[] } } }),
   ]);
   const hasCv = new Set(cvs.map((c) => c.userId));
+  const cvStatus = new Map(cvs.map((c) => [c.userId, c.status]));
   const deptName = new Map(depts.map((d) => [d.id, d.name]));
   const frName = new Map(frs.map((f) => [f.id, f.displayName]));
   const data = users.map((u) => ({
@@ -142,6 +183,7 @@ export async function listTeamCVs(requester: AuthUser, q: PaginationQuery) {
     departmentName: deptName.get(u.departmentId) ?? null,
     functionalRole: u.designationId ? frName.get(u.designationId) ?? null : null,
     hasCv: hasCv.has(u.id),
+    cvStatus: cvStatus.get(u.id) ?? null,
   }));
   return { data, total, page: q.page, pageSize: q.pageSize };
 }

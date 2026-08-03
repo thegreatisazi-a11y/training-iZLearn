@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Eye, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/spinner';
 import { CvDocument } from '@/components/common/CvDocument';
+import { CvReviewActions } from '@/components/common/CvReviewActions';
 import { svc } from '@/services';
 import { printCurriculumVitae } from '@/lib/cvPrint';
 
@@ -20,6 +21,7 @@ interface TeamRow {
   departmentName?: string | null;
   functionalRole?: string | null;
   hasCv: boolean;
+  cvStatus?: string | null;
 }
 interface CvHeader { employeeName: string; employeeCode: string; departmentName?: string | null; functionalRole?: string | null }
 interface LanguageItem { language?: string; read?: boolean; write?: boolean; understand?: boolean }
@@ -33,9 +35,16 @@ interface CvData {
   experience?: { organisation?: string; role?: string; tenureFrom?: string; tenureTo?: string; responsibilities?: string }[];
   trainings?: { detail?: string }[];
   publications?: { detail?: string }[];
+  status?: string | null;
+  reviewComment?: string | null;
 }
 
+const CV_STATUS_TONE: Record<string, string> = { APPROVED: 'COMPLETED', REJECTED: 'REJECTED', SUBMITTED: 'IN_PROGRESS', DRAFT: 'PENDING' };
+const cvStatusLabel = (s?: string | null) =>
+  s === 'SUBMITTED' ? 'Submitted' : s ? s.charAt(0) + s.slice(1).toLowerCase() : '';
+
 export default function TeamCVsPage() {
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [viewUserId, setViewUserId] = useState<string | null>(null);
   // CR-CV3: client-side filters over the loaded team list (name / employee code / dept / functional role / CV status).
@@ -82,7 +91,16 @@ export default function TeamCVsPage() {
     { key: 'employeeId', header: 'Employee Code' },
     { key: 'functionalRole', header: 'Functional Role', render: (r) => r.functionalRole ?? '—' },
     { key: 'departmentName', header: 'Department', render: (r) => r.departmentName ?? '—' },
-    { key: 'hasCv', header: 'CV', render: (r) => (r.hasCv ? <Badge tone="COMPLETED">On file</Badge> : <Badge tone="PENDING">Not created</Badge>) },
+    {
+      key: 'hasCv',
+      header: 'CV',
+      render: (r) =>
+        !r.hasCv ? (
+          <Badge tone="PENDING">Not created</Badge>
+        ) : (
+          <Badge tone={CV_STATUS_TONE[r.cvStatus ?? 'DRAFT'] ?? 'default'}>{cvStatusLabel(r.cvStatus) || 'On file'}</Badge>
+        ),
+    },
     {
       key: 'actions',
       header: '',
@@ -163,8 +181,22 @@ export default function TeamCVsPage() {
         ) : !cvData?.cv ? (
           <p className="text-sm text-slate-500">This user has not created a CV yet.</p>
         ) : (
-          // C2: render the same formatted, read-only CV layout used on "My CV".
-          <CvDocument header={cvData.header} cv={cvData.cv} />
+          <>
+            {/* Option A: shared review block (status + approve/reject) — same on the member profile. */}
+            {viewUserId && (
+              <CvReviewActions
+                userId={viewUserId}
+                status={cvData.cv.status}
+                reviewComment={cvData.cv.reviewComment}
+                onReviewed={() => {
+                  qc.invalidateQueries({ queryKey: ['team-cvs'] });
+                  qc.invalidateQueries({ queryKey: ['team-cv', viewUserId] });
+                }}
+              />
+            )}
+            {/* C2: render the same formatted, read-only CV layout used on "My CV". */}
+            <CvDocument header={cvData.header} cv={cvData.cv} />
+          </>
         )}
       </Dialog>
     </div>

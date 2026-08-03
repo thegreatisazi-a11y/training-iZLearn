@@ -98,7 +98,7 @@ export function ESignatureModal({
       }
     >
       <p className="mb-3 text-sm text-slate-600">
-        Re-enter your credentials to apply your electronic signature. This action is permanently recorded.
+        Enter your credentials to apply your electronic signature. This action is permanently recorded.
       </p>
       <Field label="Username" required>
         <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" onPaste={(e) => e.preventDefault()} placeholder={expectedUser ? `e.g. ${expectedUser}` : ''} />
@@ -135,7 +135,7 @@ export function ESignatureModal({
             }
           }}
         />
-        <span>I confirm that I am applying my electronic signature and that this action is attributable to me.</span>
+        <span>I confirm that I am applying my electronic signature and this action is attributable to me.</span>
       </label>
       {!canSign && !error && (
         <p className="mt-2 text-xs text-slate-400">

@@ -45,7 +45,7 @@ export function InactivityLockOverlay() {
           <Lock className="h-5 w-5" />
           <h2 className="text-lg font-semibold text-slate-800">Session Locked</h2>
         </div>
-        <p className="mb-4 text-sm text-slate-600">Your session was locked due to inactivity. Re-enter your credentials to continue.</p>
+        <p className="mb-4 text-sm text-slate-600">Your session was locked due to inactivity. Enter your credentials to continue.</p>
         <Field label="User ID" required>
           <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
         </Field>

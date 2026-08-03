@@ -4,6 +4,7 @@ import { Plus, Trash2, Printer, History } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input, Textarea, Field } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { PageLoader } from '@/components/ui/spinner';
@@ -36,6 +37,9 @@ interface CvData {
   experienceNotApplicable?: boolean;
   trainingsNotApplicable?: boolean;
   publicationsNotApplicable?: boolean;
+  status?: string | null;
+  reviewComment?: string | null;
+  reviewedAt?: string | null;
 }
 
 interface FormState {
@@ -188,14 +192,13 @@ export default function MyCVPage() {
   const cvValid = missing.length === 0;
 
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (status: 'DRAFT' | 'SUBMITTED') =>
       svc.cv.save({
         languagesKnown: form.languagesKnown || undefined,
         languages: filledLanguages,
         qualifications: filledQuals,
         currentRole: form.currentRole || undefined,
         currentTenureFrom: form.currentTenureFrom || undefined,
-        currentTenureTo: form.currentTenureTo || undefined,
         currentResponsibilities: form.currentResponsibilities || undefined,
         experience: form.experienceNotApplicable ? [] : filledExperience,
         trainings: form.trainingsNotApplicable ? [] : filledTrainings,
@@ -203,9 +206,10 @@ export default function MyCVPage() {
         experienceNotApplicable: form.experienceNotApplicable,
         trainingsNotApplicable: form.trainingsNotApplicable,
         publicationsNotApplicable: form.publicationsNotApplicable,
+        status,
       }),
-    onSuccess: () => {
-      toast.success('CV saved.');
+    onSuccess: (_res, status) => {
+      toast.success(status === 'SUBMITTED' ? 'CV submitted for supervisor review.' : 'Draft saved.');
       setEditing(false);
       // Refetch so the bumped version number (and other server-set fields) show immediately.
       qc.invalidateQueries({ queryKey: ['my-cv'] });
@@ -242,12 +246,15 @@ export default function MyCVPage() {
                 <Button variant="outline" onClick={() => { setForm(seedForm(data?.cv)); setEditing(false); }} disabled={save.isPending}>
                   Cancel
                 </Button>
+                <Button variant="outline" disabled={save.isPending} onClick={() => save.mutate('DRAFT')}>
+                  {save.isPending ? 'Saving…' : 'Save as Draft'}
+                </Button>
                 <Button
                   disabled={save.isPending || !cvValid}
                   title={cvValid ? undefined : `Complete all sections first: ${missing.join(', ')}`}
-                  onClick={() => save.mutate()}
+                  onClick={() => save.mutate('SUBMITTED')}
                 >
-                  {save.isPending ? 'Saving…' : 'Save CV'}
+                  {save.isPending ? 'Submitting…' : 'Submit final version'}
                 </Button>
               </>
             ) : (
@@ -257,6 +264,23 @@ export default function MyCVPage() {
         }
       />
       <CvHistoryDialog open={histOpen} onClose={() => setHistOpen(false)} header={header} />
+
+      {/* CV review status: Draft / Submitted (awaiting review) / Approved / Rejected (+comment). */}
+      {data?.cv?.status && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <span className="text-slate-500">Review status:</span>
+          <Badge
+            tone={
+              data.cv.status === 'APPROVED' ? 'COMPLETED' : data.cv.status === 'REJECTED' ? 'REJECTED' : data.cv.status === 'SUBMITTED' ? 'IN_PROGRESS' : 'default'
+            }
+          >
+            {data.cv.status === 'SUBMITTED' ? 'Submitted — awaiting review' : data.cv.status.charAt(0) + data.cv.status.slice(1).toLowerCase()}
+          </Badge>
+          {data.cv.status === 'REJECTED' && data.cv.reviewComment && (
+            <span className="text-red-700">Supervisor comment: {data.cv.reviewComment}</span>
+          )}
+        </div>
+      )}
 
       {/* S3: all sections are mandatory — show what's still missing while editing. */}
       {editing && !cvValid && (
@@ -328,10 +352,9 @@ export default function MyCVPage() {
       <Card className="mb-4">
         <CardContent>
           <div className="mb-2 text-sm font-semibold uppercase text-slate-500">Current Role</div>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Current Role / Designation" required><Input value={form.currentRole} onChange={(e) => upd('currentRole', e.target.value)} /></Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Current Functional Role" required><Input value={form.currentRole} onChange={(e) => upd('currentRole', e.target.value)} /></Field>
             <Field label="From (MM-YYYY)"><Input value={form.currentTenureFrom} onChange={(e) => upd('currentTenureFrom', e.target.value)} placeholder="01-2024" /></Field>
-            <Field label="To (MM-YYYY)"><Input value={form.currentTenureTo} onChange={(e) => upd('currentTenureTo', e.target.value)} placeholder="present" /></Field>
           </div>
           <Field label="Key Responsibilities"><Textarea value={form.currentResponsibilities} onChange={(e) => upd('currentResponsibilities', e.target.value)} /></Field>
         </CardContent>
