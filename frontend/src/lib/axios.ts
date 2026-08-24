@@ -52,9 +52,30 @@ async function doRefresh(): Promise<string | null> {
   }
 }
 
+// /**
+ // * Requests made with `responseType: 'blob'` (the file viewer, downloads, exports) receive the
+ // * server's JSON *error* body as a Blob too, so `response.data.error.message` is unreachable
+ // * and every failure collapses to Axios's generic "Request failed with status code N". That
+ // * hides the actual reason — e.g. exactly WHY a material is 403 — from the user and from logs.
+ // * Re-parse the blob into the JSON shape the rest of the app expects before rejecting.
+ // */
+// async function unwrapBlobError(error: AxiosError): Promise<void> {
+  // const data = error.response?.data as unknown;
+  // if (!(data instanceof Blob)) return;
+  // // Non-JSON error bodies (an HTML proxy page, say) are left alone.
+  // if (data.type && !data.type.includes('json') && !data.type.includes('text')) return;
+  // try {
+    // const text = await data.text();
+    // if (text) (error.response as { data: unknown }).data = JSON.parse(text);
+  // } catch {
+    // /* not JSON after all — keep the original blob */
+  // }
+// }
+//
 api.interceptors.response.use(
   (r) => r,
   async (error: AxiosError) => {
+    // await unwrapBlobError(error);
     const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
     const status = error.response?.status;
 

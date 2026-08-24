@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, sendCreated, AppError } from '../utils/response';
 import * as svc from '../services/assessment.service';
+// import * as ackSvc from '../services/topicAcknowledgement.service';
 
 export const start = asyncHandler(async (req: Request, res: Response) =>
   sendCreated(res, await svc.startAttempt(req.user!.id, req.body.topicId, req.body.assignmentId), 'Assessment started'),
@@ -14,6 +15,21 @@ export const acknowledgeRead = asyncHandler(async (req: Request, res: Response) 
   sendCreated(res, await svc.completeByAcknowledgement(req.user!.id, req.body.topicId, req.body.assignmentId), 'Training completed'),
 );
 
+// /**
+ // * Read-and-understood declaration for a topic version. Personal actions on the user's own
+ // * assigned training — the reading controls are enforced in the service, so a client cannot
+ // * acknowledge material it never opened.
+ // */
+// export const acknowledgementStatus = asyncHandler(async (req: Request, res: Response) => {
+  // const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : '';
+  // if (!topicId) throw AppError.badRequest('topicId is required.');
+  // sendSuccess(res, await ackSvc.getAcknowledgementStatus(req.user!.id, topicId));
+// });
+//
+// export const acknowledgeTopic = asyncHandler(async (req: Request, res: Response) =>
+  // sendCreated(res, await ackSvc.acknowledgeTopic(req.user!.id, req.body.topicId), 'Acknowledgement recorded'),
+// );
+//
 export const listMine = asyncHandler(async (req, res) =>
   sendSuccess(res, await svc.listAttempts({ userId: req.user!.id, topicId: req.query.topicId as string | undefined })),
 );

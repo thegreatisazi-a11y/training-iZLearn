@@ -44,6 +44,8 @@ router.post('/:id/view/start', c.startView);
 router.post('/:id/view/complete', c.completeView);
 // A4: auto-save reading progress so a session can resume where the user left off.
 router.post('/:id/view/progress', c.saveViewProgress);
+// // Page-coverage control: credit the page currently on screen (server validates the dwell).
+// router.post('/:id/view/page', c.recordPageView);
 // Set per-material required reading time (course managers / material managers).
 router.patch('/:id', requirePermission('materialManagement', 'write'), c.setViewTime);
 // Flag/unflag a library material as the global training instruction (managers).

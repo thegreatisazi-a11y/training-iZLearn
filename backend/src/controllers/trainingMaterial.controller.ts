@@ -94,6 +94,53 @@ export const acknowledgeInstruction = asyncHandler(async (req: Request, res: Res
   sendSuccess(res, await svc.acknowledgeInstruction(req.user!.id, req.params.id));
 });
 
+// /**
+ // * Non-manager read access to one material file, shared by the inline viewer and the download
+ // * endpoint so the two can never drift apart (they were previously duplicated line-for-line).
+ // * No-ops for material/course managers, who may reach any version.
+ // */
+// async function assertMayReadMaterial(req: Request): Promise<void> {
+  // if (canManageMaterials(req)) return;
+//
+  // const material = await svc.getMaterial(req.params.id);
+  // // UR-16: a trainee may only reach the current, non-obsolete version.
+  // if (material.isObsolete || !material.isCurrentVersion) {
+    // throw AppError.forbidden('Only the current version of this material is available.');
+  // }
+  // // The global training instruction is a Library file with no parent topic and is shown to
+  // // every trainee before starting; exempt it from the topic-published / completion gates
+  // // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+  // if (material.isInstruction) return;
+//
+  // // Other Material Library files likewise have no parent topic. MAT-1 exists to stop a
+  // // trainee reaching UNPUBLISHED TOPIC content by guessing an id — a library file is not
+  // // topic content, and the library listing is already gated on materialManagement:read.
+  // // Without this, a read-only library user could browse the listing but preview nothing.
+  // if (!material.topicId) {
+    // if (!hasPermission(req.user?.permissions, 'materialManagement', 'read')) {
+      // throw AppError.forbidden('This material is not currently available.');
+    // }
+    // return;
+  // }
+//
+  // // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+  // // (or archived) content, even by guessing a material id.
+  // const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
+  // if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
+    // throw AppError.forbidden('This material is not currently available.');
+  // }
+  // // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
+  // // training, material access is revoked (enable via material.lock_after_completion).
+  // if (await getBool('material.lock_after_completion', false)) {
+    // const completed = await prisma.trainingAssignment.findFirst({
+      // where: { userId: req.user!.id, topicId: material.topicId, isDeleted: false, status: 'COMPLETED' },
+    // });
+    // if (completed) {
+      // throw AppError.forbidden('Access to this material is locked after you have completed the training.');
+    // }
+  // }
+// }
+//
 export const download = asyncHandler(async (req: Request, res: Response) => {
   // BUG-10: this endpoint serves BOTH the inline locked viewer (no flag) and explicit
   // file downloads (?download=1). View-only users may render inline but must not save
@@ -130,6 +177,7 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
       }
     }
   }
+  // await assertMayReadMaterial(req);
   const { key, originalFileName, fileType } = await svc.downloadMaterial(req.params.id);
   await streamDownload(res, key, originalFileName, contentTypeForExt(fileType), { inline: true });
 });
@@ -166,6 +214,7 @@ export const viewPdf = asyncHandler(async (req: Request, res: Response) => {
       }
     }
   }
+  // await assertMayReadMaterial(req);
   const { key, originalFileName } = await svc.getViewablePdf(req.params.id);
   const pdfName = `${originalFileName.replace(/\.[^.]+$/, '')}.pdf`;
   await streamDownload(res, key, pdfName, 'application/pdf', { inline: true });
@@ -215,6 +264,14 @@ export const saveViewProgress = asyncHandler(async (req: Request, res: Response)
   sendSuccess(res, await viewSvc.saveMaterialProgress(req.user!.id, req.params.id, elapsedSeconds), 'Reading progress saved');
 });
 
+// // Page-coverage control: credit the page currently on screen. Whether it is actually
+// // credited is decided server-side against the per-page dwell interval.
+// export const recordPageView = asyncHandler(async (req: Request, res: Response) => {
+  // const page = Number((req.body as { page?: unknown }).page);
+  // if (!Number.isInteger(page) || page < 1) throw AppError.badRequest('page must be a positive integer.');
+  // sendSuccess(res, await viewSvc.recordPageView(req.user!.id, req.params.id, page));
+// });
+//
 export const readingStatus = asyncHandler(async (req: Request, res: Response) => {
   const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : '';
   if (!topicId) throw AppError.badRequest('topicId is required.');

@@ -5,6 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import DOMPurify from 'dompurify';
 import { api, apiError } from '@/lib/axios';
+// import { renderXlsxInWorker, XlsxTooLargeError } from '@/lib/renderXlsx';
 
 // pdfjs runs its parser/renderer off the main thread; point it at the bundled worker.
 // (new URL(..., import.meta.url) is rewritten by Vite to an emitted asset URL.)
@@ -16,6 +17,16 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mi
  *   - ppt / pptx / doc / xls → server-converted to PDF (LibreOffice). If conversion is
  *     unavailable, a graceful "download to view" panel is shown instead of an error, and
  *     the file auto-upgrades to an inline PDF preview whenever LibreOffice is available.
+ // *   - pdf → pdf.js.
+ // *   - doc / docx / ppt / pptx / xls → server-converted to PDF (LibreOffice) and shown in the
+ // *     SAME locked pdf.js surface. Word goes through the server rather than being rendered as
+ // *     continuous HTML so that it paginates, which is what makes the per-page reading control
+ // *     enforceable. If conversion is unavailable, docx falls back to the in-browser HTML
+ // *     renderer so the file stays viewable — and because the server cannot derive a page count
+ // *     in that case either, coverage is skipped there and only the reading-time gate applies.
+ // *   - xlsx → rendered NATIVELY, sheet by sheet, never converted. A spreadsheet is not a
+ // *     paginated document (its pages exist only as print layout and split wide grids
+ // *     mid-column), so the WORKSHEET is the reading unit instead of the page.
  *   - images / video / audio / text → native locked players.
  */
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
@@ -24,6 +35,11 @@ const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga', 'opus'];
 const TEXT_EXTS = ['txt', 'csv', 'log', 'md', 'json'];
 /** Rendered via the server LibreOffice→PDF endpoint (presentations + legacy binaries). */
 const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls'];
+// /** Rendered via the server LibreOffice→PDF endpoint. .xlsx is deliberately absent — it
+ // *  renders natively (see above). Legacy .xls stays here: it can't be parsed in-browser. */
+// const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls', 'docx'];
+// /** Office types that can still be rendered in-browser if the server conversion is down. */
+// const OFFICE_HTML_FALLBACK_EXTS = ['docx'];
 
 /**
  * In-app LOCKED file viewer (CR-32 + CR-MAT1). Fetches the protected material as a
@@ -46,6 +62,7 @@ export function InlineFileViewer({
   fileType,
   heightClass = 'h-[80vh]',
   onReady,
+  // onPageChange,
 }: {
   materialId: string;
   fileName?: string;
@@ -54,6 +71,13 @@ export function InlineFileViewer({
   /** Fired once the file has finished loading and is visible — used by the reading
    *  gate so the read-time countdown only starts after the file is actually shown. */
   onReady?: (materialId: string) => void;
+  // /**
+   // * Fired with the page currently on screen (and the document's total pages) whenever it
+   // * changes — however it changed: scrolling, the toolbar, the arrow keys, or the slideshow.
+   // * Only paginated documents emit this. The reading gate uses it to report page coverage;
+   // * deciding WHEN a page counts as read is the server's job, not this component's.
+   // */
+  // onPageChange?: (materialId: string, page: number, numPages: number) => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [blob, setBlob] = useState<Blob | null>(null);
@@ -73,9 +97,20 @@ export function InlineFileViewer({
   const isXlsx = ext === 'xlsx';
   const isPdf = ext === 'pdf';
   const usesServerPdf = SERVER_PDF_EXTS.includes(ext);
+  // // Set when the server conversion failed for a docx/xlsx, switching that file to the
+  // // in-browser HTML renderer instead of showing an error.
+  // const [officeHtmlFallback, setOfficeHtmlFallback] = useState(false);
+  // const canFallBackToHtml = OFFICE_HTML_FALLBACK_EXTS.includes(ext);
+  // const usesServerPdf = SERVER_PDF_EXTS.includes(ext) && !officeHtmlFallback;
   // PDFs and server-converted Office docs both render through the locked pdf.js viewer.
   const rendersAsPdf = isPdf || usesServerPdf;
 
+  // // A new file starts on the server-PDF path again — a previous file's failed conversion
+  // // must not force this one into the HTML fallback.
+  // useEffect(() => {
+    // setOfficeHtmlFallback(false);
+  // }, [materialId]);
+//
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
@@ -88,6 +123,9 @@ export function InlineFileViewer({
     // Presentations/legacy binaries fetch the server-converted PDF; everything else
     // (incl. docx/xlsx, which are converted in-browser) streams the raw file.
     const endpoint = usesServerPdf ? `/materials/${materialId}/view-pdf` : `/materials/${materialId}/download`;
+    // // A docx/xlsx whose server conversion fails retries as in-browser HTML rather than
+    // // erroring, so the trainee can always read the document.
+    // let retryingAsHtml = false;
     api
       .get(endpoint, { responseType: 'blob' })
       .then((res) => {
@@ -99,7 +137,17 @@ export function InlineFileViewer({
       })
       .catch((e) => !cancelled && setError(apiError(e)))
       .finally(() => {
+      // .catch((e) => {
         if (cancelled) return;
+        // if (usesServerPdf && canFallBackToHtml) {
+          // retryingAsHtml = true;
+          // setOfficeHtmlFallback(true); // re-runs this effect against /download
+          // return;
+        // }
+        // setError(apiError(e));
+      // })
+      // .finally(() => {
+        // if (cancelled || retryingAsHtml) return;
         setLoading(false);
         // Loading has settled and the viewer now shows the file (or a fallback panel) —
         // signal readiness so consumers start their read-time timer only from this point,
@@ -134,10 +182,32 @@ export function InlineFileViewer({
     // Presentations open in slideshow (one-slide-at-a-time) mode by default; any PDF can
     // still be switched into it from the toolbar.
     return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} defaultSlideshow={ext === 'ppt' || ext === 'pptx'} />;
+    // return (
+      // <PdfDocViewer
+        // url={url}
+        // heightClass={heightClass}
+        // lockClass={lockClass}
+        // lockStyle={lockStyle}
+        // onCtx={onCtx}
+        // defaultSlideshow={ext === 'ppt' || ext === 'pptx'}
+        // onPageChange={onPageChange ? (page, numPages) => onPageChange(materialId, page, numPages) : undefined}
+      // />
+    // );
   }
 
   if (isDocx || isXlsx) {
     return <OfficeHtmlViewer blob={blob} kind={isDocx ? 'docx' : 'xlsx'} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
+    // return (
+      // <OfficeHtmlViewer
+        // blob={blob}
+        // kind={isDocx ? 'docx' : 'xlsx'}
+        // heightClass={heightClass}
+        // lockClass={lockClass}
+        // lockStyle={lockStyle}
+        // onCtx={onCtx}
+        // onSheetChange={onPageChange ? (sheet, total) => onPageChange(materialId, sheet, total) : undefined}
+      // />
+    // );
   }
 
   if (isImage) {
@@ -231,6 +301,7 @@ function OfficeHtmlViewer({
   lockClass,
   lockStyle,
   onCtx,
+  // onSheetChange,
 }: {
   blob: Blob | null;
   kind: 'docx' | 'xlsx';
@@ -238,12 +309,24 @@ function OfficeHtmlViewer({
   lockClass: string;
   lockStyle: { userSelect: 'none' };
   onCtx: (e: MouseEvent) => void;
+  // /** Reports the worksheet on screen (1-based) and the total, for sheet-coverage tracking. */
+  // onSheetChange?: (sheet: number, totalSheets: number) => void;
 }) {
   const [html, setHtml] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // // Set when the workbook is too big to render as a DOM table — see XLSX_INLINE_MAX_*.
+  // const [tooLarge, setTooLarge] = useState<string>('');
+  // const scrollRef = useRef<HTMLDivElement>(null);
+  // const onSheetChangeRef = useRef(onSheetChange);
+  // onSheetChangeRef.current = onSheetChange;
   useEffect(() => {
     let cancelled = false;
     if (!blob) return;
+    // setTooLarge(''); // a new file gets a fresh verdict
+    // setFailed(false);
+    // // Aborting terminates the worker, so navigating away from a slow workbook stops the work
+    // // rather than leaving it running.
+    // const ac = new AbortController();
     (async () => {
       try {
         let out = '';
@@ -255,21 +338,75 @@ function OfficeHtmlViewer({
           const readXlsxFile = (await import('read-excel-file/browser')).default;
           const rows = (await readXlsxFile(blob)) as unknown[][];
           out = rowsToTableHtml(rows);
+          // // Parsed, ordered and rendered to markup on a WORKER thread — see xlsxWorker.ts for
+          // // why (read-excel-file only offloads the unzip; the sheet-XML parse would otherwise
+          // // run here and freeze the UI). Sanitising stays on this thread: it needs a document.
+          // out = (await renderXlsxInWorker(blob, ac.signal)).html;
         }
         if (!cancelled) setHtml(out || '<p>(Empty document)</p>');
       } catch {
         if (!cancelled) setFailed(true);
+      // } catch (e) {
+        // if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
+        // // Over-limit is guidance, not a failure — it gets its own explanatory panel.
+        // if (e instanceof XlsxTooLargeError) setTooLarge(e.message);
+        // else setFailed(true);
       }
     })();
     return () => {
       cancelled = true;
+      // ac.abort();
     };
   }, [blob, kind]);
 
+  // /**
+   // * Report the worksheet currently on screen as the trainee scrolls. Mirrors the PDF viewer's
+   // * page sync (nearest section above a marker set 35% down the viewport) so "which unit am I
+   // * on" behaves the same whether the material paginates or is a continuous workbook.
+   // */
+  // useEffect(() => {
+    // const el = scrollRef.current;
+    // if (!el || html === null || !onSheetChangeRef.current) return;
+    // const sections = Array.from(el.querySelectorAll<HTMLElement>('[data-sheet-index]'));
+    // if (!sections.length) return;
+    // const total = sections.length;
+//
+    // let last = 0;
+    // const report = () => {
+      // const marker = el.scrollTop + el.clientHeight * 0.35;
+      // let cur = 1;
+      // for (const s of sections) {
+        // if (s.offsetTop <= marker) cur = Number(s.dataset.sheetIndex) || cur;
+        // else break;
+      // }
+      // if (cur !== last) {
+        // last = cur;
+        // onSheetChangeRef.current?.(cur, total);
+      // }
+    // };
+    // report(); // credit the sheet already visible on open
+//
+    // let raf = 0;
+    // const onScroll = () => {
+      // if (raf) return;
+      // raf = requestAnimationFrame(() => {
+        // raf = 0;
+        // report();
+      // });
+    // };
+    // el.addEventListener('scroll', onScroll, { passive: true });
+    // return () => {
+      // el.removeEventListener('scroll', onScroll);
+      // if (raf) cancelAnimationFrame(raf);
+    // };
+  // }, [html]);
+//
+  // if (tooLarge) return <PreviewUnavailable heightClass={heightClass} message={`${tooLarge} Download it to view the full workbook.`} />;
   if (failed) return <PreviewUnavailable heightClass={heightClass} message="This document couldn’t be rendered. Download it to view." />;
   if (html === null) return <div className="flex h-40 items-center justify-center text-sm text-slate-500">Rendering preview…</div>;
   return (
     <div className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}>
+    {/* <div ref={scrollRef} className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}> */}
       <div className="prose prose-sm max-w-none p-4 text-slate-800" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
     </div>
   );
@@ -320,6 +457,7 @@ function PdfDocViewer({
   lockStyle,
   onCtx,
   defaultSlideshow,
+  // onPageChange,
 }: {
   url: string;
   heightClass: string;
@@ -328,6 +466,8 @@ function PdfDocViewer({
   onCtx: (e: MouseEvent) => void;
   /** Start in one-slide-at-a-time presentation mode (used for ppt/pptx). */
   defaultSlideshow?: boolean;
+  // /** Reports the page on screen (and the total) for the page-coverage reading control. */
+  // onPageChange?: (page: number, numPages: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pageElsRef = useRef<(HTMLDivElement | null)[]>([]);
@@ -365,6 +505,15 @@ function PdfDocViewer({
     };
   }, [url]);
 
+  // // Report the page on screen for the page-coverage control. Held in a ref so a caller that
+  // // passes an inline arrow function doesn't re-fire this on every render — it fires only when
+  // // the page (or the loaded document) actually changes.
+  // const onPageChangeRef = useRef(onPageChange);
+  // onPageChangeRef.current = onPageChange;
+  // useEffect(() => {
+    // if (numPages > 0) onPageChangeRef.current?.(page, numPages);
+  // }, [page, numPages]);
+//
   // Track the scroll viewport size to compute fit scales.
   useLayoutEffect(() => {
     const el = scrollRef.current;

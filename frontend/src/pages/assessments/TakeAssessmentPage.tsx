@@ -24,6 +24,21 @@ interface ReadingItem {
   requiredSeconds: number;
   isCompleted: boolean;
   elapsedSeconds?: number;
+  // /** Coverage state. totalPages null = coverage doesn't apply to this material. */
+  // totalPages?: number | null;
+  // pagesViewed?: number[];
+  // pagesRemaining?: number;
+  // isCovered?: boolean;
+  // /** 'page' for paginated documents, 'sheet' for natively-rendered .xlsx workbooks. */
+  // coverageUnit?: 'page' | 'sheet' | null;
+// }
+//
+// /** Live coverage state per material, refreshed from the server as units are credited. */
+// interface Coverage {
+  // totalPages: number | null;
+  // pagesViewed: number[];
+  // isCovered: boolean;
+  // coverageUnit: 'page' | 'sheet' | null;
 }
 
 interface QuestionOption {
@@ -235,6 +250,9 @@ export default function TakeAssessmentPage() {
   const [current, setCurrent] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [tcChecked, setTcChecked] = useState(false); // CR-41: SOP T&C acknowledgement
+  // // The read-and-understood declaration. Required on BOTH paths: it gates the assessment,
+  // // and (CR-41) completes a no-assessment SOP.
+  // const [tcChecked, setTcChecked] = useState(false);
   const answersRef = useRef<Record<string, Answer>>({});
   const submittedRef = useRef(false);
   const liveRef = useRef({ started: false, hasResult: false });
@@ -256,6 +274,11 @@ export default function TakeAssessmentPage() {
   const actualSpentRef = useRef<Record<string, number>>({});
   // A4: latest secsLeft reachable from the tick cleanup (to persist on material switch).
   const secsLeftRef = useRef<Record<string, number>>({});
+  // // Page-coverage control: server-confirmed coverage per material, plus the page currently
+  // // on screen (reported by the viewer) so the reporting timer knows what to credit.
+  // const [coverage, setCoverage] = useState<Record<string, Coverage>>({});
+  // const currentPageRef = useRef<Record<string, number>>({});
+  // const coverageRef = useRef<Record<string, Coverage>>({});
 
   const tabBlocked = useSingleTabGuard(phase === 'assessment' && !result);
 
@@ -311,6 +334,30 @@ export default function TakeAssessmentPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // // The read-and-understood declaration for this topic version. Queried so a trainee who
+  // // already declared (e.g. resuming after a failed attempt) sees it already confirmed.
+  // const ackStatusQ = useQuery({
+    // queryKey: ['topic-ack', topicId],
+    // queryFn: () => svc.assessments.acknowledgementStatus(topicId) as unknown as Promise<{ acknowledged: boolean; statementText: string }>,
+    // enabled: !!topicId,
+  // });
+  // const ackStatement = ackStatusQ.data?.statementText ?? 'I have read and understood the training contents.';
+  // useEffect(() => {
+    // if (ackStatusQ.data?.acknowledged) setTcChecked(true);
+  // }, [ackStatusQ.data?.acknowledged]);
+//
+  // // Record the declaration, then start the assessment. The server independently re-checks
+  // // both the reading controls and the acknowledgement, so this ordering is convenience,
+  // // not the control itself.
+  // const ackTopic = useMutation({
+    // mutationFn: () => svc.assessments.acknowledgeTopic(topicId),
+    // onSuccess: () => {
+      // qc.invalidateQueries({ queryKey: ['topic-ack', topicId] });
+      // start.mutate();
+    // },
+    // onError: (e) => toast.error(apiError(e)),
+  // });
+//
   const topicQ = useQuery({ queryKey: ['topic-meta', topicId], queryFn: () => svc.topics.get(topicId), enabled: !!topicId });
   const readingQ = useQuery({ queryKey: ['reading-status', topicId], queryFn: () => svc.materials.readingStatus(topicId) as unknown as Promise<ReadingItem[]>, enabled: !!topicId });
   // Global training instruction shown before reading (null when none is configured).
@@ -339,8 +386,19 @@ export default function TakeAssessmentPage() {
     const d = new Set<string>();
     const s: Record<string, number> = {};
     const r = new Set<string>();
+    // const cov: Record<string, Coverage> = {};
     for (const m of mats) {
       if (m.isCompleted || m.requiredSeconds <= 0) d.add(m.materialId);
+      // cov[m.materialId] = {
+        // totalPages: m.totalPages ?? null,
+        // pagesViewed: m.pagesViewed ?? [],
+        // isCovered: m.isCovered ?? true,
+        // coverageUnit: m.coverageUnit ?? null,
+      // };
+      // // A material with no reading time is only auto-complete when it ALSO has no pages left
+      // // to cover — otherwise it stays pending until the trainee reaches the last page.
+      // const untimedAndCovered = m.requiredSeconds <= 0 && (m.totalPages == null || m.isCovered === true);
+      // if (m.isCompleted || untimedAndCovered) d.add(m.materialId);
       const prior = Math.max(0, Math.floor(m.elapsedSeconds ?? 0));
       savedElapsedRef.current[m.materialId] = prior;
       actualSpentRef.current[m.materialId] = prior; // BUG-05: continue accruing actual time
@@ -351,9 +409,49 @@ export default function TakeAssessmentPage() {
     setDone(d);
     setSecsLeft(s);
     setResumed(r);
+    // setCoverage(cov);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingQ.isSuccess, mats.length]);
 
+  // // Mirror coverage into a ref so the reporting timer and the countdown can read the latest
+  // // value without re-subscribing on every credited page.
+  // useEffect(() => {
+    // coverageRef.current = coverage;
+  // }, [coverage]);
+//
+  // /**
+   // * Report the page on screen every couple of seconds while a material is open. The server
+   // * decides whether it has been dwelled on long enough to credit, so this only has to keep
+   // * telling it where the trainee is — no client-side timing is trusted.
+   // */
+  // useEffect(() => {
+    // if (phase !== 'material' || !active || !readyIds.has(active.materialId)) return;
+    // const id = active.materialId;
+    // const t = setInterval(() => {
+      // if (document.hidden) return;
+      // const cov = coverageRef.current[id];
+      // if (cov && (cov.totalPages == null || cov.isCovered)) return; // nothing left to credit
+      // const page = currentPageRef.current[id];
+      // if (!page) return;
+      // svc.materials
+        // .recordPage(id, page)
+        // .then((res) => {
+          // const next = res as unknown as Coverage & { materialId: string };
+          // setCoverage((prev) => ({
+            // ...prev,
+            // [id]: {
+              // totalPages: next.totalPages ?? null,
+              // pagesViewed: next.pagesViewed ?? [],
+              // isCovered: !!next.isCovered,
+              // coverageUnit: next.coverageUnit ?? prev[id]?.coverageUnit ?? null,
+            // },
+          // }));
+        // })
+        // .catch(() => undefined);
+    // }, 2000);
+    // return () => clearInterval(t);
+  // }, [phase, active, readyIds]);
+//
   // Record a server-side reading session when a material first becomes active — but only
   // once its file has actually loaded (#7), so the reading clock excludes load time.
   useEffect(() => {
@@ -374,6 +472,12 @@ export default function TakeAssessmentPage() {
       setSecsLeft((prev) => {
         const cur = prev[id] ?? 0;
         if (cur <= 1 && !completedRef.current.has(id)) {
+        // // Both controls must be satisfied before asking the server to mark this material
+        // // read. Checking coverage here (rather than letting /complete reject) avoids
+        // // hammering the endpoint once the timer has run out but pages remain unread.
+        // const cov = coverageRef.current[id];
+        // const covered = !cov || cov.totalPages == null || cov.isCovered;
+        // if (cur <= 1 && covered && !completedRef.current.has(id)) {
           completedRef.current.add(id);
           svc.materials
             .completeView(id)
@@ -721,6 +825,22 @@ export default function TakeAssessmentPage() {
   if (phase === 'material') {
     const activeSecs = active ? secsLeft[active.materialId] ?? active.requiredSeconds : 0;
     const requiresAssessment = (topicQ.data as { requiresAssessment?: boolean } | undefined)?.requiresAssessment !== false;
+    // // Already-acknowledged trainees skip straight to starting the assessment.
+    // const beginAssessment = () => (ackStatusQ.data?.acknowledged ? start.mutate() : ackTopic.mutate());
+    // /** Pages still to be read for a material, or 0 when coverage doesn't apply to it. */
+    // const pagesLeftFor = (materialId: string) => {
+      // const cov = coverage[materialId];
+      // if (!cov || cov.totalPages == null) return 0;
+      // const seen = cov.pagesViewed.filter((p) => p >= 1 && p <= cov.totalPages!).length;
+      // return Math.max(0, cov.totalPages - seen);
+    // };
+    // const activePagesLeft = active ? pagesLeftFor(active.materialId) : 0;
+    // const activeCov = active ? coverage[active.materialId] : undefined;
+    // /** "page"/"sheet" — a workbook is measured in worksheets, not print pages. */
+    // const unitLabel = (materialId: string, plural = false) => {
+      // const u = coverage[materialId]?.coverageUnit === 'sheet' ? 'sheet' : 'page';
+      // return plural ? `${u}s` : u;
+    // };
     const totalChapters = mats.length;
     const doneCount = mats.filter((m) => done.has(m.materialId)).length;
     const progressPct = totalChapters ? Math.round((doneCount / totalChapters) * 100) : 100;
@@ -747,6 +867,12 @@ export default function TakeAssessmentPage() {
             {requiresAssessment && (
               <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
                 {start.isPending ? 'Starting…' : 'Continue to Assessment'}
+              {/* <Button
+                disabled={!allDone || !tcChecked || start.isPending || ackTopic.isPending}
+                title={!allDone ? 'Finish reading every chapter in full first.' : !tcChecked ? 'Confirm the acknowledgement below to continue.' : undefined}
+                onClick={beginAssessment}
+              >
+                {start.isPending || ackTopic.isPending ? 'Starting…' : 'Continue to Assessment'} */}
               </Button>
             )}
           </div>
@@ -776,6 +902,14 @@ export default function TakeAssessmentPage() {
                 const isActive = i === activeMaterialIdx;
                 const matDone = done.has(m.materialId);
                 const remaining = secsLeft[m.materialId] ?? m.requiredSeconds;
+                // const cov = coverage[m.materialId];
+                // const pagesLeft = pagesLeftFor(m.materialId);
+                // // Page progress is the primary signal once the timer is satisfied, since
+                // // that is then the only thing still standing between the trainee and the tick.
+                // const pageNote =
+                  // cov?.totalPages != null
+                    // ? `${cov.totalPages - pagesLeft}/${cov.totalPages} ${unitLabel(m.materialId, true)}`
+                    // : null;
                 return (
                   <button
                     key={m.materialId}
@@ -796,6 +930,13 @@ export default function TakeAssessmentPage() {
                           : m.requiredSeconds > 0
                           ? `${remaining}s left${resumed.has(m.materialId) ? ' · resumed' : ''}`
                           : 'Optional'}
+                        {/* : [
+                              m.requiredSeconds > 0 ? `${remaining}s left` : null,
+                              pageNote,
+                              resumed.has(m.materialId) ? 'resumed' : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ') || 'Optional'} */}
                       </span>
                     </span>
                   </button>
@@ -814,6 +955,13 @@ export default function TakeAssessmentPage() {
                       fileType={active.fileType}
                       heightClass="h-[72vh]"
                       onReady={(mid) => setReadyIds((s) => (s.has(mid) ? s : new Set(s).add(mid)))}
+                      // // Only records WHERE the trainee is. The page count and whether coverage
+                      // // applies at all come from the server (reading-status), which is the sole
+                      // // authority — a client-reported total could otherwise either weaken the
+                      // // control or block a material the server never intends to gate on pages.
+                      // onPageChange={(mid, page) => {
+                        // currentPageRef.current[mid] = page;
+                      // }}
                     />
                   </CardContent>
                 </Card>
@@ -833,22 +981,61 @@ export default function TakeAssessmentPage() {
             ) : (
               <span>
                 Keep this chapter open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".
+                {/* Keep this chapter open
+                {activeSecs > 0 && (
+                  <>
+                    {' '}
+                    — <strong>{activeSecs}s</strong> remaining
+                  </>
+                )}
+                {activePagesLeft > 0 && active && (
+                  <>
+                    {activeSecs > 0 ? ' and ' : ' — '}
+                    <strong>
+                      {activePagesLeft} of {activeCov?.totalPages} {unitLabel(active.materialId, activePagesLeft !== 1)}
+                    </strong>{' '}
+                    still to read
+                  </>
+                )}{' '}
+                for "{active?.originalFileName}". */}
                 {active && resumed.has(active.materialId) && <span className="ml-1 text-primary">(resumed)</span>}
               </span>
             )}
           </div>
           {!requiresAssessment && (
+          // {/*
+            // The read-and-understood declaration. Deliberately NOT rendered until every chapter
+            // is fully read (time + every page) — the trainee should not see something to tick
+            // while material is still outstanding. On the SOP path it completes the training; on
+            // the assessment path it unlocks the assessment. Both are re-verified server-side.
+          // */}
+          // {allDone && (
             <div className="flex flex-col items-end gap-2">
               <label className="flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" disabled={!allDone} checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
                 I have read &amp; understood (I accept the Terms &amp; Conditions).
+              {/* <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <input type="checkbox" checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
+                {ackStatement} */}
               </label>
               <Button disabled={!allDone || !tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
                 {ackComplete.isPending ? 'Completing…' : 'Mark as read & complete'}
               </Button>
+              {/* {!requiresAssessment && (
+                <Button disabled={!tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
+                  {ackComplete.isPending ? 'Completing…' : 'Mark as read & complete'}
+                </Button>
+              )} */}
             </div>
           )}
         </div>
+        {/* Why the tick box isn't available yet — otherwise its absence just looks broken.
+        {!allDone && mats.length > 0 && (
+          <p className="mt-3 text-xs text-slate-400">
+            The “{ackStatement}” confirmation becomes available once every chapter has been read in full — every page of each
+            document, and every sheet of each workbook.
+          </p>
+        )} */}
       </div>
     );
   }

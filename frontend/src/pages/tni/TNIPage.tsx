@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Check, Search, ChevronDown, ChevronRight } from 'lucide-react';
 import { tniStatus } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
+import { ExportMenu } from '@/components/common/ExportMenu';
+import { ReasonForChangeDialog } from '@/components/common/ReasonForChangeDialog';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
 import { MultiSelect } from '@/components/common/MultiSelect';
@@ -15,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
+import { printHtml, printTable } from '@/lib/print';
 import { svc } from '@/services';
 
 interface TNI {
@@ -245,6 +248,8 @@ export default function TNIPage() {
   const qc = useQueryClient();
   const canWrite = useAuthStore((s) => s.hasPermission)('tni', 'write');
   const canApprove = useAuthStore((s) => s.hasPermission)('tni', 'approve');
+  const canExport = useAuthStore((s) => s.hasPermission)('tni', 'export');
+  const canPrint = useAuthStore((s) => s.hasPermission)('tni', 'print');
 
   const [view, setView] = useState<'requests' | 'matrix'>('requests');
   const [page, setPage] = useState(1);
@@ -257,6 +262,7 @@ export default function TNIPage() {
   // Edit (pending justification) + withdraw/archive a TNI.
   const [editTni, setEditTni] = useState<TNI | null>(null);
   const [editJustification, setEditJustification] = useState('');
+  const [editReason, setEditReason] = useState('');
   const [archiveTni, setArchiveTni] = useState<TNI | null>(null);
 
   const { data: users } = useQuery({ queryKey: ['users', 'all'], queryFn: () => svc.users.list({ pageSize: 200 }) });
@@ -268,6 +274,18 @@ export default function TNIPage() {
     queryKey: ['tni', { page, status }],
     queryFn: () => svc.tni.list({ page, status: status || undefined }),
   });
+
+  /** Print the TNI requests currently loaded, via the shared print helper. */
+  function printList() {
+    const rows = (data?.data ?? []) as unknown as TNI[];
+    const body =
+      `<h1>Training Needs Identification</h1><div class="sub">${rows.length} record(s) · printed from izLearn</div>` +
+      printTable(
+        ['User', 'Topic', 'Justification', 'Status'],
+        rows.map((r) => [r.userFullName ?? '—', r.topicTitle ?? '—', r.justification ?? '', r.status]),
+      );
+    printHtml('Training Needs Identification', body);
+  }
 
   const createMut = useMutation({
     mutationFn: () => svc.tni.create({ userId: form.userId, topicIds: form.topicIds, justification: form.justification }),
@@ -299,8 +317,10 @@ export default function TNIPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
+  // Editing and archiving a TNI both carry a mandatory reason for change (21 CFR Part 11);
+  // the server rejects either without one, so it is collected in the dialogs below.
   const editMut = useMutation({
-    mutationFn: () => svc.tni.update(editTni!.id, { justification: editJustification.trim() }),
+    mutationFn: () => svc.tni.update(editTni!.id, { justification: editJustification.trim(), reasonForChange: editReason.trim() }),
     onSuccess: () => {
       toast.success('TNI updated');
       qc.invalidateQueries({ queryKey: ['tni'] });
@@ -310,7 +330,7 @@ export default function TNIPage() {
   });
 
   const archiveMut = useMutation({
-    mutationFn: () => svc.tni.remove(archiveTni!.id, ''),
+    mutationFn: (reason: string) => svc.tni.remove(archiveTni!.id, reason),
     onSuccess: () => {
       toast.success(archiveTni?.status === 'PENDING' ? 'TNI withdrawn' : 'TNI archived');
       qc.invalidateQueries({ queryKey: ['tni'] });
@@ -381,11 +401,26 @@ export default function TNIPage() {
         title="Training Needs Identification"
         description="Identify and approve role-based training needs — the primary assignment workflow"
         actions={
-          canWrite && view === 'requests' && (
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="h-4 w-4" /> New TNI
-            </Button>
-          )
+          <div className="flex flex-wrap gap-2">
+            {/* Platform-standard export control. CSV is produced server-side so it covers every
+                row matching the current filter, not just the page on screen; print renders the
+                loaded rows through the shared print helper. */}
+            {view === 'requests' && (canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) =>
+                  f === 'csv'
+                    ? svc.tni.exportCsv({ status: status || undefined }).catch((e) => toast.error(apiError(e)))
+                    : printList()
+                }
+              />
+            )}
+            {canWrite && view === 'requests' && (
+              <Button onClick={() => setCreating(true)}>
+                <Plus className="h-4 w-4" /> New TNI
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -499,7 +534,7 @@ export default function TNIPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setEditTni(null)} disabled={editMut.isPending}>Cancel</Button>
-            <Button onClick={() => editMut.mutate()} disabled={editMut.isPending || !editJustification.trim()}>
+            <Button onClick={() => editMut.mutate()} disabled={editMut.isPending || !editJustification.trim() || editReason.trim().length < 5}>
               {editMut.isPending ? 'Saving…' : 'Save'}
             </Button>
           </>
@@ -513,22 +548,20 @@ export default function TNIPage() {
         <Field label="Justification" required>
           <Textarea value={editJustification} onChange={(e) => setEditJustification(e.target.value)} />
         </Field>
+        {/* Mandatory reason for change — enforced server-side on this endpoint. */}
+        <Field label="Reason for change" required>
+          <Textarea value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Describe why this change is being made…" />
+        </Field>
       </Dialog>
 
-      {/* Withdraw / Archive a TNI (soft-delete, record kept) */}
-      <ConfirmDialog
+      {/* Withdraw / Archive a TNI (soft-delete, record kept). Uses the shared reason dialog
+          because the server now requires a reason for change on this action. */}
+      <ReasonForChangeDialog
         open={!!archiveTni}
         onClose={() => setArchiveTni(null)}
         title={archiveTni?.status === 'PENDING' ? 'Withdraw this TNI?' : 'Archive this TNI?'}
-        confirmLabel={archiveTni?.status === 'PENDING' ? 'Withdraw' : 'Archive'}
-        onConfirm={async () => { await archiveMut.mutateAsync(); }}
-      >
-        <p className="text-sm text-slate-600">
-          {archiveTni?.status === 'PENDING'
-            ? 'This pending training need will be withdrawn and removed from the list. The record is retained for audit.'
-            : 'This training need will be archived and removed from the active list. The record is retained for audit.'}
-        </p>
-      </ConfirmDialog>
+        onConfirm={async (reason) => { await archiveMut.mutateAsync(reason); }}
+      />
       </>
       )}
     </div>

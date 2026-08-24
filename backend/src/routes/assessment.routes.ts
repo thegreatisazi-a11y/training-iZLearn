@@ -27,6 +27,11 @@ router.post('/start', validate(startAssessmentSchema), c.start);
 router.post('/submit', validate(submitAssessmentSchema), c.submit);
 // CR-41: complete a no-assessment SOP via read + T&C acknowledgement.
 router.post('/acknowledge-read', validate(startAssessmentSchema), c.acknowledgeRead);
+// // Read-and-understood declaration required before the assessment unlocks. Personal actions,
+// // so no permission gate; the reading controls are enforced in the service. NOTE: the GET
+// // must precede '/:id' below so 'acknowledgement' isn't captured as an id param.
+// router.get('/acknowledgement', c.acknowledgementStatus);
+// router.post('/acknowledgement', validate(startAssessmentSchema), c.acknowledgeTopic);
 router.post('/assignments/:assignmentId/unblock', requirePermission('assessments', 'write'), captureReasonIfPresent, c.unblock);
 router.get('/:id', requirePermission('assessments', 'read'), c.get);
 

@@ -183,6 +183,9 @@ model TrainingTopic {
   signatories             Json         @default("[]") // CR-T9: structured signatories [{ userId, role: PREPARED|REVIEWED|APPROVED, date }]
   sequenceIndex           Int? // CR-29: optional ordering for course-in-sequence
   materialViewSeconds     Int? // minimum seconds the material must stay open before the assessment unlocks
+  // // Every page of every paginated material must be viewed before the read-and-understood
+  // // acknowledgement is offered. Per-material overrides live on TrainingMaterial.
+  // requirePageCoverage     Boolean      @default(true)
   effectiveDate           DateTime? // date the (published) version becomes effective
   reviewDate              DateTime? // next scheduled review date for the SOP/topic
   dueDate                 DateTime? // course-level default completion deadline used when the course is assigned (except new-joiner auto-assign)
@@ -237,6 +240,12 @@ model TrainingMaterial {
   fileType            String // pdf, docx, pptx, mp4, etc.
   fileSize            Int // bytes
   requiredViewSeconds Int? // per-material minimum reading/viewing time before the assessment unlocks
+  // // Server-derived page count for paginated documents (pdf + Office rendered to pdf).
+  // // Resolved lazily on first read and cached; null = not paginated or not yet resolved,
+  // // in which case page-coverage is skipped and only the time gate applies (fail-open, so
+  // // an unreadable page count can never permanently block a trainee's training).
+  // pageCount           Int?
+  // requirePageCoverage Boolean? // per-material override of TrainingTopic.requirePageCoverage
   // A single library-level material (topicId = "") may be flagged as the global "training
   // instruction" shown to every trainee before the reading step. At most one is active;
   // it is versioned via replaceInstruction (old archived) and cleared when deleted.
@@ -284,6 +293,15 @@ model MaterialViewLog {
   requiredSeconds Int       @default(0)
   // A4: accumulated reading time so a closed-mid-reading session can resume where it left.
   elapsedSeconds  Int       @default(0)
+  // // Page-coverage control: the distinct 1-based page numbers this user has actually dwelled
+  // // on, and the page count that had to be covered. Persisted (like elapsedSeconds) so
+  // // coverage survives a closed session, and enforced server-side in completeMaterialView.
+  // pagesViewed     Int[]
+  // totalPages      Int?
+  // // Server clock of the most recently credited page. Pages are credited no faster than the
+  // // per-page dwell interval, measured against THIS timestamp rather than anything the client
+  // // reports — so replaying "I read page N" for every page at once credits only one page.
+  // lastPageAt      DateTime?
   startedAt       DateTime  @default(now())
   completedAt     DateTime?
   isCompleted     Boolean   @default(false)
@@ -294,6 +312,29 @@ model MaterialViewLog {
   @@index([userId, topicId])
 }
 
+// /// "I have read and understood the training contents." — the trainee's read-and-understood
+// /// declaration for one topic version, captured before the assessment unlocks.
+// ///
+// /// GxP/21 CFR Part 11: the acknowledgement is an attributable record, not a client-side
+// /// boolean. The exact statement the trainee agreed to is stored verbatim alongside who
+// /// agreed, when, and from where, so the declaration remains reconstructable even if the
+// /// wording is later reworded. Scoped to topicVersion, so a course revision requires a
+// /// fresh acknowledgement. Never updated or deleted — one row per (user, topic, version).
+// model TopicAcknowledgement {
+  // id             String   @id @default(uuid()) @map("_id")
+  // userId         String
+  // topicId        String
+  // topicVersion   Int
+  // statementText  String // the acknowledgement wording as shown at the time of signing
+  // ipAddress      String?
+  // userAgent      String?
+  // acknowledgedAt DateTime @default(now())
+  // createdAt      DateTime @default(now())
+//
+  // @@unique([userId, topicId, topicVersion])
+  // @@index([topicId, topicVersion])
+// }
+//
 model Question {
   id            String       @id @default(uuid()) @map("_id")
   topicId       String

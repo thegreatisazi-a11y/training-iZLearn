@@ -266,6 +266,11 @@ export async function listMyTrainings(userId: string) {
       readingByAssignment.set(
         a.id,
         actionable && topic ? await hasCompletedRequiredReading(userId, a.topicId, topic.currentVersion ?? 1) : false,
+        // // resolvePageCounts: false — this runs once per visible assignment and must not
+        // // trigger a document conversion per material just to decide a row's button state.
+        // actionable && topic
+          // ? await hasCompletedRequiredReading(userId, a.topicId, topic.currentVersion ?? 1, { resolvePageCounts: false })
+          // : false,
       );
     }),
   );

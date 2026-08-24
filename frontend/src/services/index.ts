@@ -154,6 +154,8 @@ export const svc = {
     // A4: auto-save accumulated reading seconds so the session can resume.
     saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
     readingStatus: (topicId: string) => data(api.get('/materials/reading-status', { params: { topicId } })),
+    // /** Report the page on screen; the server decides whether it has been dwelled on long enough. */
+    // recordPage: (id: string, page: number) => data(api.post(`/materials/${id}/view/page`, { page })),
     downloadUrl: (id: string) => `/api/materials/${id}/download`,
     // BUG-10: ?download=1 marks an explicit save (blocked server-side for view-only users);
     // the inline viewer fetches the same route WITHOUT the flag and stays available to all.
@@ -211,6 +213,9 @@ export const svc = {
     start: (body: unknown) => data(api.post('/assessments/start', body)),
     submit: (body: unknown) => data(api.post('/assessments/submit', body)),
     acknowledgeRead: (body: unknown) => data(api.post('/assessments/acknowledge-read', body)),
+    // /** Read-and-understood declaration required before the assessment unlocks. */
+    // acknowledgementStatus: (topicId: string) => data(api.get('/assessments/acknowledgement', { params: { topicId } })),
+    // acknowledgeTopic: (topicId: string) => data(api.post('/assessments/acknowledgement', { topicId })),
     listMine: (params?: ListParams) => data(api.get('/assessments/mine', { params })),
     list: (params?: ListParams) => data(api.get('/assessments', { params })),
     /** Item 3: completed attempts of others the requester may view/download (team/all). */
@@ -271,6 +276,7 @@ export const svc = {
     ...createCrud('/tni'),
     restore: (id: string) => data(api.post(`/tni/${id}/restore`, {})),
     decide: (id: string, body: unknown) => data(api.post(`/tni/${id}/decision`, body)),
+    exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/tni/export${qs(params)}`, 'tni.csv'),
     matrix: () => data(api.get('/tni/requirements/matrix')),
     setRequirement: (body: unknown) => data(api.post('/tni/requirements', body)),
     applyMatrix: (body: unknown) => data(api.post('/tni/requirements/apply', body)),

@@ -88,3 +88,19 @@ export interface ApiError {
     details?: unknown;
   };
 }
+//
+// /**
+ // * Limits for rendering an .xlsx workbook inline.
+ // *
+ // * A spreadsheet renders natively as a DOM table, which does not scale: a real 7.3 MB Article-57
+ // * style export measured 157,030 rows / 1,256,240 cells → ~68 MB of HTML and ~1.4M DOM nodes,
+ // * and read-excel-file needed ~97 s to parse it. That freezes the tab and then crashes it, so
+ // * anything above these limits is not rendered inline at all.
+ // *
+ // * BYTES is the cheap pre-check that avoids paying for the parse; CELLS is the safety net for a
+ // * small file that expands into a huge grid. Both sides use these SAME values on purpose: the
+ // * server skips deriving a sheet count for a workbook the viewer won't render, so coverage is
+ // * never required for something the trainee was never shown.
+ // */
+// export const XLSX_INLINE_MAX_BYTES = 1_500_000;
+// export const XLSX_INLINE_MAX_CELLS = 100_000;

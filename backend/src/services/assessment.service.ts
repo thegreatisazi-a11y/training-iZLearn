@@ -9,6 +9,7 @@ import { signFromRequest } from './eSignature.service';
 import { notifyAssessmentBlocked } from './notification.service';
 import { issueForAttempt } from './certificate.service';
 import { hasCompletedRequiredReading } from './materialView.service';
+// import { acknowledgeTopic, hasAcknowledged } from './topicAcknowledgement.service';
 import { gradeQuestion } from '../utils/grading';
 import { hasPermission } from '../utils/permissions';
 import { isOrgWideUserManager, directReportIds } from '../utils/accessScope';
@@ -196,6 +197,13 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     throw AppError.forbidden('You must finish the required reading time for all training materials before starting the assessment.');
   }
 
+  // // Server-enforced acknowledgement gate: the trainee must have declared that they read and
+  // // understood the contents of THIS topic version. Blocks starting the assessment by URL.
+  // const acknowledged = await hasAcknowledged(userId, topicId, topic.currentVersion);
+  // if (!acknowledged) {
+    // throw AppError.forbidden('You must confirm that you have read and understood the training contents before starting the assessment.');
+  // }
+//
   // CR-29: sequence enforcement — if this topic has a sequence position, the user
   // must first complete every assigned topic with a lower (non-null) sequenceIndex.
   if (topic.sequenceIndex != null) {
@@ -553,6 +561,11 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
   });
   if (prior) throw AppError.conflict('You have already completed the current version of this training.');
 
+  // // Record the same audited read-and-understood declaration the assessment path requires, so
+  // // an SOP completion and a quiz completion leave equivalent evidence. Written before the
+  // // attempt so the declaration survives even if certificate issuance later fails.
+  // await acknowledgeTopic(userId, topicId);
+//
   const attempt = await prisma.assessmentAttempt.create({
     data: {
       userId,

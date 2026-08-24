@@ -16,7 +16,7 @@ import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
 import { hasPermission, mergePermissions } from '../utils/permissions';
 import { isOrgWideUserManager } from '../utils/accessScope';
-import { createUserSchema } from '@izlearn/shared';
+import { createUserSchema, PERMISSION_CATALOG } from '@izlearn/shared';
 import type {
   CreateUserInput,
   UpdateUserInput,
@@ -55,6 +55,9 @@ async function assertRolesActive(roleIds: string[]): Promise<void> {
   }
 }
 
+/** Modules the current permission catalog defines — the authority on what a role can grant. */
+const CATALOG_MODULES = new Set(PERMISSION_CATALOG.map((m) => m.module));
+
 /**
  * SECURITY (RBAC-2): no privilege escalation — a granter can only assign roles whose
  * combined permissions are a subset of their own. This is fully permission-driven (no
@@ -68,6 +71,13 @@ async function assertCanGrantRoles(granterPerms: PermissionMatrix | undefined, r
   const roles = await prisma.role.findMany({ where: { id: { in: ids } }, select: { permissions: true } });
   const granted = mergePermissions(roles.map((r) => r.permissions as PermissionMatrix)) as unknown as Record<string, Record<string, boolean>>;
   for (const [module, actions] of Object.entries(granted)) {
+    // Only compare modules the CURRENT catalog defines. A role row can still carry keys for a
+    // module that has since been retired (Bundles was superseded by TNI, leaving
+    // `bundleManagement` on some roles). Those keys grant nothing — the catalog drives both the
+    // Roles UI and every permission check — but comparing them made a role permanently
+    // ungrantable: even SUPER_ADMIN, whose matrix matches the catalog exactly, "lacked" them,
+    // and no one could clear them because the Roles screen never renders a retired module.
+    if (!CATALOG_MODULES.has(module)) continue;
     for (const [action, on] of Object.entries(actions)) {
       if (on && !hasPermission(granterPerms, module, action as PermissionAction)) {
         throw AppError.forbidden('You cannot grant a role that carries permissions beyond your own.');

@@ -7,6 +7,7 @@ import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import { startOfDay } from '../utils/dateUtils';
+import { toCsv } from '../utils/csv';
 import type {
   CreateTNIInput,
   UpdateTNIInput,
@@ -44,6 +45,25 @@ export async function listTNI(q: PaginationQuery & { userId?: string; status?: s
     topicTitle: topicTitle.get(r.topicId) ?? null,
   }));
   return { data, total, page: q.page, pageSize: q.pageSize };
+}
+
+/**
+ * Export the (filtered) TNI list as CSV. Exports every matching row, not just the page the
+ * user is looking at, so the file matches the filters rather than the pagination — the same
+ * approach the Topics, Users and Bundles list exports take.
+ */
+export async function exportTniCsv(q: PaginationQuery & { userId?: string; status?: string }): Promise<string> {
+  const { data } = await listTNI({ ...q, page: 1, pageSize: 100000 });
+  const headers = ['User', 'Topic', 'Justification', 'Status', 'Identified On', 'Approved On'];
+  const rows = data.map((t) => [
+    t.userFullName ?? '',
+    t.topicTitle ?? '',
+    t.justification ?? '',
+    t.status,
+    t.createdAt ? new Date(t.createdAt as unknown as string).toISOString().slice(0, 10) : '',
+    t.approvedAt ? new Date(t.approvedAt as unknown as string).toISOString().slice(0, 10) : '',
+  ]);
+  return toCsv(headers, rows);
 }
 
 export async function getTNI(id: string) {

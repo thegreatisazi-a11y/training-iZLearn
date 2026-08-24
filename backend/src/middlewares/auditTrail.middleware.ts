@@ -51,6 +51,10 @@ const AUDITED_MODELS = new Set<string>([
   'BundleTopic',
   'TniRequirement',
   'CurriculumVitae',
+  // // The trainee's read-and-understood declaration. Low volume (one row per user + topic
+  // // version) and a GMP record in its own right, so unlike MaterialViewLog progress writes
+  // // it is audited.
+  // 'TopicAcknowledgement',
 ]);
 
 const MUTATING = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);

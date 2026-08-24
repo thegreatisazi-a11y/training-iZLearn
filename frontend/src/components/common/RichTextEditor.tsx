@@ -134,9 +134,17 @@ export async function importWordToHtml(file: File): Promise<string> {
 }
 
 /** I6: convert the first sheet of an uploaded Excel (.xlsx) file to an HTML table. */
+// /**
+ // * I6: convert the first sheet of an uploaded Excel (.xlsx) file to an HTML table.
+ // *
+ // * Uses `readSheet` (rows), NOT the default `readXlsxFile` — as of read-excel-file v9 the
+ // * default export returns one `{ sheet, data }` object per WORKSHEET, not rows.
+ // */
 export async function importExcelToHtml(file: File): Promise<string> {
   const readXlsxFile = (await import('read-excel-file/browser')).default;
   const rows = (await readXlsxFile(file)) as unknown[][];
+  // const { readSheet } = await import('read-excel-file/browser');
+  // const rows = (await readSheet(file)) as unknown[][];
   if (!rows.length) return '';
   const esc = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const [head, ...body] = rows;
