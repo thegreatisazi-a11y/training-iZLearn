@@ -24,3 +24,8 @@ export function toDateInput(value?: string | Date | null): string {
   if (Number.isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/** Today as yyyy-mm-dd in local time — for <input type="date"> min/max bounds. */
+export function todayInput(): string {
+  return toDateInput(new Date());
+}

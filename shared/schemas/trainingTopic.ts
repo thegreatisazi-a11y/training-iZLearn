@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
-import { trainingType, topicStatus } from './enums';
+import { trainingTypeCode, topicStatus } from './enums';
 
 /** CR-T9: a structured topic signatory (User · Prepared/Reviewed/Approved · Date). */
 export const topicSignatory = z.object({
@@ -15,8 +15,8 @@ export const createTopicSchema = z.object({
   topicNumber: optionalString, // user-entered display number (topicCode stays system-owned)
   sopNumber: optionalString, // controlled SOP / document number
   description: optionalString,
-  trainingType,
-  trainingTypes: z.array(trainingType).optional(), // D6: multiple training types
+  trainingType: trainingTypeCode,
+  trainingTypes: z.array(trainingTypeCode).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
@@ -53,8 +53,8 @@ export const updateTopicSchema = z.object({
   topicNumber: optionalString,
   sopNumber: optionalString,
   description: optionalString,
-  trainingType: trainingType.optional(),
-  trainingTypes: z.array(trainingType).optional(), // D6: multiple training types
+  trainingType: trainingTypeCode.optional(),
+  trainingTypes: z.array(trainingTypeCode).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
   designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets

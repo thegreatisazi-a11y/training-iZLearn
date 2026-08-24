@@ -11,6 +11,7 @@ import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
 import { snapshotVersion } from './topicVersionHistory.service';
 import { notifyCourseRevised, notifyTrainingAssigned } from './notification.service';
+import { trainingType as legacyTrainingType } from '@izlearn/shared';
 import type {
   CreateTopicInput,
   UpdateTopicInput,
@@ -149,7 +150,31 @@ export async function syncTniRequirementsFromTopic(topicId: string, designationI
   });
 }
 
+/**
+ * A course's training types are no longer a closed enum — every ACTIVE row of the
+ * Training Type master is selectable, built-in or custom (added in Master Setup). This
+ * check replaces the guarantee the Prisma enum used to give: a code must be an active
+ * master type, or one of the legacy enum values so that topics created before the
+ * master existed (e.g. WORKSHOP, E_LEARNING) still save when edited.
+ */
+async function assertTrainingTypesAllowed(codes: (string | undefined)[]) {
+  const wanted = Array.from(new Set(codes.filter((c): c is string => !!c)));
+  if (!wanted.length) return;
+  const active = await prisma.trainingTypeMaster.findMany({
+    where: { code: { in: wanted }, isActive: true, isDeleted: false },
+    select: { code: true },
+  });
+  const allowed = new Set<string>([...active.map((t) => t.code), ...legacyTrainingType.options]);
+  const rejected = wanted.filter((c) => !allowed.has(c));
+  if (rejected.length) {
+    throw AppError.badRequest(
+      `Unknown or inactive training type: ${rejected.join(', ')}. Only active training types can be used.`,
+    );
+  }
+}
+
 export async function createTopic(input: CreateTopicInput, createdBy: string) {
+  await assertTrainingTypesAllowed([input.trainingType, ...(input.trainingTypes ?? [])]);
   const sequence = (await prisma.trainingTopic.count()) + 1;
   const topicCode = generateTopicCode(sequence);
   const created = await prisma.trainingTopic.create({
@@ -204,6 +229,7 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
  */
 export async function updateTopic(id: string, input: UpdateTopicInput) {
   const topic = await getTopic(id);
+  await assertTrainingTypesAllowed([input.trainingType, ...(input.trainingTypes ?? [])]);
   const data: Prisma.TrainingTopicUpdateInput = {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.topicNumber !== undefined ? { topicNumber: input.topicNumber ?? null } : {}),

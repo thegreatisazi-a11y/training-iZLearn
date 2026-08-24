@@ -402,9 +402,18 @@ export default function MaterialLibraryPage() {
         onClose={() => setBulkDeleteOpen(false)}
         onConfirm={async (r) => { await bulkDeleteMut.mutateAsync(r); }}
         title={`Delete ${selected.size} material(s)`}
+        label="Reason for delete"
+        placeholder="Describe why these materials are being deleted…"
       />
 
-      <ReasonForChangeDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={async (r) => { await deleteMut.mutateAsync(r); }} title="Delete Material" />
+      <ReasonForChangeDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={async (r) => { await deleteMut.mutateAsync(r); }}
+        title="Delete Material"
+        label="Reason for delete"
+        placeholder="Describe why this material is being deleted…"
+      />
 
       <Dialog
         open={!!viewing}

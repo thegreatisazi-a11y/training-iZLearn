@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
+import { todayInput } from '@/lib/format';
 import { printHtml, printTable, escapeHtml } from '@/lib/print';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
@@ -35,7 +36,8 @@ interface Topic {
   isActive: boolean;
 }
 
-const TRAINING_TYPE_OPTIONS = trainingType.options.map((t) => ({ value: t, label: t.replace(/_/g, ' ') }));
+/** Fallback picker options, used only when the Training Type master cannot be read. */
+const TRAINING_TYPE_FALLBACK = trainingType.options.map((t) => ({ value: t, label: t.replace(/_/g, ' ') }));
 
 const STATUS_TONE: Record<string, 'APPROVED' | 'PENDING' | 'WAIVED'> = {
   PUBLISHED: 'APPROVED',
@@ -54,7 +56,10 @@ const emptyForm = {
   title: '',
   topicNumber: '',
   description: '',
-  trainingTypes: [trainingType.options[0]] as string[],
+  // Left empty on purpose: the picker offers only ACTIVE training types, so nothing
+  // may be preselected (a hard-coded default could be an inactive type). Save is
+  // gated on at least one being chosen.
+  trainingTypes: [] as string[],
   departmentId: '',
   designationId: '',
   designationIds: [] as string[],
@@ -104,8 +109,29 @@ export default function TopicsPage() {
   });
   const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: creating });
   const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
+  // The picker offers every ACTIVE training type — built-in AND custom ones added in
+  // Master Setup. /master/training-types already excludes inactive + deleted rows, so
+  // the list is used as-is (no enum filtering: custom codes are valid, see
+  // trainingTypeCode in shared). If the master can't be read (e.g. no masterSetup:read
+  // permission) fall back to the legacy enum list so the form still works.
+  const trainingTypesQ = useQuery({
+    queryKey: ['training-types', 'active'],
+    queryFn: () => svc.master.listTrainingTypes({ pageSize: 200 }),
+    enabled: creating,
+  });
+  const activeTypeOptions = ((trainingTypesQ.data?.data ?? []) as unknown as { code: string; displayName: string }[])
+    .map((t) => ({ value: t.code, label: t.displayName }));
+  const typeOptions = trainingTypesQ.isError ? TRAINING_TYPE_FALLBACK : activeTypeOptions;
+
   const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
   const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
+
+  // Item 3: a signatory signs on or before today (never a future date); a course due
+  // date is a deadline, so it must not already have passed. Enforced on the inputs
+  // (min/max) and again here, because a date input can still be typed into.
+  const today = todayInput();
+  const hasFutureSignatoryDate = form.signatories.some((s) => s.date && s.date > today);
+  const hasPastDueDate = !!form.dueDate && form.dueDate < today;
 
   const createMut = useMutation({
     mutationFn: (status: 'DRAFT' | 'PUBLISHED') =>
@@ -368,7 +394,15 @@ export default function TopicsPage() {
             {/* Page 8: only Save as Draft on creation; publishing happens via the controlled signatory workflow afterwards. */}
             <Button
               onClick={() => createMut.mutate('DRAFT')}
-              disabled={createMut.isPending || !form.title || form.trainingTypes.length === 0 || !form.passingScorePercent || !form.maxAttempts}
+              disabled={
+                createMut.isPending ||
+                !form.title ||
+                form.trainingTypes.length === 0 ||
+                !form.passingScorePercent ||
+                !form.maxAttempts ||
+                hasFutureSignatoryDate ||
+                hasPastDueDate
+              }
             >
               {createMut.isPending ? 'Saving…' : 'Save as Draft'}
             </Button>
@@ -387,7 +421,14 @@ export default function TopicsPage() {
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Training Type(s)" required>
-            <MultiSelect options={TRAINING_TYPE_OPTIONS} value={form.trainingTypes} onChange={(trainingTypes) => setForm({ ...form, trainingTypes })} placeholder="Select training type(s)…" heightClass="h-32" />
+            <MultiSelect
+              options={typeOptions}
+              value={form.trainingTypes}
+              onChange={(trainingTypes) => setForm({ ...form, trainingTypes })}
+              placeholder="Select training type(s)…"
+              heightClass="h-32"
+              emptyText={trainingTypesQ.isLoading ? 'Loading…' : 'No active training types'}
+            />
           </Field>
           <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
             <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
@@ -428,13 +469,20 @@ export default function TopicsPage() {
               <div key={i} className="grid grid-cols-[1fr_150px_150px_auto] items-center gap-2">
                 <Select placeholder="Select user…" options={signatoryOptions} value={s.userId} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, userId: e.target.value } : x)) }))} />
                 <Select options={[{ value: 'PREPARED', label: 'Prepared' }, { value: 'REVIEWED', label: 'Reviewed' }, { value: 'APPROVED', label: 'Approved' }]} value={s.role} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) }))} />
-                <Input type="date" value={s.date} onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))} />
+                <Input
+                  type="date"
+                  max={today}
+                  className={s.date && s.date > today ? 'border-red-500' : undefined}
+                  value={s.date}
+                  onChange={(e) => setForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))}
+                />
                 <button type="button" className="text-red-600" aria-label="Remove signatory" onClick={() => setForm((f) => ({ ...f, signatories: f.signatories.filter((_, j) => j !== i) }))}>
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
           </div>
+          {hasFutureSignatoryDate && <p className="mt-1 text-xs text-red-600">A signatory date cannot be in the future.</p>}
         </div>
         <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Advanced (optional)</div>
         <div className="grid grid-cols-2 gap-3">
@@ -444,8 +492,18 @@ export default function TopicsPage() {
           <Field label="Effective Date">
             <Input type="date" value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
           </Field>
-          <Field label="Due Date" hint="Optional. Default completion deadline applied when this course is assigned (not to new-joiner auto-assignments).">
-            <Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+          <Field
+            label="Due Date"
+            hint="Optional. Default completion deadline applied when this course is assigned (not to new-joiner auto-assignments)."
+            error={hasPastDueDate ? 'The due date cannot be in the past.' : undefined}
+          >
+            <Input
+              type="date"
+              min={today}
+              className={hasPastDueDate ? 'border-red-500' : undefined}
+              value={form.dueDate}
+              onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
+            />
           </Field>
         </div>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">

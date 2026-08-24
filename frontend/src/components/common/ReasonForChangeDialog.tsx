@@ -10,11 +10,16 @@ export function ReasonForChangeDialog({
   onClose,
   onConfirm,
   title = 'Reason for Change',
+  label = 'Reason for change',
+  placeholder = 'Describe why this change is being made…',
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => Promise<void>;
   title?: string;
+  /** Field label. Override for delete flows (e.g. "Reason for delete"). */
+  label?: string;
+  placeholder?: string;
 }) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
@@ -60,8 +65,8 @@ export function ReasonForChangeDialog({
         </>
       }
     >
-      <Field label="Reason for change" required>
-        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe why this change is being made…" />
+      <Field label={label} required>
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={placeholder} />
       </Field>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </Dialog>

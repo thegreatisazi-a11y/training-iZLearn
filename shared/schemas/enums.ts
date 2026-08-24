@@ -24,6 +24,20 @@ export const trainingType = z.enum([
 ]);
 export type TrainingType = z.infer<typeof trainingType>;
 
+/**
+ * A training-type CODE on a course. Deliberately NOT the closed `trainingType` enum:
+ * any ACTIVE row of the Training Type master is selectable, including custom
+ * (non-built-in) types added in Master Setup, whose codes cannot be known here. The
+ * enum's guarantee is replaced by a server-side check against the master (see
+ * trainingTopic.service.ts); `trainingType` above stays the accepted legacy list.
+ */
+export const trainingTypeCode = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Z0-9_]+$/, 'Training type code must be upper-case letters, digits or underscores.');
+
 export const questionType = z.enum([
   'MULTIPLE_CHOICE_SINGLE',
   'MULTIPLE_CHOICE_MULTI',

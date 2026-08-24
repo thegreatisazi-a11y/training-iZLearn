@@ -5,7 +5,7 @@ import { ArrowLeft, Download, Trash2, Plus, Pencil, RefreshCw, Library, Eye, X }
 import { MultiSelect } from '@/components/common/MultiSelect';
 import DOMPurify from 'dompurify';
 import { questionType, trainingType, type QuestionType } from '@izlearn/shared';
-import { toDateInput } from '@/lib/format';
+import { toDateInput, todayInput } from '@/lib/format';
 import { formatDateTime } from '@/lib/format';
 import { InlineFileViewer } from '@/components/common/InlineFileViewer';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -236,6 +236,14 @@ export default function TopicDetailPage() {
   const [readTimeMin, setReadTimeMin] = useState('');
   const [applyReadTimeToAll, setApplyReadTimeToAll] = useState(false);
   const [editTopicOpen, setEditTopicOpen] = useState(false);
+  // The date values this course was loaded with. The "no past due date / no future
+  // signatory date" rules must stop the user ENTERING a bad date without bricking
+  // courses that already hold one — a legacy value left untouched has to stay saveable,
+  // otherwise every other field on that course becomes uneditable.
+  const [loadedDates, setLoadedDates] = useState<{ dueDate: string; signatures: Set<string> }>({
+    dueDate: '',
+    signatures: new Set(),
+  });
   const [editTopicForm, setEditTopicForm] = useState({
     title: '', topicNumber: '', sopNumber: '', description: '', trainingType: 'CLASSROOM', trainingTypes: [] as string[],
     departmentId: '', designationId: '', designationIds: [] as string[], roleIds: [] as string[], durationMinutes: '', maxAttempts: '',
@@ -277,12 +285,45 @@ export default function TopicDetailPage() {
     queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }),
     enabled: (tab === 'materials' && canMaterialWrite) || tab === 'history',
   });
+  const editTypesQ = useQuery({
+    queryKey: ['training-types', 'active'],
+    queryFn: () => svc.master.listTrainingTypes({ pageSize: 200 }),
+    enabled: editTopicOpen,
+  });
   const editDesigs = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: editTopicOpen });
   const editRoles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }), enabled: editTopicOpen });
   const editUsers = useQuery({ queryKey: ['users', 'topic-signatories'], queryFn: () => svc.users.list({ pageSize: 1000 }), enabled: editTopicOpen });
   const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
   const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
   const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
+  // Training Type(s): offer every ACTIVE master type (built-in AND custom), mirroring the
+  // create form. Two edit-only concerns: codes already on this course are appended even if
+  // they are now inactive or legacy enum values, so saving an unrelated field can never
+  // silently drop the course's existing type; and if the master can't be read, fall back to
+  // the legacy enum list so the picker is never empty.
+  const activeEditTypes = ((editTypesQ.data?.data ?? []) as unknown as { code: string; displayName: string }[])
+    .map((t) => ({ value: t.code, label: t.displayName }));
+  const baseEditTypes = editTypesQ.isError
+    ? trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))
+    : activeEditTypes;
+  const editTypeOpts = [
+    ...baseEditTypes,
+    ...editTopicForm.trainingTypes
+      .filter((c) => !baseEditTypes.some((o) => o.value === c))
+      .map((c) => ({ value: c, label: `${c.replace(/_/g, ' ')} (inactive)` })),
+  ];
+
+  // Same date rules as course creation: a signatory signs on or before today, and a due
+  // date must not already have passed. Enforced on the inputs (min/max) and again here,
+  // because a date input can still be typed into. Values the course was loaded with are
+  // exempt (see loadedDates) so a legacy out-of-range date doesn't make the course
+  // uneditable — the rule applies the moment the user changes one.
+  const today = todayInput();
+  const isBadSignatoryDate = (sig: { userId: string; date: string }) =>
+    !!sig.date && sig.date > today && !loadedDates.signatures.has(`${sig.userId}|${sig.date}`);
+  const hasFutureSignatoryDate = editTopicForm.signatories.some(isBadSignatoryDate);
+  const hasPastDueDate =
+    !!editTopicForm.dueDate && editTopicForm.dueDate < today && editTopicForm.dueDate !== loadedDates.dueDate;
 
   // Upload one or many files at once. Each becomes its own current material — a new
   // upload no longer supersedes the topic's existing files.
@@ -583,6 +624,14 @@ export default function TopicDetailPage() {
       randomizeQuestions: src.randomizeQuestions !== false,
       showExplanations: src.showExplanations !== false,
       blockAfterMaxAttempts: src.blockAfterMaxAttempts !== false,
+    });
+    setLoadedDates({
+      dueDate: toDateInput(src.dueDate as string | null | undefined),
+      signatures: new Set(
+        (Array.isArray(src.signatories) ? (src.signatories as { userId: string; date?: string }[]) : [])
+          .filter((x) => x.date)
+          .map((x) => `${x.userId}|${x.date}`),
+      ),
     });
     setEditTopicOpen(true);
   }
@@ -1462,7 +1511,17 @@ export default function TopicDetailPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setEditTopicOpen(false)}>Cancel</Button>
-            <Button disabled={!editTopicForm.title || !editTopicForm.maxAttempts || updateTopicMut.isPending} onClick={() => updateTopicMut.mutate()}>
+            <Button
+              disabled={
+                !editTopicForm.title ||
+                !editTopicForm.maxAttempts ||
+                editTopicForm.trainingTypes.length === 0 ||
+                hasFutureSignatoryDate ||
+                hasPastDueDate ||
+                updateTopicMut.isPending
+              }
+              onClick={() => updateTopicMut.mutate()}
+            >
               Save…
             </Button>
           </>
@@ -1477,11 +1536,12 @@ export default function TopicDetailPage() {
         <div className="grid grid-cols-2 gap-3">
           <Field label="Training Type(s)" required>
             <MultiSelect
-              options={trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))}
+              options={editTypeOpts}
               value={editTopicForm.trainingTypes}
               onChange={(trainingTypes) => setEditTopicForm((f) => ({ ...f, trainingTypes }))}
               placeholder="Select training type(s)…"
               heightClass="h-32"
+              emptyText={editTypesQ.isLoading ? 'Loading…' : 'No active training types'}
             />
           </Field>
           <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">
@@ -1524,13 +1584,20 @@ export default function TopicDetailPage() {
                   value={s.role}
                   onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) }))}
                 />
-                <Input type="date" value={s.date} onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))} />
+                <Input
+                  type="date"
+                  max={today}
+                  className={isBadSignatoryDate(s) ? 'border-red-500' : undefined}
+                  value={s.date}
+                  onChange={(e) => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)) }))}
+                />
                 <button type="button" className="text-red-600" aria-label="Remove signatory" onClick={() => setEditTopicForm((f) => ({ ...f, signatories: f.signatories.filter((_, j) => j !== i) }))}>
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
           </div>
+          {hasFutureSignatoryDate && <p className="mt-1 text-xs text-red-600">A signatory date cannot be in the future.</p>}
         </div>
         {/* The edit form mirrors the create form's fields so a course shows the same
             inputs (pre-filled) on edit as on creation. On a published course, saving stages
@@ -1541,7 +1608,15 @@ export default function TopicDetailPage() {
             <Input type="number" min={0} value={editTopicForm.durationMinutes} onChange={(e) => setEditTopicForm((f) => ({ ...f, durationMinutes: e.target.value }))} placeholder="e.g. 30" />
           </Field>
           <Field label="Effective Date"><Input type="date" value={editTopicForm.effectiveDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></Field>
-          <Field label="Due Date"><Input type="date" value={editTopicForm.dueDate} onChange={(e) => setEditTopicForm((f) => ({ ...f, dueDate: e.target.value }))} /></Field>
+          <Field label="Due Date" error={hasPastDueDate ? 'The due date cannot be in the past.' : undefined}>
+            <Input
+              type="date"
+              min={today}
+              className={hasPastDueDate ? 'border-red-500' : undefined}
+              value={editTopicForm.dueDate}
+              onChange={(e) => setEditTopicForm((f) => ({ ...f, dueDate: e.target.value }))}
+            />
+          </Field>
         </div>
         <div className="space-y-1.5 rounded border border-slate-200 p-3">
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.randomizeQuestions} onChange={(e) => setEditTopicForm((f) => ({ ...f, randomizeQuestions: e.target.checked }))} /> Randomize questions</label>

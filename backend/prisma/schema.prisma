@@ -161,7 +161,12 @@ model TrainingTopic {
   sopNumber               String? // controlled SOP / document number (distinct from internal topicCode)
   title                   String
   description             String?
-  trainingType            TrainingType // primary type (back-compat)
+  // Free-form CODE, not the TrainingType enum: any ACTIVE row of the Training Type
+  // master is selectable (built-in or custom, created in Master Setup), so a closed
+  // enum would reject custom codes. Allowed values are enforced in the topic service
+  // against the master + the legacy enum list. Mongo stored enums as strings anyway,
+  // so existing documents need no migration.
+  trainingType            String // primary type (back-compat)
   trainingTypes           Json         @default("[]") // D6: a topic may have multiple training types
   status                  TopicStatus  @default(DRAFT) // draft topics are hidden from trainees
   departmentId            String? // optional department this SOP/topic belongs to
