@@ -189,6 +189,8 @@ const TRAINING_TYPES: { code: string; displayName: string }[] = [
   { code: 'INDUCTION', displayName: 'Induction' },
   { code: 'REFRESHER', displayName: 'Refresher' },
   { code: 'OFFLINE', displayName: 'Offline' },
+  { code: 'E_LEARNING', displayName: 'E-learning' },
+  { code: 'WORKSHOP', displayName: 'Workshop' },
 ];
 
 async function main() {

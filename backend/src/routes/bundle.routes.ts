@@ -10,7 +10,7 @@ import { createBundleSchema, updateBundleSchema } from '@izlearn/shared';
  * @openapi
  * tags:
  *   - name: Bundles
- *     description: Topic bundles — assignable collections of training topics
+ *     description: Course bundles — assignable collections of training courses
  */
 const router = Router();
 router.use(authenticate);
@@ -31,9 +31,9 @@ router.patch(
 // Archive / restore (toggle isActive) — distinct from edit and from delete.
 router.patch('/:id/active', requirePermission('bundleManagement', 'archive'), requireReasonForChange, c.setActive);
 router.delete('/:id', requirePermission('bundleManagement', 'archive'), requireReasonForChange, c.remove);
-// 4.7: link a topic to one or more bundles (from the topic detail page).
+// 4.7: link a course to one or more bundles (from the course detail page).
 router.post('/topics/:topicId', requirePermission('bundleManagement', 'edit'), c.addTopic);
-// Phase 5: assign a bundle to its target users (expands to per-topic assignments).
+// Phase 5: assign a bundle to its target users (expands to per-course assignments).
 // Controlled action: requires a reason for change + e-signature (enforced in the service).
 router.post('/:id/assign', requirePermission('bundleManagement', 'assign'), requireReasonForChange, c.assign);
 

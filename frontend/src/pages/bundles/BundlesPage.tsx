@@ -125,7 +125,7 @@ export default function BundlesPage() {
     const body =
       `<h1>Bundles</h1><div class="sub">${rows.length} bundle(s) · printed from izLearn</div>` +
       printTable(
-        ['Name', 'Topics', 'Targets', 'Status'],
+        ['Name', 'Courses', 'Targets', 'Status'],
         rows.map((r) => [
           r.name,
           r.topicIds?.length ?? 0,
@@ -143,7 +143,7 @@ export default function BundlesPage() {
         printTable(
           ['Field', 'Value'],
           [
-            ['Topics', r.topicIds?.length ?? 0],
+            ['Courses', r.topicIds?.length ?? 0],
             ['Departments', r.departmentIds?.length ?? 0],
             ['Functional Roles', r.designationIds?.length ?? 0],
             ['Users', r.userIds?.length ?? 0],
@@ -156,7 +156,7 @@ export default function BundlesPage() {
 
   const columns: Column<BundleRow>[] = [
     { key: 'name', header: 'Name', render: (r) => <Link to={`/bundles/${r.id}`} className="font-medium text-primary hover:underline">{r.name}</Link> },
-    { key: 'topics', header: 'Topics', render: (r) => (r.topicIds?.length ?? 0) },
+    { key: 'topics', header: 'Courses', render: (r) => (r.topicIds?.length ?? 0) },
     { key: 'targets', header: 'Targets', render: (r) => `${r.departmentIds?.length ?? 0} dept · ${r.designationIds?.length ?? 0} desig · ${r.userIds?.length ?? 0} user` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.isActive ? 'APPROVED' : 'WAIVED'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
     {
@@ -186,7 +186,7 @@ export default function BundlesPage() {
     <div>
       <PageHeader
         title="Bundles"
-        description="Group training topics and assign them to departments, designations and users together."
+        description="Group training courses and assign them to departments, designations and users together."
         actions={
           <div className="flex flex-wrap gap-2">
             {(canExport || canPrint) && (

@@ -39,9 +39,9 @@ const STATUS_OPTIONS = [...tniStatus.options.map((s) => ({ value: s, label: s })
 const emptyForm = { userId: '', topicIds: [] as string[], justification: '' };
 
 /**
- * CR-46/47/49: the role × topic requirement matrix. Toggling a cell saves the
+ * CR-46/47/49: the role × course requirement matrix. Toggling a cell saves the
  * Required flag; "Assign from matrix" e-signs and creates assignments for every
- * required (role, topic) pair. TNI is the primary assignment workflow.
+ * required (role, course) pair. TNI is the primary assignment workflow.
  */
 function RequirementMatrix() {
   const qc = useQueryClient();
@@ -51,10 +51,10 @@ function RequirementMatrix() {
   const [assignLater, setAssignLater] = useState(false);
   const [activateOn, setActivateOn] = useState('');
   const [q, setQ] = useState('');
-  // Filter the matrix down to the topics Required for one functional role — answers
-  // "which courses is this role assigned?" (the reverse of the per-topic view).
+  // Filter the matrix down to the courses Required for one functional role — answers
+  // "which courses is this role assigned?" (the reverse of the per-course view).
   const [roleFilter, setRoleFilter] = useState('');
-  // J1: permission-style layout — each topic is an expandable card of per-role toggles.
+  // J1: permission-style layout — each course is an expandable card of per-role toggles.
   const [openTopics, setOpenTopics] = useState<Set<string>>(new Set());
   const { data, isLoading } = useQuery({ queryKey: ['tni-matrix'], queryFn: () => svc.tni.matrix() as unknown as Promise<MatrixData> });
 
@@ -112,7 +112,7 @@ function RequirementMatrix() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm text-slate-600">
-            Mark which published SOPs/topics are <span className="font-medium text-green-700">Required</span> for each Functional Role, then assign.
+            Mark which published SOPs/courses are <span className="font-medium text-green-700">Required</span> for each Functional Role, then assign.
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
             <span>{data.designations.length} functional role(s)</span>
@@ -143,7 +143,7 @@ function RequirementMatrix() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1.5">
             <Search className="h-4 w-4 text-slate-400" />
-            <input className="bg-transparent text-sm outline-none" placeholder="Filter topics…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="bg-transparent text-sm outline-none" placeholder="Filter courses…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <Select className="w-56" options={roleFilterOptions} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} />
           {roleFilter && (
@@ -161,15 +161,15 @@ function RequirementMatrix() {
       {noRoles ? (
         <p className="py-8 text-center text-sm text-slate-500">No Functional Roles defined. Add them under Master Setup → Functional Roles first.</p>
       ) : noTopics ? (
-        <p className="py-8 text-center text-sm text-slate-500">No published topics yet.</p>
+        <p className="py-8 text-center text-sm text-slate-500">No published courses yet.</p>
       ) : topics.length === 0 ? (
         <p className="py-8 text-center text-sm text-slate-500">
           {roleFilter
             ? `No courses are marked Required for ${roleFilterName} yet.`
-            : 'No topics match your filter.'}
+            : 'No courses match your filter.'}
         </p>
       ) : (
-        // J1: permission-matrix style — each topic is a card; expand to toggle Required per functional role.
+        // J1: permission-matrix style — each course is a card; expand to toggle Required per functional role.
         <div className="max-h-[65vh] space-y-2 overflow-y-auto pr-1">
           {topics.map((t) => {
             const isOpen = openTopics.has(t.id);
@@ -281,7 +281,7 @@ export default function TNIPage() {
     const body =
       `<h1>Training Needs Identification</h1><div class="sub">${rows.length} record(s) · printed from izLearn</div>` +
       printTable(
-        ['User', 'Topic', 'Justification', 'Status'],
+        ['User', 'Course', 'Justification', 'Status'],
         rows.map((r) => [r.userFullName ?? '—', r.topicTitle ?? '—', r.justification ?? '', r.status]),
       );
     printHtml('Training Needs Identification', body);
@@ -350,7 +350,7 @@ export default function TNIPage() {
 
   const columns: Column<TNI>[] = [
     { key: 'user', header: 'User', render: (r) => <span className="font-medium text-slate-800">{r.userFullName ?? '—'}</span> },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? '—' },
+    { key: 'topic', header: 'Course', render: (r) => r.topicTitle ?? '—' },
     { key: 'justification', header: 'Justification', render: (r) => <span className="text-slate-600">{r.justification}</span> },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     {
@@ -486,8 +486,8 @@ export default function TNIPage() {
           <Select options={userOptions} placeholder="Select user…" value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })} />
         </Field>
         {/* J2: multiple topics — one TNI row is created per selected topic. */}
-        <Field label="Topics" required>
-          <MultiSelect options={topicOptions} value={form.topicIds} onChange={(topicIds) => setForm({ ...form, topicIds })} placeholder="Search topics…" />
+        <Field label="Courses" required>
+          <MultiSelect options={topicOptions} value={form.topicIds} onChange={(topicIds) => setForm({ ...form, topicIds })} placeholder="Search courses…" />
         </Field>
         <Field label="Justification" required>
           <Textarea value={form.justification} onChange={(e) => setForm({ ...form, justification: e.target.value })} placeholder="Why is this training required?" />
@@ -542,7 +542,7 @@ export default function TNIPage() {
       >
         <div className="mb-3 grid grid-cols-2 gap-3 text-sm">
           <div><div className="text-xs text-slate-500">User</div><div className="font-medium text-slate-800">{editTni?.userFullName ?? '—'}</div></div>
-          <div><div className="text-xs text-slate-500">Topic</div><div className="font-medium text-slate-800">{editTni?.topicTitle ?? '—'}</div></div>
+          <div><div className="text-xs text-slate-500">Course</div><div className="font-medium text-slate-800">{editTni?.topicTitle ?? '—'}</div></div>
           <div><div className="text-xs text-slate-500">Status</div><div><Badge tone={editTni?.status ?? 'default'}>{editTni?.status}</Badge></div></div>
         </div>
         <Field label="Justification" required>

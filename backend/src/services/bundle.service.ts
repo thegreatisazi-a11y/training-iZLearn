@@ -9,8 +9,8 @@ import { notifyTrainingAssigned } from './notification.service';
 import type { CreateBundleInput, UpdateBundleInput, PaginationQuery } from '@izlearn/shared';
 
 /**
- * Topic bundles — a named collection of topics assignable together to selected
- * departments/roles. Soft-delete only; topic membership lives in the BundleTopic
+ * Course bundles — a named collection of courses assignable together to selected
+ * departments/roles. Soft-delete only; course membership lives in the BundleTopic
  * join (also soft-deleted). All writes are captured by the Prisma audit middleware.
  */
 
@@ -63,7 +63,7 @@ export async function listBundles(q: PaginationQuery) {
     }),
     prisma.topicBundle.count({ where }),
   ]);
-  // Attach the active topic count for the list view.
+  // Attach the active course count for the list view.
   const data = await Promise.all(
     rows.map(async (b) => ({ ...b, topicIds: await bundleTopicIds(b.id) })),
   );
@@ -131,7 +131,7 @@ export async function setBundleActive(id: string, isActive: boolean) {
 /** 4.7: link one topic to one or more bundles (from the topic detail page). */
 export async function addTopicToBundles(topicId: string, bundleIds: string[], actorId: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
   for (const bundleId of bundleIds) {
     const bundle = await prisma.topicBundle.findFirst({ where: { id: bundleId, isDeleted: false } });
     if (!bundle) continue;
@@ -145,10 +145,10 @@ export async function addTopicToBundles(topicId: string, bundleIds: string[], ac
 }
 
 /**
- * Assign a bundle: expand to one TrainingAssignment per (resolved user × bundle topic).
+ * Assign a bundle: expand to one TrainingAssignment per (resolved user × bundle course).
  * Targets are the union of users in the bundle's departments and users holding its
- * roles. Only PUBLISHED topics are assignable. Existing active (non-completed,
- * non-waived) assignments for the same user+topic are skipped to avoid duplicates.
+ * roles. Only PUBLISHED courses are assignable. Existing active (non-completed,
+ * non-waived) assignments for the same user+course are skipped to avoid duplicates.
  * Reuses notifyTrainingAssigned (which also notifies the supervisor, UR-42).
  */
 /**
@@ -197,7 +197,7 @@ export async function assignBundle(id: string, req: Request, opts?: { dueDate?: 
 
   const userIds = new Set<string>(await resolveBundleUsers(bundle));
 
-  // Only PUBLISHED topics in the bundle may be assigned.
+  // Only PUBLISHED courses in the bundle may be assigned.
   const publishedTopics = await prisma.trainingTopic.findMany({
     where: { id: { in: bundle.topicIds }, isDeleted: false, status: 'PUBLISHED' },
     select: { id: true },
@@ -205,10 +205,10 @@ export async function assignBundle(id: string, req: Request, opts?: { dueDate?: 
   const topicIds = publishedTopics.map((t) => t.id);
 
   if (!userIds.size || !topicIds.length) {
-    throw AppError.badRequest('Bundle has no resolvable users or no published topics to assign.');
+    throw AppError.badRequest('Bundle has no resolvable users or no published courses to assign.');
   }
 
-  // Build (user × topic) pairs, skipping any with an existing active assignment.
+  // Build (user × course) pairs, skipping any with an existing active assignment.
   const pairs: Array<{ userId: string; topicId: string }> = [];
   for (const userId of userIds) {
     for (const topicId of topicIds) {
@@ -248,9 +248,9 @@ export async function assignBundle(id: string, req: Request, opts?: { dueDate?: 
 }
 
 /**
- * Step 4: rich detail for the Bundle Detail page — resolved topics (with version +
+ * Step 4: rich detail for the Bundle Detail page — resolved courses (with version +
  * status), target departments/roles/users, and live assignment status counts across
- * the bundle's published topics and resolved users.
+ * the bundle's published courses and resolved users.
  */
 export async function getBundleDetail(id: string) {
   const bundle = await getBundle(id);
@@ -276,7 +276,7 @@ export async function getBundleDetail(id: string) {
     ? await prisma.user.findMany({ where: { id: { in: resolvedUserIds } }, select: { id: true, fullName: true, employeeId: true } })
     : [];
 
-  // Live assignment status across the bundle's topics for the resolved users.
+  // Live assignment status across the bundle's courses for the resolved users.
   const assignments = topicIds.length && resolvedUserIds.length
     ? await prisma.trainingAssignment.findMany({
         where: { isDeleted: false, topicId: { in: topicIds }, userId: { in: resolvedUserIds } },
@@ -308,7 +308,7 @@ export async function getBundleDetail(id: string) {
 /** Build a CSV export of the (filtered) bundle list. */
 export async function exportBundlesCsv(q: PaginationQuery): Promise<string> {
   const { data } = await listBundles({ ...q, page: 1, pageSize: 100000 });
-  const headers = ['Name', 'Description', 'Topics', 'Departments', 'Designations', 'Roles', 'Users', 'Due Date', 'Status'];
+  const headers = ['Name', 'Description', 'Courses', 'Departments', 'Designations', 'Roles', 'Users', 'Due Date', 'Status'];
   const rows = data.map((b) => [
     b.name,
     b.description ?? '',

@@ -79,8 +79,8 @@ export function BundleForm({
       <Field label="Description">
         <Textarea value={value.description} onChange={(e) => onChange({ ...value, description: e.target.value })} />
       </Field>
-      <Field label="Topics (select one or more)" required>
-        <MultiSelect options={topicOpts} value={value.topicIds} onChange={(topicIds) => onChange({ ...value, topicIds })} placeholder="Search topics…" heightClass="max-h-56" />
+      <Field label="Courses (select one or more)" required>
+        <MultiSelect options={topicOpts} value={value.topicIds} onChange={(topicIds) => onChange({ ...value, topicIds })} placeholder="Search courses…" heightClass="max-h-56" />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Assign to Departments">

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, Search, X } from 'lucide-react';
+import { Check, Search } from 'lucide-react';
 
 export interface MultiSelectOption {
   value: string;
@@ -7,9 +7,9 @@ export interface MultiSelectOption {
 }
 
 /**
- * Clean, searchable multi-select: a search box, a scrollable checkbox list, and
- * removable chips for the current selection. Replaces the native <select multiple>
- * boxes across the app. Dependency-free and keyboard/click friendly.
+ * Clean, searchable multi-select: a search box and a scrollable checkbox list that shows
+ * the current selection inline (ticks + an "N selected" badge). Replaces the native
+ * <select multiple> boxes across the app. Dependency-free and keyboard/click friendly.
  */
 export function MultiSelect({
   options,
@@ -27,13 +27,14 @@ export function MultiSelect({
   emptyText?: string;
 }) {
   const [q, setQ] = useState('');
+  // Show options alphabetically by label (case-insensitive).
+  const sortedOptions = useMemo(() => [...options].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })), [options]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return s ? options.filter((o) => o.label.toLowerCase().includes(s)) : options;
-  }, [options, q]);
+    return s ? sortedOptions.filter((o) => o.label.toLowerCase().includes(s)) : sortedOptions;
+  }, [sortedOptions, q]);
 
   const toggle = (v: string) => onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
-  const selected = options.filter((o) => value.includes(o.value));
 
   // CR-2: one-click select-all / clear over the currently visible (filtered) options.
   const filteredValues = filtered.map((o) => o.value);
@@ -84,18 +85,6 @@ export function MultiSelect({
           })
         )}
       </div>
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1 border-t border-slate-200 p-2">
-          {selected.map((o) => (
-            <span key={o.value} className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-              {o.label}
-              <button type="button" className="text-slate-400 hover:text-slate-700" onClick={() => toggle(o.value)} aria-label={`Remove ${o.label}`}>
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

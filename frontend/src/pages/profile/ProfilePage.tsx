@@ -230,8 +230,8 @@ export default function ProfilePage() {
   const profileQ = useQuery({ queryKey: ['my-profile'], queryFn: () => svc.users.myProfile() as unknown as Promise<FullProfile> });
   const profile = profileQ.data;
 
-  // Use the enriched "my trainings" endpoint so topic name/number resolve (the raw
-  // assignments list returns ids only — which showed "—" in the Topic column).
+  // Use the enriched "my trainings" endpoint so course name/number resolve (the raw
+  // assignments list returns ids only — which showed "—" in the Course column).
   const training = useQuery({
     queryKey: ['profile', 'training', me?.id],
     queryFn: () => svc.assignments.mine() as unknown as Promise<Assignment[]>,
@@ -270,11 +270,11 @@ export default function ProfilePage() {
   const trainingColumns: Column<Assignment>[] = [
     {
       key: 'topic',
-      header: 'Topic',
-      // Link to the course topic; falls back to plain text if there's no topic id.
+      header: 'Course',
+      // Link to the course; falls back to plain text if there's no course id.
       render: (r) =>
         r.topicId ? (
-          <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/topics/${r.topicId}`)}>
+          <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/courses/${r.topicId}`)}>
             {r.topicTitle || r.topicNumber || r.topicId}
           </button>
         ) : (
@@ -302,7 +302,7 @@ export default function ProfilePage() {
 
   const certColumns: Column<Certificate>[] = [
     { key: 'certificateNumber', header: 'Certificate No.' },
-    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle || '—') },
+    { key: 'topic', header: 'Course', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle || '—') },
     { key: 'certificateType', header: 'Type' },
     { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
     {

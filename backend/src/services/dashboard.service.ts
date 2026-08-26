@@ -9,7 +9,7 @@ const MY_STATUSES = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'OVERDUE', 'BLOCKED'
 export async function getDashboard(user: AuthUser) {
   // A revised course supersedes its old version; the trainee gets a FRESH assignment to
   // the new version and the old assignment is hidden everywhere in the app (see
-  // listMyTrainings). The dashboard must exclude those superseded-topic assignments too,
+  // listMyTrainings). The dashboard must exclude those superseded-course assignments too,
   // otherwise its counts are higher than what the user actually sees on My Trainings.
   // (Computed in JS — `supersededByTopicId` is optional and unreliable to filter on in Mongo.)
   const allTopics = await prisma.trainingTopic.findMany({ where: { isDeleted: false }, select: { id: true, supersededByTopicId: true, status: true } });

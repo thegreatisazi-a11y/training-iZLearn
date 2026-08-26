@@ -90,7 +90,7 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
   const targets = await resolveTargets(input);
   if (!targets.length) throw AppError.badRequest('No assignment targets could be resolved for this request.');
 
-  // 4.3: only PUBLISHED topics may be assigned — draft/archived topics are not assignable.
+  // 4.3: only PUBLISHED courses may be assigned — draft/archived courses are not assignable.
   const topicIds = Array.from(new Set(targets.map((t) => t.topicId)));
   const assignable = await prisma.trainingTopic.findMany({
     where: { id: { in: topicIds }, isDeleted: false, status: 'PUBLISHED' },
@@ -101,7 +101,7 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
   const topicDueDate = new Map(assignable.map((t) => [t.id, t.dueDate]));
   const blocked = topicIds.filter((id) => !publishedIds.has(id));
   if (blocked.length) {
-    throw AppError.badRequest('One or more selected topics are not published and cannot be assigned.');
+    throw AppError.badRequest('One or more selected courses are not published and cannot be assigned.');
   }
 
   // CR-56: never stamp an already-expired due date (e.g. a user added to a
@@ -154,7 +154,7 @@ export async function listAssignments(q: PaginationQuery & { userId?: string; to
     prisma.trainingAssignment.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.trainingAssignment.count({ where }),
   ]);
-  // BUG-03/04: resolve user + topic so lists (e.g. Blocked Assignments) show the
+  // BUG-03/04: resolve user + course so lists (e.g. Blocked Assignments) show the
   // employee name and "number – title" instead of raw ids.
   const userIds = Array.from(new Set(rows.map((r) => r.userId)));
   const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
@@ -184,7 +184,7 @@ export async function getAssignment(id: string) {
 }
 
 /**
- * Step 6: the signed-in user's trainings, enriched with full topic details (name,
+ * Step 6: the signed-in user's trainings, enriched with full course details (name,
  * number, version, status, type, reading time) and their best attempt result, so
  * the "My Trainings" screen can show complete, human-readable training records.
  */
@@ -213,7 +213,7 @@ export async function listMyTrainings(userId: string) {
     if (at.isPassed) {
       cur.isPassed = true;
       // Remember the course version this pass was taken at, so a completed row keeps showing
-      // the version it was actually completed at (not the topic's newer current version).
+      // the version it was actually completed at (not the course's newer current version).
       if (at.topicVersion != null && (cur.passedVersion === null || at.topicVersion > cur.passedVersion)) {
         cur.passedVersion = at.topicVersion;
       }
@@ -222,7 +222,7 @@ export async function listMyTrainings(userId: string) {
   };
   // Result is computed PER-ASSIGNMENT (attempts carry the assignmentId they were taken under),
   // so a fresh re-training assignment on a revised course shows NO prior pass even though an
-  // earlier version was passed under a different assignment. The per-topic map is kept only as a
+  // earlier version was passed under a different assignment. The per-course map is kept only as a
   // fallback for legacy attempts that were recorded without a linked assignment.
   const bestByAssignment = new Map<string, Res>();
   const bestByTopic = new Map<string, Res>();
@@ -233,11 +233,11 @@ export async function listMyTrainings(userId: string) {
   const resultFor = (a: { id: string; topicId: string; status: string }): Res | null => {
     const own = bestByAssignment.get(a.id);
     if (own) return own;
-    // No attempt linked to THIS assignment: only a COMPLETED assignment inherits the topic's
+    // No attempt linked to THIS assignment: only a COMPLETED assignment inherits the course's
     // result (legacy). A pending/re-training assignment must never inherit an old-version pass.
     return a.status === 'COMPLETED' ? bestByTopic.get(a.topicId) ?? null : null;
   };
-  // A revised course shows ONLY the current version: hide assignments whose topic has
+  // A revised course shows ONLY the current version: hide assignments whose course has
   // been superseded by a newer version (the user gets a fresh assignment to it).
   // Also: when a course is UNPUBLISHED (archived/draft), remove its still-actionable
   // assignments from My Trainings instead of leaving a dead end where the user can open
@@ -268,8 +268,8 @@ export async function listMyTrainings(userId: string) {
         actionable && topic ? await hasCompletedRequiredReading(userId, a.topicId, topic.currentVersion ?? 1) : false,
         // // resolvePageCounts: false — this runs once per visible assignment and must not
         // // trigger a document conversion per material just to decide a row's button state.
-        // actionable && topic
-          // ? await hasCompletedRequiredReading(userId, a.topicId, topic.currentVersion ?? 1, { resolvePageCounts: false })
+        // actionable && course
+          // ? await hasCompletedRequiredReading(userId, a.topicId, course.currentVersion ?? 1, { resolvePageCounts: false })
           // : false,
       );
     }),
@@ -291,7 +291,7 @@ export async function listMyTrainings(userId: string) {
       topicTitle: topic?.title ?? null,
       topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
       // A COMPLETED row keeps the version it was actually completed at; an actionable row
-      // shows the topic's current version (the one the user will take).
+      // shows the course's current version (the one the user will take).
       topicVersion:
         (a.status === 'COMPLETED' ? resultFor(a)?.passedVersion ?? null : null) ?? topic?.currentVersion ?? null,
       requiresAssessment: topic?.requiresAssessment ?? true,

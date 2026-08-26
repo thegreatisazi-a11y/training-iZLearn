@@ -10,18 +10,18 @@
 // import { hasCompletedRequiredReading } from './materialView.service';
 //
 // /**
-//  * The trainee's "read and understood" declaration for one topic version.
+//  * The trainee's "read and understood" declaration for one course version.
 //  *
 //  * The statement is stored verbatim on every record rather than only referenced by id, so an
 //  * audit years later can reconstruct exactly what the trainee agreed to even if the wording
-//  * has since been changed. Records are write-once and scoped to the topic version, so a
+//  * has since been changed. Records are write-once and scoped to the course version, so a
 //  * course revision requires a fresh declaration (matching how re-training already works).
 //  */
 //
 // /** The wording presented to the trainee. Persisted with each record — see above. */
 // export const ACK_STATEMENT = 'I have read and understood the training contents.';
 //
-// /** Has this user acknowledged this exact topic version? */
+// /** Has this user acknowledged this exact course version? */
 // export async function hasAcknowledged(userId: string, topicId: string, topicVersion: number): Promise<boolean> {
 //   const row = await prisma.topicAcknowledgement.findUnique({
 //     where: { userId_topicId_topicVersion: { userId, topicId, topicVersion } },
@@ -34,22 +34,22 @@
 //  * coverage) are satisfied server-side, so the acknowledgement can never be submitted by a
 //  * client that skipped the material — for example by posting straight to this endpoint.
 //  *
-//  * Idempotent: re-acknowledging the same topic version returns the original record, keeping
+//  * Idempotent: re-acknowledging the same course version returns the original record, keeping
 //  * the first (earliest) declaration as the record of truth.
 //  */
 // export async function acknowledgeTopic(userId: string, topicId: string) {
-//   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-//   if (!topic) throw AppError.notFound('Training topic not found');
-//   if (topic.status !== 'PUBLISHED') {
+//   const course = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
+//   if (!course) throw AppError.notFound('Training course not found');
+//   if (course.status !== 'PUBLISHED') {
 //     throw AppError.conflict('This training is not currently published.');
 //   }
 //
 //   const existing = await prisma.topicAcknowledgement.findUnique({
-//     where: { userId_topicId_topicVersion: { userId, topicId, topicVersion: topic.currentVersion } },
+//     where: { userId_topicId_topicVersion: { userId, topicId, topicVersion: course.currentVersion } },
 //   });
 //   if (existing) return existing;
 //
-//   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
+//   const readingDone = await hasCompletedRequiredReading(userId, topicId, course.currentVersion);
 //   if (!readingDone) {
 //     throw AppError.forbidden('Read every page of all training materials before confirming that you have read and understood them.');
 //   }
@@ -61,7 +61,7 @@
 //     data: {
 //       userId,
 //       topicId,
-//       topicVersion: topic.currentVersion,
+//       topicVersion: course.currentVersion,
 //       statementText: ACK_STATEMENT,
 //       ipAddress: ctx?.ipAddress ?? null,
 //       userAgent: ctx?.userAgent ?? null,
@@ -69,16 +69,16 @@
 //   });
 // }
 //
-// /** Acknowledgement state for the current user + live topic version (drives the UI gate). */
+// /** Acknowledgement state for the current user + live course version (drives the UI gate). */
 // export async function getAcknowledgementStatus(userId: string, topicId: string) {
-//   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-//   if (!topic) throw AppError.notFound('Training topic not found');
+//   const course = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
+//   if (!course) throw AppError.notFound('Training course not found');
 //   const row = await prisma.topicAcknowledgement.findUnique({
-//     where: { userId_topicId_topicVersion: { userId, topicId, topicVersion: topic.currentVersion } },
+//     where: { userId_topicId_topicVersion: { userId, topicId, topicVersion: course.currentVersion } },
 //   });
 //   return {
 //     topicId,
-//     topicVersion: topic.currentVersion,
+//     topicVersion: course.currentVersion,
 //     statementText: ACK_STATEMENT,
 //     acknowledged: !!row,
 //     acknowledgedAt: row?.acknowledgedAt ?? null,

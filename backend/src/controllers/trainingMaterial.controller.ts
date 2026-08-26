@@ -25,7 +25,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
   const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : undefined;
   const manager = canManageMaterials(req);
-  // Managers viewing a topic also see the archived files of its previous versions
+  // Managers viewing a course also see the archived files of its previous versions
   // (the version lineage), so the Archived Materials section is complete.
   const topicIds = topicId && manager ? await svc.lineageTopicIds(topicId) : undefined;
   const r = await svc.listMaterials({
@@ -58,7 +58,7 @@ export const upload = asyncHandler(async (req: Request, res: Response) => {
 /**
  * CR-MAT2: Bulk-upload multiple files (multer .array('files')). topicId is
  * optional — when omitted the files become library-level materials reusable into
- * topics later. Returns an { uploaded, failed, errors[] } summary; partial
+ * courses later. Returns an { uploaded, failed, errors[] } summary; partial
  * success is reported with HTTP 200.
  */
 export const bulkUpload = asyncHandler(async (req: Request, res: Response) => {
@@ -107,14 +107,14 @@ export const acknowledgeInstruction = asyncHandler(async (req: Request, res: Res
   // if (material.isObsolete || !material.isCurrentVersion) {
     // throw AppError.forbidden('Only the current version of this material is available.');
   // }
-  // // The global training instruction is a Library file with no parent topic and is shown to
-  // // every trainee before starting; exempt it from the topic-published / completion gates
-  // // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+  // // The global training instruction is a Library file with no parent course and is shown to
+  // // every trainee before starting; exempt it from the course-published / completion gates
+  // // below (which would otherwise 403 since there is no PUBLISHED parent course to find).
   // if (material.isInstruction) return;
 //
-  // // Other Material Library files likewise have no parent topic. MAT-1 exists to stop a
+  // // Other Material Library files likewise have no parent course. MAT-1 exists to stop a
   // // trainee reaching UNPUBLISHED TOPIC content by guessing an id — a library file is not
-  // // topic content, and the library listing is already gated on materialManagement:read.
+  // // course content, and the library listing is already gated on materialManagement:read.
   // // Without this, a read-only library user could browse the listing but preview nothing.
   // if (!material.topicId) {
     // if (!hasPermission(req.user?.permissions, 'materialManagement', 'read')) {
@@ -123,13 +123,13 @@ export const acknowledgeInstruction = asyncHandler(async (req: Request, res: Res
     // return;
   // }
 //
-  // // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+  // // MAT-1: a trainee may only reach files of a PUBLISHED course — never draft/under-review
   // // (or archived) content, even by guessing a material id.
   // const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
   // if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
     // throw AppError.forbidden('This material is not currently available.');
   // }
-  // // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
+  // // CR-33: optional workflow lock — once the trainee has COMPLETED this course's
   // // training, material access is revoked (enable via material.lock_after_completion).
   // if (await getBool('material.lock_after_completion', false)) {
     // const completed = await prisma.trainingAssignment.findFirst({
@@ -155,17 +155,17 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
-    // The global training instruction is a Library file with no parent topic and is shown to
-    // every trainee before starting; exempt it from the topic-published / completion gates
-    // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+    // The global training instruction is a Library file with no parent course and is shown to
+    // every trainee before starting; exempt it from the course-published / completion gates
+    // below (which would otherwise 403 since there is no PUBLISHED parent course to find).
     if (!material.isInstruction) {
-      // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+      // MAT-1: a trainee may only reach files of a PUBLISHED course — never draft/under-review
       // (or archived) content, even by guessing a material id.
       const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
       if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
         throw AppError.forbidden('This material is not currently available.');
       }
-      // CR-33: optional workflow lock — once the trainee has COMPLETED this topic's
+      // CR-33: optional workflow lock — once the trainee has COMPLETED this course's
       // training, material access is revoked (enable via material.lock_after_completion).
       if (await getBool('material.lock_after_completion', false)) {
         const completed = await prisma.trainingAssignment.findFirst({
@@ -194,11 +194,11 @@ export const viewPdf = asyncHandler(async (req: Request, res: Response) => {
     if (material.isObsolete || !material.isCurrentVersion) {
       throw AppError.forbidden('Only the current version of this material is available.');
     }
-    // The global training instruction is a Library file with no parent topic and is shown to
-    // every trainee before starting; exempt it from the topic-published / completion gates
-    // below (which would otherwise 403 since there is no PUBLISHED parent topic to find).
+    // The global training instruction is a Library file with no parent course and is shown to
+    // every trainee before starting; exempt it from the course-published / completion gates
+    // below (which would otherwise 403 since there is no PUBLISHED parent course to find).
     if (!material.isInstruction) {
-      // MAT-1: a trainee may only reach files of a PUBLISHED topic — never draft/under-review
+      // MAT-1: a trainee may only reach files of a PUBLISHED course — never draft/under-review
       // (or archived) content, even by guessing a material id.
       const parentTopic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId }, select: { status: true } });
       if (!parentTopic || parentTopic.status !== 'PUBLISHED') {
@@ -239,7 +239,7 @@ export const attachFromLibrary = asyncHandler(async (req: Request, res: Response
   const topicId = (req.body?.topicId ?? '').toString();
   if (!materialId || !topicId) throw AppError.badRequest('materialId and topicId are required.');
   const material = await svc.attachLibraryMaterial(materialId, topicId, req.user!.id);
-  sendCreated(res, material, 'Library material attached to topic');
+  sendCreated(res, material, 'Library material attached to course');
 });
 
 export const setViewTime = asyncHandler(async (req: Request, res: Response) => {

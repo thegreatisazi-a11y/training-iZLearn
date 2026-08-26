@@ -13,7 +13,7 @@ import type { CreateRetakeRequestInput, RetakeDecisionInput, PaginationQuery } f
  * (max attempts exhausted) requests a retake; the request is routed to their
  * direct supervisor. On approval the assignment is unblocked and a fresh set of
  * attempts is granted (extraAttempts), so the effective limit becomes
- * topic.maxAttempts again from the current attempt count.
+ * course.maxAttempts again from the current attempt count.
  */
 
 /** Attach the trainee name + topic title to a set of retake requests for display. */

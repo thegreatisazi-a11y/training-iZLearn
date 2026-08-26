@@ -16,17 +16,25 @@ interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onC
   placeholder?: string;
   /** Event-like for backward compatibility with the former native <select>. */
   onChange?: (e: { target: { value: string } }) => void;
+  /** By default options are shown alphabetically by label. Set for order-sensitive lists
+   *  (e.g. Yes/No) that must keep their given order. */
+  unsorted?: boolean;
 }
 
 // Only surface the filter box once a list is long enough to be worth filtering; short
 // dropdowns (status filters, yes/no, etc.) stay clean with just the option list.
 const SEARCH_MIN_OPTIONS = 5;
 
-export function Select({ options, placeholder, className, value, onChange, disabled, id }: SelectProps) {
+export function Select({ options, placeholder, className, value, onChange, disabled, id, unsorted }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const current = value == null ? '' : String(value);
+  // Show options alphabetically by default; `unsorted` preserves the caller's order.
+  const orderedOptions = useMemo(
+    () => (unsorted ? options : [...options].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))),
+    [options, unsorted],
+  );
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -55,9 +63,9 @@ export function Select({ options, placeholder, className, value, onChange, disab
   const showSearch = options.length > SEARCH_MIN_OPTIONS;
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return options;
-    return options.filter((o) => o.label.toLowerCase().includes(s));
-  }, [options, q]);
+    if (!s) return orderedOptions;
+    return orderedOptions.filter((o) => o.label.toLowerCase().includes(s));
+  }, [orderedOptions, q]);
 
   function pick(v: string) {
     onChange?.({ target: { value: v } });

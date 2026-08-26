@@ -28,6 +28,7 @@ interface Topic {
   topicNumber?: string | null;
   title: string;
   trainingType: string;
+  trainingTypes?: string[];
   status: string;
   durationMinutes: number;
   passingScorePercent: number;
@@ -122,6 +123,12 @@ export default function TopicsPage() {
   const activeTypeOptions = ((trainingTypesQ.data?.data ?? []) as unknown as { code: string; displayName: string }[])
     .map((t) => ({ value: t.code, label: t.displayName }));
   const typeOptions = trainingTypesQ.isError ? TRAINING_TYPE_FALLBACK : activeTypeOptions;
+  // Map a training-type code → its display label (falls back to the raw code, spaced).
+  const typeLabelMap = new Map([...TRAINING_TYPE_FALLBACK, ...activeTypeOptions].map((o) => [o.value, o.label]));
+  const typeLabels = (r: Topic) => {
+    const codes = r.trainingTypes && r.trainingTypes.length ? r.trainingTypes : [r.trainingType];
+    return codes.filter(Boolean).map((c) => typeLabelMap.get(c) ?? c.replace(/_/g, ' ')).join(', ');
+  };
 
   const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
   const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
@@ -162,7 +169,7 @@ export default function TopicsPage() {
         signatories: form.signatories.filter((s) => s.userId),
       }),
     onSuccess: (_d, status) => {
-      toast.success(status === 'PUBLISHED' ? 'Topic created & published' : 'Draft topic created');
+      toast.success(status === 'PUBLISHED' ? 'Course created & published' : 'Draft course created');
       qc.invalidateQueries({ queryKey: ['topics'] });
       setCreating(false);
       setForm(emptyForm);
@@ -176,7 +183,7 @@ export default function TopicsPage() {
       return svc.topics.updateStatus(archiveTarget!.id, { status: 'ARCHIVED', reasonForChange: (reason ?? '').trim(), signature: sig });
     },
     onSuccess: () => {
-      toast.success('Topic archived — moved to Archived/Obsolete and hidden from active courses');
+      toast.success('Course archived — moved to Archived/Obsolete and hidden from active courses');
       qc.invalidateQueries({ queryKey: ['topics'] });
       setArchiveTarget(null);
     },
@@ -212,12 +219,12 @@ export default function TopicsPage() {
 
   function exportOne(r: Topic) {
     downloadCsv(
-      `topic-${r.topicNumber || r.topicCode}.csv`,
+      `course-${r.topicNumber || r.topicCode}.csv`,
       ['Field', 'Value'],
       [
         ['SOP No.', r.topicNumber || r.topicCode],
         ['Title', r.title],
-        ['Type', r.trainingType],
+        ['Type', typeLabels(r)],
         ['Duration (min)', r.durationMinutes],
         ['Pass %', r.passingScorePercent],
         ['Max Attempts', r.maxAttempts],
@@ -229,22 +236,22 @@ export default function TopicsPage() {
 
   function printList() {
     const body =
-      `<h1>Training Topics</h1><div class="sub">${rows.length} topic(s) · printed from izLearn</div>` +
+      `<h1>Training Courses</h1><div class="sub">${rows.length} course(s) · printed from izLearn</div>` +
       printTable(
         ['SOP No.', 'Title', 'Type', 'Duration', 'Pass %', 'Version', 'Status'],
-        rows.map((r) => [r.topicNumber || r.topicCode, r.title, r.trainingType, r.durationMinutes, `${r.passingScorePercent}%`, `v${r.currentVersion}`, r.status]),
+        rows.map((r) => [r.topicNumber || r.topicCode, r.title, typeLabels(r), r.durationMinutes, `${r.passingScorePercent}%`, `v${r.currentVersion}`, r.status]),
       );
-    printHtml('Training Topics', body);
+    printHtml('Training Courses', body);
   }
 
   function printOne(r: Topic) {
     printHtml(
-      `Topic — ${r.title}`,
+      `Course — ${r.title}`,
       `<h1>${escapeHtml(r.title)}</h1><div class="sub">${escapeHtml(r.topicNumber || r.topicCode)} · v${r.currentVersion} · ${escapeHtml(r.status)}</div>` +
         printTable(
           ['Field', 'Value'],
           [
-            ['Type', r.trainingType],
+            ['Type', typeLabels(r)],
             ['Duration (min)', r.durationMinutes],
             ['Pass %', `${r.passingScorePercent}%`],
             ['Max Attempts', r.maxAttempts],
@@ -259,12 +266,12 @@ export default function TopicsPage() {
       key: 'title',
       header: 'Title',
       render: (r) => (
-        <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>
+        <button className="text-left font-medium text-primary hover:underline" onClick={() => navigate(`/courses/${r.id}`)}>
           {r.title}
         </button>
       ),
     },
-    { key: 'trainingType', header: 'Type', render: (r) => r.trainingType.replace(/_/g, ' ') },
+    { key: 'trainingType', header: 'Type', render: (r) => typeLabels(r) },
     { key: 'durationMinutes', header: 'Duration (min)' },
     { key: 'passingScorePercent', header: 'Pass %', render: (r) => `${r.passingScorePercent}%` },
     { key: 'maxAttempts', header: 'Max Attempts' },
@@ -278,8 +285,8 @@ export default function TopicsPage() {
         const isArchived = r.status === 'ARCHIVED';
         return (
           <div className="flex flex-wrap justify-end gap-1">
-            <Button size="sm" variant="ghost" title="View" onClick={() => navigate(`/topics/${r.id}`)}><Eye className="h-4 w-4" /></Button>
-            {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/topics/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
+            <Button size="sm" variant="ghost" title="View" onClick={() => navigate(`/courses/${r.id}`)}><Eye className="h-4 w-4" /></Button>
+            {canEdit && !isArchived && <Button size="sm" variant="ghost" title="Edit" onClick={() => navigate(`/courses/${r.id}?edit=1`)}><Pencil className="h-4 w-4" /></Button>}
             {/* G2/G3: full-course "Revise" removed — Archive only; material changes auto-version. */}
             {canArchive && !isArchived && <Button size="sm" variant="ghost" title="Archive" onClick={() => setArchiveTarget(r)}><Archive className="h-4 w-4" /></Button>}
             {/* Restore an archived course back to Draft. */}
@@ -299,7 +306,7 @@ export default function TopicsPage() {
   return (
     <div>
       <PageHeader
-        title="Training Topics"
+        title="Training Courses"
         description="Controlled course catalogue"
         actions={
           <div className="flex flex-wrap gap-2">
@@ -325,7 +332,7 @@ export default function TopicsPage() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Input
           className="max-w-xs"
-          placeholder="Search topics…"
+          placeholder="Search courses…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -351,7 +358,7 @@ export default function TopicsPage() {
         pageSize={data?.pageSize}
         total={data?.total}
         onPageChange={setPage}
-        emptyText="No topics found."
+        emptyText="No courses found."
       />
 
       {/* Archive (e-signature + reason) */}
@@ -385,7 +392,7 @@ export default function TopicsPage() {
       <Dialog
         open={creating}
         onClose={() => setCreating(false)}
-        title="New Training Topic"
+        title="New Training Course"
         footer={
           <>
             <Button variant="outline" onClick={() => setCreating(false)} disabled={createMut.isPending}>
@@ -409,7 +416,7 @@ export default function TopicsPage() {
           </>
         }
       >
-        <p className="mb-3 text-xs text-slate-500">The topic code is generated automatically and locked once created. Drafts are hidden from trainees until published.</p>
+        <p className="mb-3 text-xs text-slate-500">The course code is generated automatically and locked once created. Drafts are hidden from trainees until published.</p>
         <Field label="Title" required>
           <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         </Field>

@@ -56,7 +56,7 @@ function columns(opts?: { showEmployee?: boolean }): Column<Certificate>[] {
   cols.push(
     { key: 'certificateNumber', header: 'Certificate No.' },
     // BUG-04: show "number – title".
-    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle ?? r.topicId) },
+    { key: 'topic', header: 'Course', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? r.topicId}` : r.topicTitle ?? r.topicId) },
     { key: 'issuedAt', header: 'Issued', render: (r) => formatDate(r.issuedAt) },
     { key: 'certificateType', header: 'Type' },
     {

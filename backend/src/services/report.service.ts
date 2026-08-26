@@ -51,7 +51,7 @@ export type ReportType = (typeof REPORT_TYPES)[number];
 
 /**
  * The filter controls each report actually USES. The Reports UI renders only these for the
- * selected report (so no filter is ever silently ignored — e.g. Topic has no effect on the
+ * selected report (so no filter is ever silently ignored — e.g. Course has no effect on the
  * aggregate department/designation reports, so it isn't offered there). Keep this in sync with
  * the filter logic in `buildReport` below — this is the single source of truth the UI reads.
  */
@@ -190,10 +190,10 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           dueDate: formatDate(x.dueDate),
         }));
       return {
-        title: 'Training Topic-Wise Status Report',
+        title: 'Training Course-Wise Status Report',
         columns: [
-          { header: 'Topic Code', key: 'topicCode' },
-          { header: 'Topic', key: 'topicTitle' },
+          { header: 'Course Code', key: 'topicCode' },
+          { header: 'Course', key: 'topicTitle' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
           { header: 'Department', key: 'department' },
@@ -263,7 +263,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Location', key: 'location' },
           { header: 'Functional Role', key: 'functionalRole' },
           { header: 'Reporting Manager', key: 'reportingManager' },
-          { header: 'Topic', key: 'topic' },
+          { header: 'Course', key: 'topic' },
           { header: 'Status', key: 'status' },
           { header: 'Due Date', key: 'dueDate' },
         ],
@@ -354,9 +354,9 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         score: x.score,
       }));
       return {
-        title: 'Version-Wise Training Topic Report',
+        title: 'Version-Wise Training Course Report',
         columns: [
-          { header: 'Topic', key: 'topic' },
+          { header: 'Course', key: 'topic' },
           { header: 'Version', key: 'topicVersion' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
@@ -421,8 +421,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Location', key: 'location' },
           { header: 'Functional Role', key: 'functionalRole' },
           { header: 'Reporting Manager', key: 'reportingManager' },
-          { header: 'Topic', key: 'topic' },
-          { header: 'Topic Code', key: 'topicCode' },
+          { header: 'Course', key: 'topic' },
+          { header: 'Course Code', key: 'topicCode' },
           { header: 'Completed', key: 'completedAt' },
         ],
         rows,
@@ -448,7 +448,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Reporting Manager', key: 'reportingManager' },
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
-          { header: 'Topic', key: 'topic' },
+          { header: 'Course', key: 'topic' },
           { header: 'Due Date', key: 'dueDate' },
         ],
         rows,
@@ -499,11 +499,11 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         columns: [
           { header: 'Employee', key: 'employee' },
           { header: 'Employee ID', key: 'employeeId' },
-          { header: 'Induction Topic', key: 'topic' },
+          { header: 'Induction Course', key: 'topic' },
           { header: 'Certificate No.', key: 'certificateNumber' },
           { header: 'Issued', key: 'issuedAt' },
         ],
-        rows: rows.length ? rows : [{ employee: '', employeeId: '', topic: `${inductionTopics.size} induction topics defined`, certificateNumber: '', issuedAt: '' }],
+        rows: rows.length ? rows : [{ employee: '', employeeId: '', topic: `${inductionTopics.size} induction courses defined`, certificateNumber: '', issuedAt: '' }],
       };
     }
 
@@ -534,7 +534,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         title: 'Feedback Analysis Report',
         columns: [
           { header: 'Form', key: 'form' },
-          { header: 'Topic', key: 'topic' },
+          { header: 'Course', key: 'topic' },
           { header: 'Responses', key: 'responseCount' },
         ],
         rows,
@@ -573,7 +573,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         title: 'Bundle Assignment Status Report',
         columns: [
           { header: 'Bundle', key: 'bundle' },
-          { header: 'Topics', key: 'topics' },
+          { header: 'Courses', key: 'topics' },
           { header: 'Total Assignments', key: 'totalAssignments' },
           { header: 'Completed', key: 'completed' },
           { header: 'Pending', key: 'pending' },
@@ -630,8 +630,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Location', key: 'location' },
           { header: 'Functional Role', key: 'functionalRole' },
           { header: 'Reporting Manager', key: 'reportingManager' },
-          { header: 'Topic', key: 'topic' },
-          { header: 'Topic Code', key: 'topicCode' },
+          { header: 'Course', key: 'topic' },
+          { header: 'Course Code', key: 'topicCode' },
           { header: 'Version', key: 'version' },
           { header: 'Status', key: 'status' },
           { header: 'Score', key: 'score' },
@@ -644,7 +644,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       };
     }
 
-    // CR-54: days between a topic's effective date and each completion date.
+    // CR-54: days between a course's effective date and each completion date.
     case 'effective-to-completion-days': {
       const attempts = await prisma.assessmentAttempt.findMany({
         where: { isDeleted: false, isPassed: true, completedAt: { not: null }, ...(f.topicId ? { topicId: f.topicId } : {}) },
@@ -678,8 +678,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
           { header: 'Location', key: 'location' },
           { header: 'Functional Role', key: 'functionalRole' },
           { header: 'Reporting Manager', key: 'reportingManager' },
-          { header: 'Topic', key: 'topic' },
-          { header: 'Topic Code', key: 'topicCode' },
+          { header: 'Course', key: 'topic' },
+          { header: 'Course Code', key: 'topicCode' },
           { header: 'Effective Date', key: 'effectiveDate' },
           { header: 'Completed', key: 'completedAt' },
           { header: 'Days to Complete', key: 'days' },

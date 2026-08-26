@@ -41,7 +41,7 @@ export default function MaterialLibraryPage() {
   // BUG-10: explicit downloads are limited to material managers (download permission).
   const canDownload = canWrite || hasPermission('courseManagement', 'write');
   const bulkInputRef = useRef<HTMLInputElement>(null);
-  // Live upload progress for the single-file topic upload, the library bulk upload,
+  // Live upload progress for the single-file course upload, the library bulk upload,
   // and the training-instruction replace (each a separate request).
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const [bulkPct, setBulkPct] = useState<number | null>(null);
@@ -316,8 +316,8 @@ export default function MaterialLibraryPage() {
           <CardContent>
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[220px]">
-                <Field label="Upload to topic" required>
-                  <Select options={topicOptions} placeholder="Select a topic…" value={uploadTopicId} onChange={(e) => setUploadTopicId(e.target.value)} />
+                <Field label="Upload to course" required>
+                  <Select options={topicOptions} placeholder="Select a course…" value={uploadTopicId} onChange={(e) => setUploadTopicId(e.target.value)} />
                 </Field>
               </div>
               <div className="mb-3">
@@ -329,7 +329,7 @@ export default function MaterialLibraryPage() {
                     progress={uploadPct}
                   />
                 ) : (
-                  <p className="text-sm text-slate-400">Select a topic to enable upload.</p>
+                  <p className="text-sm text-slate-400">Select a course to enable upload.</p>
                 )}
               </div>
             </div>
@@ -360,7 +360,7 @@ export default function MaterialLibraryPage() {
         <Select
           className="max-w-xs"
           options={topicOptions}
-          placeholder="All topics"
+          placeholder="All courses"
           value={filterTopicId}
           onChange={(e) => {
             setFilterTopicId(e.target.value);

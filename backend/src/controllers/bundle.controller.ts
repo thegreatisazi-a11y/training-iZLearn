@@ -51,7 +51,7 @@ export const setActive = asyncHandler(async (req: Request, res: Response) => {
 export const addTopic = asyncHandler(async (req: Request, res: Response) => {
   const { bundleIds } = addTopicToBundlesSchema.parse(req.body);
   const r = await svc.addTopicToBundles(req.params.topicId, bundleIds, req.user!.id);
-  sendSuccess(res, r, 'Topic added to bundle(s)');
+  sendSuccess(res, r, 'Course added to bundle(s)');
 });
 
 /** Phase 5: assign a bundle → per-(user × topic) training assignments. */

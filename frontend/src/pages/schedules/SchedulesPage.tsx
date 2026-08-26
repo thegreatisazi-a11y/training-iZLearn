@@ -54,8 +54,6 @@ interface OfflineRow {
   traineeIds?: string[];
 }
 
-const TRAINING_TYPES = ['CLASSROOM', 'E_LEARNING', 'OJT', 'OFFLINE', 'INDUCTION', 'REFRESHER', 'WORKSHOP'].map((v) => ({ value: v, label: v.replace(/_/g, ' ') }));
-
 /** Sentinel value used in a person dropdown to enter someone from OUTSIDE the org by name. */
 const OTHER_PERSON = '__other__';
 
@@ -81,12 +79,20 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
   const [scheduledDate, setScheduledDate] = useState('');
   const [trainerId, setTrainerId] = useState('');
   const [trainerOther, setTrainerOther] = useState('');
-  const [trainingType, setTrainingType] = useState('CLASSROOM');
   const [methodology, setMethodology] = useState('');
   const [venue, setVenue] = useState('');
   const [maxTrainees, setMaxTrainees] = useState('');
   const [traineeIds, setTraineeIds] = useState<string[]>([]);
   const [error, setError] = useState('');
+
+  // Mirrors the server's rule (schedule.service.ts): the course's first trainingTypes
+  // entry, falling back to its primary trainingType. Display only — never submitted.
+  const selectedTopic = (topics.data ?? []).find((t) => String(t.id) === topicId);
+  const derivedTrainingType = (() => {
+    if (!selectedTopic) return '';
+    const list = Array.isArray(selectedTopic.trainingTypes) ? (selectedTopic.trainingTypes as string[]) : [];
+    return String(list[0] || selectedTopic.trainingType || '').replace(/_/g, ' ');
+  })();
 
   const isExtTrainer = trainerId === OTHER_PERSON;
   const trainerValid = isExtTrainer ? !!trainerOther.trim() : !!trainerId;
@@ -96,7 +102,6 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
     setScheduledDate('');
     setTrainerId('');
     setTrainerOther('');
-    setTrainingType('CLASSROOM');
     setMethodology('');
     setVenue('');
     setMaxTrainees('');
@@ -112,7 +117,7 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
         // Internal trainer → send the user id; external ("Other") → send a name instead.
         trainerId: isExtTrainer ? undefined : trainerId,
         trainerName: isExtTrainer ? trainerOther.trim() : undefined,
-        trainingType,
+        // trainingType is NOT sent — the server derives it from the course.
         methodology: methodology || undefined,
         venue: venue || undefined,
         maxTrainees: maxTrainees ? Number(maxTrainees) : undefined,
@@ -146,8 +151,8 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
         </>
       }
     >
-      <Field label="Topic" required>
-        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
+      <Field label="Course" required>
+        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a course…" />
       </Field>
       <Field label="Scheduled date & time" required>
         <Input type="datetime-local" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
@@ -160,8 +165,10 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
           <Input value={trainerOther} onChange={(e) => setTrainerOther(e.target.value)} placeholder="Enter the external trainer's name" />
         </Field>
       )}
-      <Field label="Training type">
-        <Select options={TRAINING_TYPES} value={trainingType} onChange={(e) => setTrainingType(e.target.value)} />
+      {/* Read-only: the delivery type comes from the selected course, so it can never
+          drift from the Training Type master the way the old hand-picked dropdown did. */}
+      <Field label="Training type" hint="Taken from the selected course.">
+        <Input value={derivedTrainingType} readOnly disabled placeholder="Select a course first" />
       </Field>
       <Field label="Methodology">
         <Input value={methodology} onChange={(e) => setMethodology(e.target.value)} placeholder="Optional" />
@@ -242,8 +249,8 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
         </>
       }
     >
-      <Field label="Topic" required>
-        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
+      <Field label="Course" required>
+        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a course…" />
       </Field>
       <Field label="Trainee" required>
         <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="Select a trainee…" />
@@ -329,8 +336,8 @@ function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () 
         </>
       }
     >
-      <Field label="Topic" required>
-        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
+      <Field label="Course" required>
+        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a course…" />
       </Field>
       <Field label="Venue" required>
         <Input value={venue} onChange={(e) => setVenue(e.target.value)} />
@@ -391,7 +398,7 @@ export default function SchedulesPage() {
   });
 
   const columns: Column<ScheduleRow>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—') },
+    { key: 'topic', header: 'Course', render: (r) => (r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—') },
     { key: 'trainer', header: 'Trainer', render: (r) => r.trainerName || '—' },
     { key: 'scheduledDate', header: 'Scheduled', render: (r) => formatDateTime(r.scheduledDate) },
     { key: 'trainingType', header: 'Type', render: (r) => (r.trainingType ? r.trainingType.replace(/_/g, ' ') : '—') },
@@ -419,7 +426,7 @@ export default function SchedulesPage() {
     r.topicNumber ? `${r.topicNumber} – ${r.topicTitle ?? ''}` : r.topicTitle ?? '—';
 
   const ojtColumns: Column<OjtRow>[] = [
-    { key: 'topic', header: 'Topic', render: topicCell },
+    { key: 'topic', header: 'Course', render: topicCell },
     { key: 'trainee', header: 'Trainee', render: (r) => r.userFullName ?? '—' },
     { key: 'evaluator', header: 'Evaluator', render: (r) => r.evaluatorName ?? '—' },
     { key: 'date', header: 'Date', render: (r) => formatDate(r.evaluationDate) },
@@ -428,7 +435,7 @@ export default function SchedulesPage() {
     { key: 'status', header: 'Status', render: () => <Badge tone="COMPLETED">Completed</Badge> },
   ];
   const offlineColumns: Column<OfflineRow>[] = [
-    { key: 'topic', header: 'Topic', render: topicCell },
+    { key: 'topic', header: 'Course', render: topicCell },
     { key: 'trainer', header: 'Trainer', render: (r) => r.trainerName },
     { key: 'venue', header: 'Venue', render: (r) => r.venue || '—' },
     { key: 'date', header: 'Date', render: (r) => formatDate(r.trainingDate) },

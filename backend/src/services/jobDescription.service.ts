@@ -530,7 +530,7 @@ async function propagateTemplateUpdate(
  * e-signed. Obsolete JDs are part of the permanent record and stay locked.
  *
  * Item 2 — the JD version is a true revision lineage tied to edits, exactly like the
- * course/topic model:
+ * course model:
  *  - Editing a JD that is LIVE with the employee (status APPROVED — i.e. already
  *    assigned, whether or not it has been acknowledged yet) publishes a NEW version.
  *    The current copy is preserved (obsoleted, so it stays in the employee's version

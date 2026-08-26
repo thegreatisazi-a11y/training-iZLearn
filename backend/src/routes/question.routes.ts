@@ -10,7 +10,7 @@ import { createQuestionSchema, updateQuestionSchema } from '@izlearn/shared';
  * @openapi
  * tags:
  *   - name: Questions
- *     description: Question bank (Module 7) — assessment questions per topic version
+ *     description: Question bank (Module 7) — assessment questions per course version
  */
 const router = Router();
 router.use(authenticate);

@@ -87,7 +87,10 @@ export interface AssessmentResult {
   totalQuestions: number;
   attempted: number;
   correctCount: number;
+  /** Answered but wrong (does NOT include unattempted questions). */
   incorrectCount: number;
+  /** Questions the learner left unanswered. */
+  unattempted?: number;
   passingScorePercent: number;
   isPassed: boolean;
   isBlocked: boolean;

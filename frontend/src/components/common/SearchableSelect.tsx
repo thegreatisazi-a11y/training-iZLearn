@@ -51,11 +51,13 @@ export function SearchableSelect({
   }, [open]);
 
   const selected = options.find((o) => o.value === value) ?? null;
+  // Show options alphabetically by label.
+  const sortedOptions = useMemo(() => [...options].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })), [options]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return options;
-    return options.filter((o) => o.label.toLowerCase().includes(s) || (o.sublabel ?? '').toLowerCase().includes(s));
-  }, [options, q]);
+    if (!s) return sortedOptions;
+    return sortedOptions.filter((o) => o.label.toLowerCase().includes(s) || (o.sublabel ?? '').toLowerCase().includes(s));
+  }, [sortedOptions, q]);
 
   function pick(v: string) {
     onChange(v);

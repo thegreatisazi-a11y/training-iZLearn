@@ -20,24 +20,24 @@ import type {
 } from '@izlearn/shared';
 
 /**
- * Training topics (Module 4) — the versioned definition of a training course.
+ * Training courses (Module 4) — the versioned definition of a training course.
  *
  *  - soft-delete only; reads filter isDeleted and default to active-only.
  *  - topicCode is generated once on creation and is PERMANENTLY locked — it is
  *    never accepted by any update path.
- *  - passingScorePercent is a controlled value. On a PUBLISHED topic every edit
+ *  - passingScorePercent is a controlled value. On a PUBLISHED course every edit
  *    (including the passing score) is staged into draftMeta and only goes live via the
  *    e-signed publishDraftChanges; while DRAFT it is editable as normal authoring, before
  *    the e-signed publish. (TOPIC-2: the old "dedicated e-signed endpoint" was never wired
  *    — the staged-publish path is the actual control.)
- *  - a "revision" creates a NEW topic row (currentVersion + 1) linked to the
+ *  - a "revision" creates a NEW course row (currentVersion + 1) linked to the
  *    original via parentTopicId, and supersedes the prior version's materials.
  *  - plain CRUD writes are captured by the Prisma audit middleware automatically.
  */
 export async function listTopics(q: PaginationQuery & { status?: string }, canManage = true) {
   // Status visibility (managers):
   //   ARCHIVED → the Archived / Obsolete history view (read-only).
-  //   ALL      → every topic regardless of status/active flag.
+  //   ALL      → every course regardless of status/active flag.
   //   default  → the active catalogue: active AND not archived/obsolete.
   // Trainees always see only the active, PUBLISHED catalogue.
   let statusWhere: Prisma.TrainingTopicWhereInput = {};
@@ -87,7 +87,7 @@ export async function exportTopicsCsv(
     { page: 1, pageSize: 100000, sortBy: 'createdAt', sortDir: 'desc', search: filter.search, status: filter.status } as PaginationQuery & { status?: string },
     canManage,
   );
-  const headers = ['Topic No.', 'Title', 'Type', 'Duration (min)', 'Pass %', 'Max Attempts', 'Version', 'Status', 'Effective Date', 'Review Date'];
+  const headers = ['Course No.', 'Title', 'Type', 'Duration (min)', 'Pass %', 'Max Attempts', 'Version', 'Status', 'Effective Date', 'Review Date'];
   const rows = data.map((t) => [
     t.topicNumber || t.topicCode,
     t.title,
@@ -105,9 +105,9 @@ export async function exportTopicsCsv(
 
 export async function getTopic(id: string, canManage = true) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
-  // 4.3: a trainee may not open a DRAFT/ARCHIVED topic by id.
-  if (!canManage && topic.status !== 'PUBLISHED') throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
+  // 4.3: a trainee may not open a DRAFT/ARCHIVED course by id.
+  if (!canManage && topic.status !== 'PUBLISHED') throw AppError.notFound('Training course not found');
   const [materials, questionCount] = await Promise.all([
     prisma.trainingMaterial.findMany({
       // Trainees only ever see the current, non-staged, non-obsolete files.
@@ -124,10 +124,10 @@ export async function getTopic(id: string, canManage = true) {
 }
 
 /**
- * Task-1: keep the TNI requirement matrix in sync with a topic's selected Functional
+ * Task-1: keep the TNI requirement matrix in sync with a course's selected Functional
  * Roles. Each selected functional role (designationId) becomes a REQUIRED cell for this
- * topic; roles no longer selected are marked Not-Required. Idempotent — safe to re-run.
- * Does NOT write back to the topic, so it never loops with the reverse (TNI → topic) sync.
+ * course; roles no longer selected are marked Not-Required. Idempotent — safe to re-run.
+ * Does NOT write back to the course, so it never loops with the reverse (TNI → course) sync.
  */
 export async function syncTniRequirementsFromTopic(topicId: string, designationIds: unknown, createdBy: string) {
   const ids = Array.from(
@@ -143,7 +143,7 @@ export async function syncTniRequirementsFromTopic(topicId: string, designationI
       await prisma.tniRequirement.create({ data: { designationId, topicId, isRequired: true, createdBy } });
     }
   }
-  // Roles previously required for this topic but no longer selected → Not Required.
+  // Roles previously required for this course but no longer selected → Not Required.
   await prisma.tniRequirement.updateMany({
     where: { topicId, isDeleted: false, isRequired: true, designationId: { notIn: ids } },
     data: { isRequired: false },
@@ -154,7 +154,7 @@ export async function syncTniRequirementsFromTopic(topicId: string, designationI
  * A course's training types are no longer a closed enum — every ACTIVE row of the
  * Training Type master is selectable, built-in or custom (added in Master Setup). This
  * check replaces the guarantee the Prisma enum used to give: a code must be an active
- * master type, or one of the legacy enum values so that topics created before the
+ * master type, or one of the legacy enum values so that courses created before the
  * master existed (e.g. WORKSHOP, E_LEARNING) still save when edited.
  */
 async function assertTrainingTypesAllowed(codes: (string | undefined)[]) {
@@ -173,8 +173,21 @@ async function assertTrainingTypesAllowed(codes: (string | undefined)[]) {
   }
 }
 
+// Compliance guard: an assessment course must have at least one question before it can go
+// live, so a learner is never shown an empty test. Publishing is blocked until questions are
+// added (or the course is switched to reading-only). Shared by every publish path.
+const NO_QUESTIONS_TO_PUBLISH_MSG =
+  'This course requires an assessment but has no questions. Add at least one question, or turn off "Requires assessment" to publish it as a reading-only course.';
+
 export async function createTopic(input: CreateTopicInput, createdBy: string) {
   await assertTrainingTypesAllowed([input.trainingType, ...(input.trainingTypes ?? [])]);
+  // "Create & Publish" of an assessment course is impossible to satisfy — a brand-new course
+  // has no questions yet. Require it to be saved as a draft first (then add questions & publish).
+  if ((input.status ?? 'DRAFT') === 'PUBLISHED' && (input.requiresAssessment ?? true)) {
+    throw AppError.badRequest(
+      'A new assessment course has no questions yet — save it as a draft, add questions, then publish. (Or turn off "Requires assessment" to publish it as a reading-only course.)',
+    );
+  }
   const sequence = (await prisma.trainingTopic.count()) + 1;
   const topicCode = generateTopicCode(sequence);
   const created = await prisma.trainingTopic.create({
@@ -220,10 +233,10 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
 
 /**
  * Plain metadata update. topicCode is PERMANENTLY locked and never updatable here.
- * passingScorePercent IS accepted here, but on a PUBLISHED topic it (like every field)
+ * passingScorePercent IS accepted here, but on a PUBLISHED course it (like every field)
  * is staged into draftMeta and only goes live via the e-signed publish.
  *
- * G4: if the topic is PUBLISHED, the edits are NOT applied to the live record — they
+ * G4: if the course is PUBLISHED, the edits are NOT applied to the live record — they
  * are staged in `draftMeta` (a draft working copy). The published version stays live
  * and unchanged until `publishDraftChanges` promotes the draft (e-signed, confirmed).
  */
@@ -288,7 +301,7 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
 }
 
 /**
- * G2/G4: promote a published topic's pending draft changes to the live record — both
+ * G2/G4: promote a published course's pending draft changes to the live record — both
  * the staged metadata (draftMeta) AND any staged material files — then clear the draft.
  * This replaces the old full-course "Revise (new version)" clone: the published course
  * stays the same id and stays live; edits are applied in place only on this controlled,
@@ -304,6 +317,18 @@ export async function publishDraftChanges(id: string, req: Request) {
   ]);
   if (!topic.draftMeta && stagedCount === 0 && stagedQuestionCount === 0 && pendingRemovalCount === 0) {
     throw AppError.badRequest('There are no pending draft changes to publish.');
+  }
+  // Block publishing changes that would leave an assessment course with no questions (e.g. a
+  // staged removal of the last one). Use the EFFECTIVE requiresAssessment AFTER this publish —
+  // a staged edit that turns "Requires assessment" off (held in draftMeta) must be allowed
+  // through, otherwise a legacy course with no questions could never be fixed.
+  const stagedMeta = (topic.draftMeta ?? {}) as Record<string, unknown>;
+  const willRequireAssessment = 'requiresAssessment' in stagedMeta ? !!stagedMeta.requiresAssessment : topic.requiresAssessment;
+  if (willRequireAssessment) {
+    const liveKept = await prisma.question.count({
+      where: { topicId: id, isActive: true, isDeleted: false, isStaged: false, pendingRemoval: false },
+    });
+    if (liveKept + stagedQuestionCount === 0) throw AppError.badRequest(NO_QUESTIONS_TO_PUBLISH_MSG);
   }
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
@@ -364,7 +389,7 @@ export async function publishDraftChanges(id: string, req: Request) {
   // ONCE (regardless of how many changes are batched) and clear the staged metadata.
   // Staged per-material read-time changes are held under a non-column key
   // (materialReadTimes) — apply them to the live materials and strip the key before it is
-  // spread onto the topic (Prisma would reject the unknown field).
+  // spread onto the course (Prisma would reject the unknown field).
   const { materialReadTimes, ...draft } = (topic.draftMeta ?? {}) as Prisma.TrainingTopicUpdateInput & {
     materialReadTimes?: Record<string, number>;
   };
@@ -437,13 +462,18 @@ export async function publishDraftChanges(id: string, req: Request) {
 }
 
 /**
- * 4.3 / Step 3: change a topic's lifecycle status (publish / archive / submit for
+ * 4.3 / Step 3: change a course's lifecycle status (publish / archive / submit for
  * review). Publishing and archiving are controlled GMP transitions and require a
  * two-component e-signature; the reason is captured by the route middleware.
  * When publishing, the effective date is stamped if not already set.
  */
 export async function updateTopicStatus(id: string, status: TopicStatus, req: Request) {
   const topic = await getTopic(id);
+  // Block publishing an assessment course with no questions (before consuming the e-signature).
+  if (status === 'PUBLISHED' && topic.requiresAssessment) {
+    const questionCount = await prisma.question.count({ where: { topicId: id, isActive: true, isDeleted: false, isStaged: false } });
+    if (questionCount === 0) throw AppError.badRequest(NO_QUESTIONS_TO_PUBLISH_MSG);
+  }
   // Every controlled lifecycle transition is e-signed (publish / unpublish / archive).
   const meaning = status === 'PUBLISHED' ? 'Approved' : status === 'ARCHIVED' ? 'Performed' : 'Reviewed';
   await signFromRequest(req, 'TrainingTopic', id, meaning);
@@ -453,7 +483,7 @@ export async function updateTopicStatus(id: string, status: TopicStatus, req: Re
       status,
       ...(status === 'PUBLISHED' && !topic.effectiveDate ? { effectiveDate: new Date() } : {}),
       // CR-26: Unpublish (→ DRAFT / UNDER_REVIEW) must NOT archive — it returns the
-      // topic to an editable, active state. Only an explicit Archive deactivates it.
+      // course to an editable, active state. Only an explicit Archive deactivates it.
       isActive: status !== 'ARCHIVED',
     },
   });
@@ -475,9 +505,9 @@ function functionalRoleIdsOf(u: { designationId?: string | null; designationIds?
 
 /**
  * On publish (and re-publish), auto-assign the course to every active user whose
- * functional role(s) match the topic's target functional role(s) (designationIds).
+ * functional role(s) match the course's target functional role(s) (designationIds).
  * Creates a PENDING ROLE_SPECIFIC assignment per user, skipping anyone who already has
- * an active/completed assignment for the topic. TNI remains the separate planned flow.
+ * an active/completed assignment for the course. TNI remains the separate planned flow.
  * Best-effort — never blocks the publish transition.
  */
 async function assignToFunctionalRoleHolders(
@@ -545,7 +575,7 @@ async function reassignCompletedUsersForRevision(topicId: string, actorId: strin
 }
 
 /**
- * CR-51: ensure each signatory user has a COMPLETED training record for this topic.
+ * CR-51: ensure each signatory user has a COMPLETED training record for this course.
  * Best-effort — never blocks the publish transition.
  */
 async function markSignatoriesComplete(topicId: string, actorId: string) {
@@ -579,12 +609,12 @@ async function markSignatoriesComplete(topicId: string, actorId: string) {
 }
 
 /**
- * Create a new content version of a topic. A NEW TrainingTopic row is written
+ * Create a new content version of a course. A NEW TrainingTopic row is written
  * (currentVersion + 1, parentTopicId = original); the OLD version is archived and
  * its materials/questions are snapshotted, preserving completed-training links to
  * the old version. Material migration to the new version:
  *
- *  - STAGED files on the old topic (added/replaced/attached while published) are
+ *  - STAGED files on the old course (added/replaced/attached while published) are
  *    PROMOTED onto the new version as the current files.
  *  - UNCHANGED current files (not targeted by a staged Replace) are CARRIED
  *    FORWARD (file copied on disk → independent lineage) onto the new version.
@@ -594,7 +624,7 @@ async function markSignatoriesComplete(topicId: string, actorId: string) {
  */
 export async function reviseTopic(id: string, req: Request) {
   const old = await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false } });
-  if (!old) throw AppError.notFound('Training topic not found');
+  if (!old) throw AppError.notFound('Training course not found');
 
   // Only the CURRENT version may be revised. Revising an already-superseded version
   // would create a parallel "published" version (two live versions of one course)
@@ -614,7 +644,7 @@ export async function reviseTopic(id: string, req: Request) {
   // version was revised more than once), so advance past any existing code to
   // guarantee uniqueness — otherwise the create hits a P2002 (409) collision.
   const baseCode = old.topicCode.replace(/-v\d+$/, '');
-  // The new version is exactly ONE past the highest version anywhere in this topic
+  // The new version is exactly ONE past the highest version anywhere in this course
   // family (the base code itself = v1, plus every "<base>-vN" revision). This keeps
   // the increment a consistent +1 from the true latest — never +2 or backwards —
   // regardless of which version was revised, and the topicCode stays unique.
@@ -629,7 +659,7 @@ export async function reviseTopic(id: string, req: Request) {
     nextVersion++;
   }
   // The revised version carries forward all SOP metadata and becomes the active
-  // version (inherits the old status; a previously-archived topic re-publishes).
+  // version (inherits the old status; a previously-archived course re-publishes).
   const created = await prisma.trainingTopic.create({
     data: {
       topicCode: `${baseCode}-v${nextVersion}`,
@@ -667,7 +697,7 @@ export async function reviseTopic(id: string, req: Request) {
     },
   });
 
-  // Gather the old topic's staged + current materials.
+  // Gather the old course's staged + current materials.
   const [staged, current] = await Promise.all([
     prisma.trainingMaterial.findMany({ where: { topicId: old.id, isDeleted: false, isStaged: true } }),
     prisma.trainingMaterial.findMany({
@@ -794,7 +824,7 @@ export async function reviseTopic(id: string, req: Request) {
  */
 export async function deactivateTopic(id: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id, isDeleted: false }, select: { status: true } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
   if (topic.status === 'PUBLISHED') {
     throw AppError.conflict('A published course cannot be deleted. Archive it instead.');
   }

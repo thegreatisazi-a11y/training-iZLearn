@@ -77,7 +77,7 @@ export async function issueForAttempt(attemptId: string) {
     prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } }),
     getOrgInfo(),
   ]);
-  if (!user || !topic) throw AppError.notFound('User or topic not found');
+  if (!user || !topic) throw AppError.notFound('User or course not found');
 
   const certificateNumber = generateCertificateNumber();
   const isInduction = topic.trainingType === 'INDUCTION';
@@ -156,7 +156,7 @@ export async function listCertificates(filters: { userId?: string }) {
     where: { isDeleted: false, ...(filters.userId ? { userId: filters.userId } : {}) },
     orderBy: { issuedAt: 'desc' },
   });
-  // BUG-03/04: resolve topic title + number so certificates never show a raw topicId.
+  // BUG-03/04: resolve course title + number so certificates never show a raw topicId.
   const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
   const topics = topicIds.length
     ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })

@@ -18,14 +18,14 @@ const materialKey = (storedFileName: string) => `materials/${storedFileName}`;
 
 /**
  * Training materials (Module 4) — the uploaded files (PDF/PPT/video/...) that
- * back a training topic, plus a reusable material library.
+ * back a training course, plus a reusable material library.
  *
  *  - every upload is validated (extension + MIME + size) and virus-scanned
  *    before the file is moved out of the tmp dir into permanent storage.
- *  - STAGED workflow: a file added/replaced/attached on a PUBLISHED topic is
- *    STAGED (isStaged:true, not current) and stays inert until the topic is
+ *  - STAGED workflow: a file added/replaced/attached on a PUBLISHED course is
+ *    STAGED (isStaged:true, not current) and stays inert until the course is
  *    revised — the live/published version is never altered by simply adding a
- *    file. On a DRAFT/UNDER_REVIEW topic (still being built) the file becomes
+ *    file. On a DRAFT/UNDER_REVIEW course (still being built) the file becomes
  *    current immediately, since there is no live version to protect.
  *  - on reviseTopic, staged files are promoted onto the new version and the prior
  *    current files are archived (see trainingTopic.service.ts).
@@ -63,7 +63,7 @@ async function assertNoDuplicateName(originalName: string, scope: { topicId: str
 
 export async function uploadMaterial(topicId: string, file: Express.Multer.File, createdBy: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   // Item 1: reject a duplicate file name in the same course so the same file can't be
   // uploaded twice. Case-insensitive; ignores superseded (obsolete) prior versions and
@@ -79,15 +79,15 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
   await storage.putFile(key, file.path, file.mimetype);
 
   const staged = isPublished(topic.status);
-  // A topic legitimately holds MANY materials at once (e.g. a PDF + a video). Uploading
-  // a new file ADDS a material — it must NOT demote/supersede the topic's existing
+  // A course legitimately holds MANY materials at once (e.g. a PDF + a video). Uploading
+  // a new file ADDS a material — it must NOT demote/supersede the course's existing
   // current files (that is what Replace/Update is for). So on a draft the new file simply
   // becomes another current material; nothing else is touched.
   // BUG-02: authoring never bumps the course version — that only advances when published
   // changes go live (publishDraftChanges).
 
   // Use the highest existing version (not the count): materials are copied across
-  // topic revisions carrying their version numbers, so a raw count can fall BELOW an
+  // course revisions carrying their version numbers, so a raw count can fall BELOW an
   // existing version and make the next file go backwards (e.g. v5 → v4).
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
 
@@ -119,10 +119,10 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
 
 /**
  * CR-MAT2/MAT3: Persist a single uploaded file as a LIBRARY-level material (no
- * topic). Reuses the same validation (extension/MIME/size), virus-scan and
+ * course). Reuses the same validation (extension/MIME/size), virus-scan and
  * metadata capture (originalFileName/fileType/fileSize) as the single-upload
  * path, and records a FILE_UPLOAD audit event. The material is stored with an
- * empty topicId sentinel so it can later be reused into a topic via
+ * empty topicId sentinel so it can later be reused into a course via
  * attachLibraryMaterial(). Pass `maxBytes` so a bulk loop resolves the size
  * limit once.
  */
@@ -137,8 +137,8 @@ async function persistLibraryMaterial(file: Express.Multer.File, createdBy: stri
 
   const material = await prisma.trainingMaterial.create({
     data: {
-      // Library-level: no owning topic. Empty sentinel keeps the non-null schema
-      // column satisfied; attach-from-library copies it into a topic later.
+      // Library-level: no owning course. Empty sentinel keeps the non-null schema
+      // column satisfied; attach-from-library copies it into a course later.
       topicId: '',
       originalFileName: file.originalname,
       storedFileName: file.filename,
@@ -165,8 +165,8 @@ async function persistLibraryMaterial(file: Express.Multer.File, createdBy: stri
 /**
  * CR-MAT2: Bulk-upload multiple files into the Material Library. Each file goes
  * through the same single-file persist logic (validation + virus-scan + metadata
- * capture + FILE_UPLOAD audit). Files are library-level (no topic) so they can be
- * reused into topics later. A failure on one file does not abort the rest; the
+ * capture + FILE_UPLOAD audit). Files are library-level (no course) so they can be
+ * reused into courses later. A failure on one file does not abort the rest; the
  * caller gets a summary of what uploaded and what failed.
  */
 export async function bulkUploadMaterials(
@@ -194,10 +194,10 @@ export async function bulkUploadMaterials(
 
 /**
  * 4.1: Replace/Update a SPECIFIC material with a new uploaded file.
- *  - PUBLISHED topic: the new file is STAGED against the selected material
- *    (replacesMaterialId) and supersedes it only when the topic is revised. The
+ *  - PUBLISHED course: the new file is STAGED against the selected material
+ *    (replacesMaterialId) and supersedes it only when the course is revised. The
  *    live version is untouched.
- *  - DRAFT topic: the selected file (and any other current files) are superseded
+ *  - DRAFT course: the selected file (and any other current files) are superseded
  *    immediately and the new file becomes current; a version-history snapshot is
  *    written. Reason-for-change is captured by the route middleware.
  */
@@ -205,7 +205,7 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   const old = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
   if (!old) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
@@ -215,9 +215,9 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   await storage.putFile(key, file.path, file.mimetype);
 
   const reason = auditContext.getStore()?.reasonForChange ?? null;
-  // G3/G4: on a PUBLISHED topic the replacement is STAGED (a draft change) — the live
+  // G3/G4: on a PUBLISHED course the replacement is STAGED (a draft change) — the live
   // current file is left untouched until "Publish changes" promotes it. On a DRAFT
-  // topic the old file is superseded immediately and the new one becomes current.
+  // course the old file is superseded immediately and the new one becomes current.
   const staged = isPublished(topic.status);
   if (!staged) {
     await prisma.trainingMaterial.updateMany({
@@ -266,18 +266,18 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
 }
 
 /**
- * 4.2: Attach an existing Material Library file to a topic. The source file is
+ * 4.2: Attach an existing Material Library file to a course. The source file is
  * copied on disk (independent lineage) and recorded as a new TrainingMaterial.
- *  - PUBLISHED topic: the attached file is STAGED (inert until revise).
- *  - DRAFT topic: it is ADDED as another current file. Attaching adds a material —
- *    it does not supersede the topic's existing current files (use Replace for that),
+ *  - PUBLISHED course: the attached file is STAGED (inert until revise).
+ *  - DRAFT course: it is ADDED as another current file. Attaching adds a material —
+ *    it does not supersede the course's existing current files (use Replace for that),
  *    so multiple library files can be attached to a draft and all stay current.
  */
 export async function attachLibraryMaterial(sourceMaterialId: string, topicId: string, createdBy: string) {
   const source = await prisma.trainingMaterial.findFirst({ where: { id: sourceMaterialId, isDeleted: false } });
   if (!source) throw AppError.notFound('Source material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   // Item 1: don't attach a library file whose name is already present in the course.
   await assertNoDuplicateName(source.originalFileName, { topicId });
@@ -293,7 +293,7 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   // BUG-02: authoring never bumps the course version; publishing changes bumps it instead.
 
   // Use the highest existing version (not the count): materials are copied across
-  // topic revisions carrying their version numbers, so a raw count can fall BELOW an
+  // course revisions carrying their version numbers, so a raw count can fall BELOW an
   // existing version and make the next file go backwards (e.g. v5 → v4).
   const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
   const material = await prisma.trainingMaterial.create({
@@ -319,7 +319,7 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   });
 
   // Attaching to a draft is authoring (adding a file), not a controlled supersession —
-  // no version-history snapshot is written (mirrors a plain upload). A published topic's
+  // no version-history snapshot is written (mirrors a plain upload). A published course's
   // attach is staged and captured when the changes are published.
   return material;
 }
@@ -330,8 +330,8 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
  * the selected file is superseded (replacesMaterialId), the library file's bytes are
  * copied into independent storage, and a version-history snapshot is written — but the
  * new file's content comes from an existing library material.
- *  - PUBLISHED topic: STAGED against the target (inert until the topic is published).
- *  - DRAFT topic: superseded immediately, the copied file becomes current, course
+ *  - PUBLISHED course: STAGED against the target (inert until the course is published).
+ *  - DRAFT course: superseded immediately, the copied file becomes current, course
  *    version bumped. Reason-for-change is captured by the route middleware.
  */
 export async function replaceMaterialFromLibrary(materialId: string, sourceMaterialId: string, createdBy: string) {
@@ -340,7 +340,7 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
   const source = await prisma.trainingMaterial.findFirst({ where: { id: sourceMaterialId, isDeleted: false } });
   if (!source) throw AppError.notFound('Source library material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   // Copy the source file to an independent stored object (own lineage), as attach does.
   const storedFileName = generateStoredName(source.originalFileName);
@@ -395,8 +395,8 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
 }
 
 /**
- * Resolve a topic's version lineage (the topic itself + all ancestor versions via
- * parentTopicId). Used so a managed view of a revised topic also surfaces the
+ * Resolve a course's version lineage (the course itself + all ancestor versions via
+ * parentTopicId). Used so a managed view of a revised course also surfaces the
  * archived files that belonged to its previous versions.
  */
 export async function lineageTopicIds(topicId: string): Promise<string[]> {
@@ -483,9 +483,9 @@ export async function downloadMaterial(id: string): Promise<{ key: string; origi
 
 /**
  * Set a material's required reading/viewing time (seconds). If `applyToAll`, the same
- * time is applied to every current material of the topic. Afterwards the course
+ * time is applied to every current material of the course. Afterwards the course
  * duration is recomputed from the total reading time (sum of current materials'
- * required seconds → minutes) and stored on the topic, so the duration shown across
+ * required seconds → minutes) and stored on the course, so the duration shown across
  * the app reflects the configured reading time.
  */
 export async function setRequiredViewSeconds(id: string, seconds: number, applyToAll = false) {
@@ -528,7 +528,7 @@ export async function setRequiredViewSeconds(id: string, seconds: number, applyT
 /**
  * Course duration = total required reading time of the current materials (rounded up to
  * whole minutes). Only updates when there is reading time configured, so a manually
- * entered duration isn't wiped on topics that don't gate reading time.
+ * entered duration isn't wiped on courses that don't gate reading time.
  */
 export async function recomputeTopicDurationFromReadingTime(topicId: string) {
   const materials = await prisma.trainingMaterial.findMany({
@@ -543,7 +543,7 @@ export async function recomputeTopicDurationFromReadingTime(topicId: string) {
 
 /** Soft-delete (the only kind of delete in izLearn). */
 /** H1: a material attached to a PUBLISHED topic is part of the controlled record and
- * cannot be deleted by anyone (delete is only allowed while the topic is unpublished). */
+ * cannot be deleted by anyone (delete is only allowed while the course is unpublished). */
 async function assertMaterialDeletable(material: { topicId: string }) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: material.topicId, isDeleted: false }, select: { status: true } });
   if (topic?.status === 'PUBLISHED') {

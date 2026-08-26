@@ -14,7 +14,7 @@ import {
 /**
  * @openapi
  * tags:
- *   - name: Training Topics
+ *   - name: Training Courses
  *     description: Training content (Module 4) — versioned course definitions
  */
 const router = Router();
@@ -22,7 +22,7 @@ router.use(authenticate);
 
 // Browsing published courses is a personal action a trainee needs (to see and start
 // their assigned training and populate the "Start Assessment" list), so the catalogue
-// list + single-topic read are open to any authenticated user. The controller scopes the
+// list + single-course read are open to any authenticated user. The controller scopes the
 // result: managers (courseManagement:write) see drafts/all statuses; everyone else sees
 // only PUBLISHED, current content. Export + version history stay manager-only.
 // (/export and /reading-style paths precede /:id so they aren't captured as an id.)
@@ -51,7 +51,7 @@ router.patch(
   validate(updateTopicSchema),
   c.update,
 );
-// G4: publish a published topic's staged draft edits to the live record (e-signed).
+// G4: publish a published course's staged draft edits to the live record (e-signed).
 router.post(
   '/:id/publish-draft',
   requirePermission('courseManagement', 'edit'),

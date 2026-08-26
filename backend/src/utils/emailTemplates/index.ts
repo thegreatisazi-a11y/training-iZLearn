@@ -42,7 +42,7 @@ export function renderEmail(type: EmailType, orgName: string, data: Data): Rende
             paragraph('You have been assigned the following training. Please complete it by the due date.') +
             infoTable([
               ['Training', data.topicTitle ?? ''],
-              ['Topic Code', data.topicCode ?? ''],
+              ['Course Code', data.topicCode ?? ''],
               ['Due Date', data.dueDate ?? 'Not set'],
             ]),
         ),
@@ -166,7 +166,7 @@ export function renderEmail(type: EmailType, orgName: string, data: Data): Rende
             paragraph(`A training course you are assigned to has been revised to a new version. Please review the updated material and complete any required re-training.`) +
             infoTable([
               ['Training', data.topicTitle ?? ''],
-              ['Topic Code', data.topicCode ?? ''],
+              ['Course Code', data.topicCode ?? ''],
               ['Reason', data.reason ?? '—'],
             ]),
         ),

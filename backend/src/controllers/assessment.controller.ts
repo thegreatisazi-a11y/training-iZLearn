@@ -16,7 +16,7 @@ export const acknowledgeRead = asyncHandler(async (req: Request, res: Response) 
 );
 
 // /**
- // * Read-and-understood declaration for a topic version. Personal actions on the user's own
+ // * Read-and-understood declaration for a course version. Personal actions on the user's own
  // * assigned training — the reading controls are enforced in the service, so a client cannot
  // * acknowledge material it never opened.
  // */

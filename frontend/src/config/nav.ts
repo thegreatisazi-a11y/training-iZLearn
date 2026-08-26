@@ -26,7 +26,7 @@ export const NAV: NavItem[] = [
   { to: '/users/requests', label: 'User Requests', icon: UserPlus, module: 'userRequests', action: 'view' },
   { to: '/roles', label: 'Roles & Access Control', icon: Shield, module: 'roleManagement', action: 'read' },
   { to: '/masters', label: 'Master Setup', icon: MapPin, module: 'masterSetup', action: 'read' },
-  { to: '/topics', label: 'Courses', icon: BookOpen, module: 'courseManagement', action: 'read' },
+  { to: '/courses', label: 'Courses', icon: BookOpen, module: 'courseManagement', action: 'read' },
   { to: '/materials', label: 'Material Library', icon: FolderOpen, module: 'materialManagement', action: 'read' },
   { to: '/job-descriptions', label: 'Job Descriptions', icon: FileText, module: 'jobDescription', action: 'read' },
   { to: '/tni', label: 'Training Needs (TNI)', icon: ClipboardList, module: 'tni', action: 'read' },

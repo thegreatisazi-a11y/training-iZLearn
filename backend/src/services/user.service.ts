@@ -882,7 +882,7 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
   for (const c of certs) certCount.set(c.userId, (certCount.get(c.userId) ?? 0) + 1);
   const tniPending = new Map<string, number>();
   for (const t of tnis) if (t.status === 'PENDING') tniPending.set(t.userId, (tniPending.get(t.userId) ?? 0) + 1);
-  // Assessment completion = distinct topics the user has passed.
+  // Assessment completion = distinct courses the user has passed.
   const assessPassed = new Map<string, Set<string>>();
   for (const a of passedAttempts) {
     const s = assessPassed.get(a.userId) ?? new Set<string>();
@@ -938,7 +938,7 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
     : [];
   const tMap = new Map(topics.map((t) => [t.id, t]));
 
-  // Per-topic attempt summary (attempts are keyed by user+topic, not by assignment).
+  // Per-course attempt summary (attempts are keyed by user+course, not by assignment).
   const byTopic = new Map<string, { used: number; best: number | null; passed: boolean }>();
   for (const a of attempts) {
     const s = byTopic.get(a.topicId) ?? { used: 0, best: null, passed: false };
@@ -954,7 +954,7 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   return {
     user: { id: target.id, fullName: target.fullName, employeeId: target.employeeId },
     assignments: assignments
-      // A revised course shows ONLY the current version: hide assignments whose topic
+      // A revised course shows ONLY the current version: hide assignments whose course
       // has been superseded by a newer version.
       .filter((a) => {
         const t = tMap.get(a.topicId);

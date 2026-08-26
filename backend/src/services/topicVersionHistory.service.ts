@@ -3,8 +3,8 @@ import { prisma } from '../config/prisma';
 import type { PaginationQuery } from '@izlearn/shared';
 
 /**
- * Topic version history (4.4). Each entry is a point-in-time snapshot of a topic's
- * materials AND questions, written whenever a new file supersedes the topic's
+ * Course version history (4.4). Each entry is a point-in-time snapshot of a course's
+ * materials AND questions, written whenever a new file supersedes the course's
  * content (per-file replace, library attach, or a full reviseTopic). The live
  * Question rows are never touched — only a copy is recorded here.
  */

@@ -110,7 +110,7 @@ async function enrichEntityLabels<T extends { entityType: string; entityId: stri
   const idsOf = (type: string) => Array.from(idsByType.get(type) ?? []);
   const truncate = (s: string, n = 60) => (s && s.length > n ? `${s.slice(0, n)}…` : s);
 
-  // Resolve user + topic ids first — several relational records label via these.
+  // Resolve user + course ids first — several relational records label via these.
   const allUserIds = new Set<string>(idsOf('User'));
   const allTopicIds = new Set<string>(idsOf('TrainingTopic'));
 
@@ -132,7 +132,7 @@ async function enrichEntityLabels<T extends { entityType: string; entityId: stri
     }
     for (const id of sessionIds) allUserIds.add(id); // ids that are themselves userIds
   }
-  // Relational records whose label is composed from their user/topic.
+  // Relational records whose label is composed from their user/course.
   const relational = ['TrainingAssignment', 'AssessmentAttempt', 'RetakeRequest', 'CurriculumVitae'] as const;
   const relRecords: Record<string, { userId?: string; topicId?: string }> = {};
   await Promise.all(
@@ -195,7 +195,7 @@ async function enrichEntityLabels<T extends { entityType: string; entityId: stri
     if (name) put('UserSession', id, name);
   }
 
-  // Relational composite labels: "<user> · <topic>".
+  // Relational composite labels: "<user> · <course>".
   for (const type of relational) {
     for (const id of idsOf(type)) {
       const rec = relRecords[`${type}:${id}`];

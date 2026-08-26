@@ -226,11 +226,11 @@ export default function DashboardPage() {
       node: section(
         'My Training',
         <>
-          <Stat icon={Clock} label="Pending" value={me.pending ?? 0} tone="bg-amber-100 text-amber-700" to="/my-trainings" />
-          <Stat icon={BookOpen} label="In Progress" value={me.inProgress ?? 0} tone="bg-blue-100 text-blue-700" to="/my-trainings" />
-          <Stat icon={CheckCircle2} label="Completed" value={me.completed ?? 0} tone="bg-green-100 text-green-700" to="/my-trainings" />
-          <Stat icon={AlertTriangle} label="Overdue" value={me.overdue ?? 0} tone="bg-red-100 text-red-700" to="/my-trainings" />
-          <Stat icon={Ban} label="Blocked" value={me.blocked ?? 0} tone="bg-red-100 text-red-700" to="/my-trainings" />
+          <Stat icon={Clock} label="Pending" value={me.pending ?? 0} tone="bg-amber-100 text-amber-700" to="/my-trainings?filter=pending" />
+          <Stat icon={BookOpen} label="In Progress" value={me.inProgress ?? 0} tone="bg-blue-100 text-blue-700" to="/my-trainings?filter=pending" />
+          <Stat icon={CheckCircle2} label="Completed" value={me.completed ?? 0} tone="bg-green-100 text-green-700" to="/my-trainings?filter=completed" />
+          <Stat icon={AlertTriangle} label="Overdue" value={me.overdue ?? 0} tone="bg-red-100 text-red-700" to="/my-trainings?filter=overdue" />
+          <Stat icon={Ban} label="Blocked" value={me.blocked ?? 0} tone="bg-red-100 text-red-700" to="/my-trainings?filter=blocked" />
           <Stat icon={RefreshCw} label="Refresher Due" value={me.refresherDue ?? 0} tone="bg-purple-100 text-purple-700" to="/my-trainings" />
           <Stat icon={Award} label="Certificates" value={me.certificates ?? 0} tone="bg-teal-100 text-teal-700" to="/certificates" />
         </>,
@@ -269,13 +269,13 @@ export default function DashboardPage() {
       node: section(
         'Training Management',
         <>
-          <Stat icon={BookOpen} label="Published Courses" value={org?.publishedTopics ?? 0} tone="bg-green-100 text-green-700" to="/topics" />
-          <Stat icon={BookOpen} label="Draft Courses" value={org?.draftTopics ?? 0} tone="bg-amber-100 text-amber-700" to="/topics" />
-          <Stat icon={BookOpen} label="Under Review" value={org?.underReviewTopics ?? 0} tone="bg-blue-100 text-blue-700" to="/topics" />
-          <Stat icon={BookOpen} label="Archived Courses" value={org?.archivedTopics ?? 0} tone="bg-slate-100 text-slate-600" to="/topics" />
-          <Stat icon={ClipboardList} label="Assigned Trainings" value={org?.assignedTrainings ?? 0} tone="bg-slate-100 text-slate-700" to="/topics" />
-          <Stat icon={Clock} label="Pending Trainings" value={org?.pendingTrainings ?? 0} tone="bg-amber-100 text-amber-700" to="/topics" />
-          <Stat icon={CheckCircle2} label="Completed Trainings" value={org?.completedTrainings ?? 0} tone="bg-green-100 text-green-700" to="/topics" />
+          <Stat icon={BookOpen} label="Published Courses" value={org?.publishedTopics ?? 0} tone="bg-green-100 text-green-700" to="/courses" />
+          <Stat icon={BookOpen} label="Draft Courses" value={org?.draftTopics ?? 0} tone="bg-amber-100 text-amber-700" to="/courses" />
+          <Stat icon={BookOpen} label="Under Review" value={org?.underReviewTopics ?? 0} tone="bg-blue-100 text-blue-700" to="/courses" />
+          <Stat icon={BookOpen} label="Archived Courses" value={org?.archivedTopics ?? 0} tone="bg-slate-100 text-slate-600" to="/courses" />
+          <Stat icon={ClipboardList} label="Assigned Trainings" value={org?.assignedTrainings ?? 0} tone="bg-slate-100 text-slate-700" to="/courses" />
+          <Stat icon={Clock} label="Pending Trainings" value={org?.pendingTrainings ?? 0} tone="bg-amber-100 text-amber-700" to="/courses" />
+          <Stat icon={CheckCircle2} label="Completed Trainings" value={org?.completedTrainings ?? 0} tone="bg-green-100 text-green-700" to="/courses" />
         </>,
       ),
     },
@@ -287,7 +287,7 @@ export default function DashboardPage() {
         'Organisation',
         <>
           <Stat icon={Users} label="Active Users" value={org?.activeUsers ?? 0} tone="bg-slate-100 text-slate-700" to="/users" />
-          <Stat icon={BookOpen} label="Training Topics" value={org?.totalTopics ?? 0} tone="bg-slate-100 text-slate-700" to="/topics" />
+          <Stat icon={BookOpen} label="Training Courses" value={org?.totalTopics ?? 0} tone="bg-slate-100 text-slate-700" to="/courses" />
           <Stat icon={UserCog} label="Pending User Requests" value={org?.pendingUserRequests ?? 0} tone="bg-amber-100 text-amber-700" to="/users/requests" />
           <Stat icon={AlertTriangle} label="Overdue Assignments" value={org?.overdueAssignments ?? 0} tone="bg-red-100 text-red-700" to="/reports" />
           <Stat icon={ClipboardList} label="Pending TNI" value={org?.pendingTNI ?? 0} tone="bg-amber-100 text-amber-700" to="/tni" />

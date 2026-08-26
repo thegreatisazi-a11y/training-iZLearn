@@ -51,7 +51,7 @@ const AUDITED_MODELS = new Set<string>([
   'BundleTopic',
   'TniRequirement',
   'CurriculumVitae',
-  // // The trainee's read-and-understood declaration. Low volume (one row per user + topic
+  // // The trainee's read-and-understood declaration. Low volume (one row per user + course
   // // version) and a GMP record in its own right, so unlike MaterialViewLog progress writes
   // // it is audited.
   // 'TopicAcknowledgement',

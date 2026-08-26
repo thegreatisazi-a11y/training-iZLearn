@@ -56,7 +56,7 @@ router.post('/:id/acknowledge-instruction', c.acknowledgeInstruction);
 router.post('/', requirePermission('materialManagement', 'write'), uploadFile.single('file'), c.upload);
 // CR-MAT2: bulk-upload multiple files (library-level when no topicId supplied).
 router.post('/bulk', requirePermission('materialManagement', 'create'), uploadFile.array('files', 50), c.bulkUpload);
-// 4.2: attach an existing library material to a topic as the current version.
+// 4.2: attach an existing library material to a course as the current version.
 router.post('/attach', requirePermission('materialManagement', 'write'), captureReasonIfPresent, c.attachFromLibrary);
 // 4.1: replace/update a specific material with a new uploaded version. On a published
 // course this STAGES the change; the reason (+ e-sign) is captured once at "Publish

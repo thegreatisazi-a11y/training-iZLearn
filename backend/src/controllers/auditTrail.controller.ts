@@ -51,7 +51,7 @@ const HOUSEKEEPING_FIELDS = ['lastLoginAt', 'failedLoginAttempts', 'lockedUntil'
 const FIELD_LABELS: Record<string, string> = {
   fullName: 'Full Name', email: 'Email', isActive: 'Active', isDeleted: 'Deleted', status: 'Status',
   roleName: 'Role Name', description: 'Description', permissions: 'Permissions', title: 'Title',
-  topicNumber: 'Topic Number', sopNumber: 'SOP Number', passingScorePercent: 'Passing Score (%)',
+  topicNumber: 'Course Number', sopNumber: 'SOP Number', passingScorePercent: 'Passing Score (%)',
   maxAttempts: 'Max Attempts', durationMinutes: 'Duration (min)', assessmentTimeMinutes: 'Assessment Time (min)',
   requiresAssessment: 'Requires Assessment', dueDate: 'Due Date', refresherDueDate: 'Refresher Due',
   effectiveDate: 'Effective Date', reviewDate: 'Review Date', supervisorId: 'Reporting Manager',

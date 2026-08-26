@@ -385,7 +385,10 @@ model TrainingSchedule {
   scheduledDate DateTime
   trainerId     String? // internal trainer (userId); null when an external trainer is named. Must NOT be in traineeIds
   trainerName   String? // external trainer name (used when trainerId is null)
-  trainingType  TrainingType
+  // DERIVED from the schedule's topic at creation — never entered by hand, so it can't
+  // drift from the master. String (not the TrainingType enum) because a topic's type may
+  // be a custom master code. Kept as a point-in-time record of the session as scheduled.
+  trainingType  String
   methodology   String?
   venue         String?
   maxTrainees   Int?

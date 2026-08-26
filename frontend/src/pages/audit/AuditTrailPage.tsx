@@ -43,7 +43,7 @@ const FIELD_LABELS: Record<string, string> = {
   description: 'Description',
   permissions: 'Permissions',
   title: 'Title',
-  topicNumber: 'Topic Number',
+  topicNumber: 'Course Number',
   sopNumber: 'SOP Number',
   passingScorePercent: 'Passing Score (%)',
   maxAttempts: 'Max Attempts',

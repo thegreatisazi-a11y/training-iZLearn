@@ -317,15 +317,15 @@ export default function MyCVPage() {
             {/* R5: explicit Yes/No (blank/unset defaults to No) instead of a tick/cross/hyphen. */}
             <label className="flex items-center gap-1.5 text-sm text-slate-700">
               Read
-              <Select className="w-20" options={YES_NO} value={row.read ? 'yes' : 'no'} onChange={(e) => set({ ...row, read: e.target.value === 'yes' })} />
+              <Select className="w-20" options={YES_NO} unsorted value={row.read ? 'yes' : 'no'} onChange={(e) => set({ ...row, read: e.target.value === 'yes' })} />
             </label>
             <label className="flex items-center gap-1.5 text-sm text-slate-700">
               Write
-              <Select className="w-20" options={YES_NO} value={row.write ? 'yes' : 'no'} onChange={(e) => set({ ...row, write: e.target.value === 'yes' })} />
+              <Select className="w-20" options={YES_NO} unsorted value={row.write ? 'yes' : 'no'} onChange={(e) => set({ ...row, write: e.target.value === 'yes' })} />
             </label>
             <label className="flex items-center gap-1.5 text-sm text-slate-700">
               Understand
-              <Select className="w-20" options={YES_NO} value={row.understand ? 'yes' : 'no'} onChange={(e) => set({ ...row, understand: e.target.value === 'yes' })} />
+              <Select className="w-20" options={YES_NO} unsorted value={row.understand ? 'yes' : 'no'} onChange={(e) => set({ ...row, understand: e.target.value === 'yes' })} />
             </label>
           </div>
         )}
@@ -390,7 +390,7 @@ export default function MyCVPage() {
         onChange={(rows) => upd('trainings', rows)}
         blank={{}}
         render={(row, set) => (
-          <Input placeholder="Detail (month-year, topic, location…)" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
+          <Input placeholder="Detail (month-year, course, location…)" value={row.detail ?? ''} onChange={(e) => set({ ...row, detail: e.target.value })} />
         )}
       />
 

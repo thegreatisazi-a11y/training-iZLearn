@@ -137,7 +137,7 @@ export default function BundleDetailPage() {
   function exportCsv() {
     downloadCsv(
       `bundle-${b.name}.csv`,
-      ['Topic No.', 'Topic', 'Type', 'Version', 'Status'],
+      ['Course No.', 'Course', 'Type', 'Version', 'Status'],
       b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status]),
     );
   }
@@ -145,8 +145,8 @@ export default function BundleDetailPage() {
   function printDetail() {
     const body =
       `<h1>${escapeHtml(b.name)}</h1><div class="sub">${escapeHtml(b.description ?? 'Training bundle')} · ${b.isActive ? 'Active' : 'Inactive'}</div>` +
-      `<div class="section">Topics (${b.topics.length})</div>` +
-      printTable(['Topic No.', 'Topic', 'Type', 'Version', 'Status'], b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status])) +
+      `<div class="section">Courses (${b.topics.length})</div>` +
+      printTable(['Course No.', 'Course', 'Type', 'Version', 'Status'], b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status])) +
       `<div class="section">Targets</div>` +
       printTable(
         ['Departments', 'Functional Roles', 'Roles', 'Resolved users'],
@@ -156,8 +156,8 @@ export default function BundleDetailPage() {
   }
 
   const topicColumns: Column<BundleTopic>[] = [
-    { key: 'num', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber || r.topicCode}</span> },
-    { key: 'title', header: 'Topic', render: (r) => <button className="text-left text-primary hover:underline" onClick={() => navigate(`/topics/${r.id}`)}>{r.title}</button> },
+    { key: 'num', header: 'Course No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber || r.topicCode}</span> },
+    { key: 'title', header: 'Course', render: (r) => <button className="text-left text-primary hover:underline" onClick={() => navigate(`/courses/${r.id}`)}>{r.title}</button> },
     { key: 'trainingType', header: 'Type', render: (r) => r.trainingType.replace(/_/g, ' ') },
     { key: 'currentVersion', header: 'Version', render: (r) => `v${r.currentVersion}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status}</Badge> },
@@ -202,7 +202,7 @@ export default function BundleDetailPage() {
 
       <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase text-slate-500"><BookOpen className="h-4 w-4" /> Topics ({b.topics.length})</h2>
       <div className="mb-6">
-        <DataTable columns={topicColumns} rows={b.topics} emptyText="No topics in this bundle." />
+        <DataTable columns={topicColumns} rows={b.topics} emptyText="No courses in this bundle." />
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">

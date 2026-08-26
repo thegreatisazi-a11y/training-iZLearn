@@ -46,9 +46,9 @@ function requiredFor(material: { requiredViewSeconds: number | null }, topic: { 
 
 /** Begin (or resume) a reading session for a material — records the server start time. */
 export async function startMaterialView(userId: string, materialId: string) {
-// /** Per-material override wins; otherwise the topic-level setting (default on). */
-// function coverageEnabled(material: MaterialLike, topic: TopicLike): boolean {
-  // return material.requirePageCoverage ?? topic?.requirePageCoverage ?? true;
+// /** Per-material override wins; otherwise the course-level setting (default on). */
+// function coverageEnabled(material: MaterialLike, course: TopicLike): boolean {
+  // return material.requirePageCoverage ?? course?.requirePageCoverage ?? true;
 // }
 //
 // /**
@@ -56,8 +56,8 @@ export async function startMaterialView(userId: string, materialId: string) {
  // * apply — the type does not paginate (video/audio/image/text), coverage is switched off, or
  // * the page count could not be derived. Null keeps the material on the time gate alone.
  // */
-// async function pageTargetFor(material: MaterialLike, topic: TopicLike, resolve = true): Promise<number | null> {
-  // if (!coverageEnabled(material, topic) || !hasCoverageUnits(material.fileType)) return null;
+// async function pageTargetFor(material: MaterialLike, course: TopicLike, resolve = true): Promise<number | null> {
+  // if (!coverageEnabled(material, course) || !hasCoverageUnits(material.fileType)) return null;
   // // resolve = false uses only an already-cached count, never triggering an Office→PDF
   // // conversion. Used by read-only/list callers where a stale null is merely cosmetic.
   // return resolve ? resolveMaterialPageCount(material) : material.pageCount;
@@ -77,20 +77,20 @@ export async function startMaterialView(userId: string, materialId: string) {
   // return true;
 // }
 //
-// /** Load a material plus its topic, or fail. */
+// /** Load a material plus its course, or fail. */
 // async function loadContext(materialId: string) {
   const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
   if (!material) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
   const topicVersion = topic?.currentVersion ?? 1;
-  // return { material: material as MaterialLike & { topicId: string }, topic: topic as TopicLike & { currentVersion?: number } | null, topicVersion: topic?.currentVersion ?? 1 };
+  // return { material: material as MaterialLike & { topicId: string }, course: course as TopicLike & { currentVersion?: number } | null, topicVersion: course?.currentVersion ?? 1 };
 // }
 //
 // /** Begin (or resume) a reading session for a material — records the server start time. */
 // export async function startMaterialView(userId: string, materialId: string) {
-  // const { material, topic, topicVersion } = await loadContext(materialId);
+  // const { material, course, topicVersion } = await loadContext(materialId);
   const requiredSeconds = requiredFor(material, topic);
-  // const totalPages = await pageTargetFor(material, topic);
+  // const totalPages = await pageTargetFor(material, course);
 
   const existing = await prisma.materialViewLog.findUnique({
     where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
@@ -120,7 +120,7 @@ export async function saveMaterialProgress(userId: string, materialId: string, e
   if (!material) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
   const topicVersion = topic?.currentVersion ?? 1;
-  // const { material, topic, topicVersion } = await loadContext(materialId);
+  // const { material, course, topicVersion } = await loadContext(materialId);
   const requiredSeconds = requiredFor(material, topic);
 
   const log = await prisma.materialViewLog.upsert({
@@ -144,9 +144,9 @@ export async function saveMaterialProgress(userId: string, materialId: string, e
  // * Returns the coverage state so the viewer can keep its progress display in sync.
  // */
 // export async function recordPageView(userId: string, materialId: string, page: number) {
-  // const { material, topic, topicVersion } = await loadContext(materialId);
-  // const requiredSeconds = requiredFor(material, topic);
-  // const totalPages = await pageTargetFor(material, topic);
+  // const { material, course, topicVersion } = await loadContext(materialId);
+  // const requiredSeconds = requiredFor(material, course);
+  // const totalPages = await pageTargetFor(material, course);
 //
   // const log = await prisma.materialViewLog.upsert({
     // where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
@@ -189,9 +189,9 @@ export async function completeMaterialView(userId: string, materialId: string) {
   if (!material) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
   const topicVersion = topic?.currentVersion ?? 1;
-  // const { material, topic, topicVersion } = await loadContext(materialId);
+  // const { material, course, topicVersion } = await loadContext(materialId);
   const requiredSeconds = requiredFor(material, topic);
-  // const totalPages = await pageTargetFor(material, topic);
+  // const totalPages = await pageTargetFor(material, course);
 
   const log = await prisma.materialViewLog.findUnique({
     where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
@@ -220,10 +220,10 @@ export async function completeMaterialView(userId: string, materialId: string) {
 
 /**
  * True when every current material that has a required reading time has a COMPLETED
- * view log for this user + topic version. Topics with no timed materials pass freely.
- // * True when every GATED material for this topic version has a COMPLETED view log for this
+ * view log for this user + course version. Courses with no timed materials pass freely.
+ // * True when every GATED material for this course version has a COMPLETED view log for this
  // * user. A material is gated when it has a required reading time OR requires page coverage,
- // * so a document with no timer still has to be read through to the last page. Topics whose
+ // * so a document with no timer still has to be read through to the last page. Courses whose
  // * materials are neither timed nor paginated pass freely.
  */
 export async function hasCompletedRequiredReading(userId: string, topicId: string, topicVersion: number): Promise<boolean> {
@@ -251,7 +251,7 @@ export async function hasCompletedRequiredReading(userId: string, topicId: strin
   // for (const m of materials as MaterialLike[]) {
     // // Short-circuit: a timed material is gated regardless of pagination, and skipping
     // // pageTargetFor avoids triggering an Office→PDF conversion just to answer this.
-    // const gate = requiredFor(m, topic as TopicLike) > 0 || (await pageTargetFor(m, topic as TopicLike, resolve)) != null;
+    // const gate = requiredFor(m, course as TopicLike) > 0 || (await pageTargetFor(m, course as TopicLike, resolve)) != null;
     // if (gate) gated.push(m.id);
   // }
   // if (gated.length === 0) return true;
@@ -264,7 +264,7 @@ export async function hasCompletedRequiredReading(userId: string, topicId: strin
 /** Per-material reading status for the current user + version (drives the UI). */
 export async function getReadingStatus(userId: string, topicId: string) {
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
-  // const topic = (await prisma.trainingTopic.findUnique({ where: { id: topicId } })) as (TopicLike & { currentVersion?: number }) | null;
+  // const course = (await prisma.trainingTopic.findUnique({ where: { id: topicId } })) as (TopicLike & { currentVersion?: number }) | null;
   const topicVersion = topic?.currentVersion ?? 1;
   const materials = await prisma.trainingMaterial.findMany({
     where: { topicId, isDeleted: false, isCurrentVersion: true, isObsolete: false },
@@ -288,13 +288,13 @@ export async function getReadingStatus(userId: string, topicId: string) {
   // return Promise.all(
     // (materials as unknown as (MaterialLike & { originalFileName: string })[]).map(async (m) => {
       // const log = logByMat.get(m.id);
-      // const totalPages = await pageTargetFor(m, topic);
+      // const totalPages = await pageTargetFor(m, course);
       // const pagesViewed = log?.pagesViewed ?? [];
       // return {
         // materialId: m.id,
         // originalFileName: m.originalFileName,
         // fileType: m.fileType,
-        // requiredSeconds: requiredFor(m, topic),
+        // requiredSeconds: requiredFor(m, course),
         // isCompleted: log?.isCompleted ?? false,
         // // A4: resume support — how far the user had read previously.
         // elapsedSeconds: log?.elapsedSeconds ?? 0,

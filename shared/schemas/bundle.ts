@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
 
 /**
- * Topic bundles — a named collection of training topics that can be assigned
+ * Course bundles — a named collection of training courses that can be assigned
  * together to selected departments and/or roles. Targeting is stored inline as
  * JSON arrays of ids (mirroring the Announcement.targetRoles precedent).
  */

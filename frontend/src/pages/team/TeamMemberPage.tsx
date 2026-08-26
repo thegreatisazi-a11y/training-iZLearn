@@ -169,7 +169,7 @@ export default function TeamMemberPage() {
   const pendingRetakes = (data?.retakeRequests ?? []).filter((r) => r.status === 'PENDING_APPROVAL');
 
   const assignmentColumns: Column<AssignmentRow>[] = [
-    { key: 'num', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber ?? '—'}</span> },
+    { key: 'num', header: 'Course No.', render: (r) => <span className="font-mono text-xs">{r.topicNumber ?? '—'}</span> },
     {
       key: 'title',
       header: 'Training',

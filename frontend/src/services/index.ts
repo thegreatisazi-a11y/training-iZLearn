@@ -106,7 +106,7 @@ export const svc = {
     publishDraft: (id: string, body: unknown) => data(api.post(`/topics/${id}/publish-draft`, body)),
     updateStatus: (id: string, body: unknown) => data(api.patch(`/topics/${id}/status`, body)),
     history: (id: string, params?: ListParams) => api.get(`/topics/${id}/history`, { params }).then((r) => r.data),
-    exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/topics/export${qs(params)}`, 'training-topics.csv'),
+    exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/topics/export${qs(params)}`, 'training-courses.csv'),
   },
 
   materials: {
@@ -118,7 +118,7 @@ export const svc = {
       return api.post('/materials', fd, upCfg(onProgress)).then((r) => r.data.data);
     },
     /**
-     * Upload several files to a topic in one request. The server adds each as its own
+     * Upload several files to a course in one request. The server adds each as its own
      * current material (no file supersedes another) and returns an
      * { uploaded, failed, errors[] } summary; partial success is HTTP 200.
      */

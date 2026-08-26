@@ -38,6 +38,7 @@ interface AttemptReview {
   passingScorePercent: number;
   correctCount: number;
   incorrectCount: number;
+  unattempted?: number;
   isPassed: boolean;
   attemptNumber: number;
   maxAttempts: number;
@@ -156,8 +157,13 @@ function printAttemptReview(data: AttemptReview): void {
     ) +
     row(
       cell('Incorrect', String(data.incorrectCount)),
+      cell('Unattempted', String(data.unattempted ?? 0)),
       cell('Time on Assessment', fmtDuration(data.timeSpentSeconds)),
+    ) +
+    row(
       cell('Time on Reading', fmtDuration(data.readingTimeSeconds)),
+      cell('', ''),
+      cell('', ''),
     ) +
     `</table>`;
   const summary = banner + details;
@@ -219,6 +225,7 @@ function AttemptReviewDialog({ id, onClose }: { id: string | null; onClose: () =
                 <div>Passing score: {data.passingScorePercent}%</div>
                 <div className="text-green-700">Correct: {data.correctCount}</div>
                 <div className="text-red-700">Incorrect: {data.incorrectCount}</div>
+                <div className="text-slate-500">Unattempted: {data.unattempted ?? 0}</div>
                 <div>Attempt {data.attemptNumber} of {data.maxAttempts}</div>
               </div>
               <div className="text-sm text-slate-600">
@@ -288,12 +295,12 @@ export default function AssessmentsPage() {
     enabled: canManage,
   });
 
-  // BUG-08: topics the user has already passed must not be startable again.
+  // BUG-08: courses the user has already passed must not be startable again.
   const passedTopicIds = useMemo(() => new Set((mine.data ?? []).filter((a) => a.isPassed).map((a) => a.topicId)), [mine.data]);
   // Item B: only genuinely-remaining assessments. Include an assignment when it is
   // actionable (PENDING/IN_PROGRESS — this excludes OVERDUE, COMPLETED/WAIVED, and BLOCKED
-  // which covers a pending retake request), its materials are fully read, the topic still
-  // requires an assessment, and it has not already been passed. De-duplicated by topic.
+  // which covers a pending retake request), its materials are fully read, the course still
+  // requires an assessment, and it has not already been passed. De-duplicated by course.
   const topicOpts = useMemo(() => {
     const seen = new Set<string>();
     return (myTrainings.data ?? [])
@@ -351,7 +358,7 @@ export default function AssessmentsPage() {
   });
 
   const mineColumns: Column<Attempt>[] = [
-    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
+    { key: 'topic', header: 'Course', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
     { key: 'attemptNumber', header: 'Attempt', render: (r) => `#${r.attemptNumber}` },
     { key: 'score', header: 'Score', render: (r) => (r.score == null ? '—' : `${r.score}%`) },
     { key: 'isPassed', header: 'Result', render: (r) => (r.completedAt ? <Badge tone={r.isPassed ? 'COMPLETED' : 'REJECTED'}>{r.isPassed ? 'Passed' : 'Failed'}</Badge> : <Badge tone="IN_PROGRESS">In Progress</Badge>) },
@@ -382,7 +389,7 @@ export default function AssessmentsPage() {
   // Item 3: managed (team / org-wide) completed attempts — View + Download of others' tests.
   const managedColumns: Column<ManagedAttempt>[] = [
     { key: 'user', header: 'Employee', render: (r) => (r.userFullName ? `${r.userFullName}${r.employeeId ? ` (${r.employeeId})` : ''}` : r.userId) },
-    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
+    { key: 'topic', header: 'Course', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
     { key: 'attemptNumber', header: 'Attempt', render: (r) => `#${r.attemptNumber}` },
     { key: 'score', header: 'Score', render: (r) => (r.score == null ? '—' : `${r.score}%`) },
     { key: 'isPassed', header: 'Result', render: (r) => <Badge tone={r.isPassed ? 'COMPLETED' : 'REJECTED'}>{r.isPassed ? 'Passed' : 'Failed'}</Badge> },
@@ -406,7 +413,7 @@ export default function AssessmentsPage() {
 
   const blockedColumns: Column<BlockedAssignment>[] = [
     { key: 'user', header: 'Employee', render: (r) => (r.userFullName ? `${r.userFullName}${r.employeeId ? ` (${r.employeeId})` : ''}` : r.userId) },
-    { key: 'topic', header: 'Topic', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
+    { key: 'topic', header: 'Course', render: (r) => topicLabel(r.topicNumber, r.topicTitle, r.topicId) },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
     {
       key: 'actions',
@@ -430,7 +437,7 @@ export default function AssessmentsPage() {
         <CardContent className="flex flex-col gap-2">
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-64">
-              <Select options={topicOpts} value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} placeholder="Choose an assigned topic…" />
+              <Select options={topicOpts} value={selectedTopic} onChange={(e) => setSelectedTopic(e.target.value)} placeholder="Choose an assigned course…" />
             </div>
             <Button disabled={!selectedTopic || selectedPassed} onClick={() => navigate(`/assessments/take/${selectedTopic}`)}>
               Start Assessment

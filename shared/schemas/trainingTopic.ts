@@ -19,15 +19,15 @@ export const createTopicSchema = z.object({
   trainingTypes: z.array(trainingTypeCode).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
-  designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
+  designationIds: z.array(uuid).optional(), // #2: functional roles this course targets
   roleId: uuid.optional(),
-  roleIds: z.array(uuid).optional(), // CR-30: multiple roles a topic is mapped to
+  roleIds: z.array(uuid).optional(), // CR-30: multiple roles a course is mapped to
   durationMinutes: z.coerce.number().int().min(0).optional(), // Page 8/G1: optional, demoted (0 = unspecified)
   requiresAssessment: z.coerce.boolean().optional(), // CR-41: false = SOP, completes via T&C
   assessmentTimeMinutes: z.coerce.number().int().positive().optional(), // CR-38: countdown limit
   passingScorePercent: z.coerce.number().int().min(0).max(100),
   maxAttempts: z.coerce.number().int().min(1),
-  questionLimit: z.coerce.number().int().min(1).optional(), // per-topic # of questions per assessment
+  questionLimit: z.coerce.number().int().min(1).optional(), // per-course # of questions per assessment
   randomizeQuestions: z.coerce.boolean().optional(),
   showExplanations: z.coerce.boolean().optional(),
   blockAfterMaxAttempts: z.coerce.boolean().optional(),
@@ -57,7 +57,7 @@ export const updateTopicSchema = z.object({
   trainingTypes: z.array(trainingTypeCode).optional(), // D6: multiple training types
   departmentId: uuid.optional(),
   designationId: uuid.optional(),
-  designationIds: z.array(uuid).optional(), // #2: functional roles this topic targets
+  designationIds: z.array(uuid).optional(), // #2: functional roles this course targets
   roleId: uuid.optional(),
   roleIds: z.array(uuid).optional(), // CR-30
   requiresAssessment: z.coerce.boolean().optional(), // CR-41

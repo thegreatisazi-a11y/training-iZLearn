@@ -17,10 +17,10 @@ function isPublishedTopic(status?: string): boolean {
 
 /**
  * Question bank (Module 7) — the pool of assessment questions per training
- * topic version.
+ * course version.
  *
- *  - a question is pinned to the topic's CURRENT version at creation time
- *    (topicVersion) so revising a topic does not silently change old questions.
+ *  - a question is pinned to the course's CURRENT version at creation time
+ *    (topicVersion) so revising a course does not silently change old questions.
  *  - options carry stable ids; for MATCH_THE_WORDS the left/right pairs are
  *    stored inside the options JSON. correctAnswer is stored as JSON (an array
  *    of option ids or an answer string per question type).
@@ -47,7 +47,7 @@ function buildOptionsPayload(
 
 export async function createQuestion(input: CreateQuestionInput, createdBy: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: input.topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   // CR-36: for MATCH_THE_WORDS the answer key IS the set of pairs, so derive it
   // from matchPairs (never trust a separately-supplied answer that could drift).

@@ -122,10 +122,10 @@ function sanitizeForClient(q: SnapshotQuestion) {
 /** Start (generate) an assessment attempt. */
 export async function startAttempt(userId: string, topicId: string, assignmentId?: string) {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
-  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED topic version may be assessed.
+  if (!topic) throw AppError.notFound('Training course not found');
+  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED course version may be assessed.
   // Blocks starting an attempt (and thus minting a certificate) against a DRAFT/under-review
-  // or an ARCHIVED/superseded version reached by guessing the topic id.
+  // or an ARCHIVED/superseded version reached by guessing the course id.
   if (topic.status !== 'PUBLISHED') {
     throw AppError.conflict('This training is not currently published and cannot be assessed.');
   }
@@ -167,7 +167,7 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   }
 
   // An approved retake grants extra attempts on the assignment, raising the effective
-  // limit (effective = topic.maxAttempts + extraAttempts). Fairness: a server-confirmed
+  // limit (effective = course.maxAttempts + extraAttempts). Fairness: a server-confirmed
   // no-submission failure (ABANDONED / SYSTEM_FAILURE — e.g. the system/power/network died
   // before any answers reached the server) does NOT consume an attempt, so a learner is
   // never penalized for a technical interruption beyond their control. The reason is still
@@ -182,7 +182,7 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     select: { submissionReason: true },
   });
   const completedCount = finalized.filter((a) => !a.submissionReason || failureReasonCountsAsAttempt(a.submissionReason as AssessmentFailureReason)).length;
-  // L-C3: `blockAfterMaxAttempts` is a deliberate per-topic toggle. When ON, hitting the
+  // L-C3: `blockAfterMaxAttempts` is a deliberate per-course toggle. When ON, hitting the
   // limit blocks the trainee pending supervisor review; when OFF, maxAttempts is advisory
   // and retries stay open — this is intended, not a bypass.
   if (topic.blockAfterMaxAttempts && completedCount >= effectiveMax) {
@@ -191,21 +191,21 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   }
 
   // Server-enforced reading gate: every timed material must have a completed view
-  // log for this topic version before the assessment can start (blocks URL bypass).
+  // log for this course version before the assessment can start (blocks URL bypass).
   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
   if (!readingDone) {
     throw AppError.forbidden('You must finish the required reading time for all training materials before starting the assessment.');
   }
 
   // // Server-enforced acknowledgement gate: the trainee must have declared that they read and
-  // // understood the contents of THIS topic version. Blocks starting the assessment by URL.
-  // const acknowledged = await hasAcknowledged(userId, topicId, topic.currentVersion);
+  // // understood the contents of THIS course version. Blocks starting the assessment by URL.
+  // const acknowledged = await hasAcknowledged(userId, topicId, course.currentVersion);
   // if (!acknowledged) {
     // throw AppError.forbidden('You must confirm that you have read and understood the training contents before starting the assessment.');
   // }
 //
-  // CR-29: sequence enforcement — if this topic has a sequence position, the user
-  // must first complete every assigned topic with a lower (non-null) sequenceIndex.
+  // CR-29: sequence enforcement — if this course has a sequence position, the user
+  // must first complete every assigned course with a lower (non-null) sequenceIndex.
   if (topic.sequenceIndex != null) {
     const earlier = await prisma.trainingTopic.findMany({
       where: { isDeleted: false, sequenceIndex: { not: null, lt: topic.sequenceIndex } },
@@ -227,11 +227,11 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const attemptNumber = priorAttempts.filter((a) => a.topicVersion === topic.currentVersion).length + 1;
 
   // Build the question set: all mandatory + (optionally randomized) non-mandatory up to the count.
-  // The per-topic questionLimit takes precedence over the global default.
+  // The per-course questionLimit takes precedence over the global default.
   const rnd = topic.randomizeQuestions;
   const count = topic.questionLimit ?? (await getNumber('assessment.default_question_count', 10));
   const pool = await prisma.question.findMany({
-    // The live question set = all active, non-deleted questions for this topic. (We do NOT
+    // The live question set = all active, non-deleted questions for this course. (We do NOT
     // pin to topicVersion: a question change now bumps the course version, and pinning
     // would orphan every pre-existing question from the assessment. Staged drafts, if any
     // legacy ones remain, are still excluded.)
@@ -242,6 +242,13 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const optional = rnd ? shuffle(optionalPool) : optionalPool;
   const needed = Math.max(0, count - mandatory.length);
   const selected = [...mandatory, ...optional.slice(0, needed)];
+
+  // A course that requires an assessment must have at least one question — otherwise the
+  // learner would be shown an empty test that auto-fails. Block the start with a clear error
+  // instead (the course is misconfigured until questions are added).
+  if (selected.length === 0) {
+    throw AppError.badRequest('This course has no assessment questions yet. Please contact your administrator.');
+  }
 
   const ordered = rnd ? shuffle(selected) : selected;
   const snapshot: SnapshotQuestion[] = ordered.map((q) => {
@@ -287,7 +294,7 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     attemptNumber,
     maxAttempts: topic.maxAttempts,
     topicTitle: topic.title,
-    // CR-27: surface the correct topic identity (number + version) on the assessment screen.
+    // CR-27: surface the correct course identity (number + version) on the assessment screen.
     topicNumber: topic.topicNumber ?? topic.topicCode,
     topicCode: topic.topicCode,
     topicVersion: topic.currentVersion,
@@ -392,7 +399,7 @@ export async function submitAttempt(
     : reason ?? (autoSubmitted ? 'TAB_CLOSED' : 'USER_SUBMITTED');
 
   const topic = await prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } });
-  if (!topic) throw AppError.notFound('Training topic not found');
+  if (!topic) throw AppError.notFound('Training course not found');
 
   const questions = (attempt.questionsUsed as unknown as SnapshotQuestion[]) ?? [];
   const incorrectDetails: QuestionResult[] = [];
@@ -420,14 +427,18 @@ export async function submitAttempt(
     if (!isCorrect) incorrectDetails.push(detail);
   }
 
-  const total = questions.length || 1;
-  const score = Number(((correctCount / total) * 100).toFixed(2));
+  const total = questions.length;
+  // Score is over the whole question set; guard divide-by-zero for a (blocked) empty test.
+  const score = total > 0 ? Number(((correctCount / total) * 100).toFixed(2)) : 0;
   const isPassed = score >= topic.passingScorePercent;
+  // Distinguish "answered but wrong" from "never attempted" so the result isn't misleading.
+  const unattempted = total - attempted;
+  const incorrectCount = attempted - correctCount;
 
   // BUG-05: actual time spent on the assessment = completedAt − startedAt.
   const completedAt = new Date();
   const timeSpentSeconds = Math.max(0, Math.round((completedAt.getTime() - attempt.startedAt.getTime()) / 1000));
-  // BUG-05: actual time spent reading this topic's materials (sum of per-material elapsed).
+  // BUG-05: actual time spent reading this course's materials (sum of per-material elapsed).
   const readingLogs = await prisma.materialViewLog.findMany({
     where: { userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
     select: { elapsedSeconds: true },
@@ -515,7 +526,8 @@ export async function submitAttempt(
     totalQuestions: total,
     attempted,
     correctCount,
-    incorrectCount: total - correctCount,
+    incorrectCount,
+    unattempted,
     passingScorePercent: topic.passingScorePercent,
     isPassed,
     isBlocked,
@@ -537,14 +549,14 @@ export async function submitAttempt(
 }
 
 /**
- * CR-41: complete a topic that has NO assessment (`requiresAssessment = false`) via
+ * CR-41: complete a course that has NO assessment (`requiresAssessment = false`) via
  * a read + Terms-&-Conditions acknowledgement. Records a passed "attempt" marker so
  * completion, refresher scheduling and certificate issuance behave like a quiz pass.
  */
 export async function completeByAcknowledgement(userId: string, topicId: string, assignmentId?: string): Promise<AssessmentResult> {
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
-  if (!topic) throw AppError.notFound('Training topic not found');
-  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED topic version may be completed.
+  if (!topic) throw AppError.notFound('Training course not found');
+  // SECURITY / GxP (ASMT-1): only a currently PUBLISHED course version may be completed.
   if (topic.status !== 'PUBLISHED') {
     throw AppError.conflict('This training is not currently published and cannot be completed.');
   }
@@ -554,7 +566,7 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
   if (!readingDone) throw AppError.forbidden('You must finish the required reading time before completing this training.');
 
   // ASMT-3: scope the "already completed" check to the CURRENT version. Without this, a
-  // user who completed v1 by acknowledgement could never re-complete the topic after it was
+  // user who completed v1 by acknowledgement could never re-complete the course after it was
   // revised (the revision auto-assigns re-training), permanently locking SOP re-reads.
   const prior = await prisma.assessmentAttempt.findFirst({
     where: { userId, topicId, topicVersion: topic.currentVersion, isPassed: true, isDeleted: false },
@@ -632,7 +644,7 @@ export async function listAttempts(filters: { userId?: string; topicId?: string 
     where: { isDeleted: false, ...(filters.userId ? { userId: filters.userId } : {}), ...(filters.topicId ? { topicId: filters.topicId } : {}) },
     orderBy: { startedAt: 'desc' },
   });
-  // BUG-03/04: enrich with topic title + number so the UI never shows a raw topicId,
+  // BUG-03/04: enrich with course title + number so the UI never shows a raw topicId,
   // and BUG-05: surface the actual time spent (completedAt − startedAt).
   const topicIds = Array.from(new Set(rows.map((r) => r.topicId)));
   const topics = topicIds.length
@@ -764,8 +776,10 @@ export async function reviewAttempt(
   const allDetails: QuestionResult[] = [];
   const incorrectDetails: QuestionResult[] = [];
   let correctCount = 0;
+  let attempted = 0;
   for (const q of questions) {
     const ua = answers[q.id];
+    if (ua !== undefined && ua !== null && ua !== '') attempted++;
     const isCorrect = gradeQuestion(q, ua);
     if (isCorrect) correctCount++;
     const detail: QuestionResult = {
@@ -781,6 +795,8 @@ export async function reviewAttempt(
     if (!isCorrect) incorrectDetails.push(detail);
   }
   const total = questions.length;
+  const unattempted = total - attempted;
+  const incorrectCount = attempted - correctCount;
   const [readingLogs, owner] = await Promise.all([
     prisma.materialViewLog.findMany({
       where: { userId: attempt.userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
@@ -803,8 +819,10 @@ export async function reviewAttempt(
     topicNumber: topic?.topicNumber ?? topic?.topicCode ?? null,
     score: attempt.score ?? 0,
     totalQuestions: total,
+    attempted,
     correctCount,
-    incorrectCount: total - correctCount,
+    incorrectCount,
+    unattempted,
     passingScorePercent: topic?.passingScorePercent ?? 0,
     isPassed: !!attempt.isPassed,
     attemptNumber: attempt.attemptNumber,
@@ -829,7 +847,7 @@ export async function unblockAssignment(assignmentId: string, req: Request) {
   // because the used attempts still equal the max. Grant a fresh set of attempts (like
   // an approved retake) by raising extraAttempts to the attempts used so far, so the
   // user can actually take the assessment again after being unblocked.
-  // L-C2: count attempts on the CURRENT topic version only (the start-time limit does too),
+  // L-C2: count attempts on the CURRENT course version only (the start-time limit does too),
   // so stale prior-version attempts don't inflate extraAttempts and over-grant retakes.
   const topic = await prisma.trainingTopic.findFirst({ where: { id: assignment.topicId }, select: { currentVersion: true } });
   const usedAttempts = await prisma.assessmentAttempt.count({

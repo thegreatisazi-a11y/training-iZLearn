@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { nonEmptyString, optionalString, uuid, reasonForChange } from './common';
-import { trainingType, scheduleStatus } from './enums';
+import { scheduleStatus } from './enums';
 
 export const createScheduleSchema = z
   .object({
@@ -9,7 +9,8 @@ export const createScheduleSchema = z
     // Internal trainer (a user) OR an external trainer entered by name (trainerName).
     trainerId: uuid.optional(),
     trainerName: optionalString,
-    trainingType,
+    // NOTE: no trainingType here on purpose — the server derives it from the course
+    // (a schedule is always for a course, and the course already carries its type).
     methodology: optionalString,
     venue: optionalString,
     maxTrainees: z.coerce.number().int().positive().optional(),

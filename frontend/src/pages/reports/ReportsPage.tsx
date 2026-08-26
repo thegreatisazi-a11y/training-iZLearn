@@ -22,8 +22,18 @@ interface ReportResult {
 
 const EXT: Record<string, string> = { csv: 'csv', xlsx: 'xlsx', pdf: 'pdf' };
 
+/**
+ * Display names for report types whose key does not read well when title-cased.
+ * The KEYS are the API contract (REPORT_TYPES in report.service.ts) and must NOT be
+ * renamed — only what the user sees is unified on "Course".
+ */
+const REPORT_LABELS: Record<string, string> = {
+  'topic-wise-status': 'Course Wise Status',
+  'version-wise-topic': 'Version Wise Course',
+};
+
 function labelFor(type: string) {
-  return type.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return REPORT_LABELS[type] ?? type.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 export default function ReportsPage() {
@@ -115,13 +125,13 @@ export default function ReportsPage() {
   }));
 
   // #7: drill-down — rows that carry a hidden _userId / _topicId open the matching
-  // detail (employee → My Team member view; topic → course detail), like My Teams.
+  // detail (employee → My Team member view; course → course detail), like My Teams.
   const rowsHaveDrill = (result?.rows ?? []).some((r) => r._userId || r._topicId);
   function drillInto(row: Record<string, unknown>) {
     const uid = row._userId as string | undefined;
     const tid = row._topicId as string | undefined;
     if (uid) navigate(`/team/${uid}`);
-    else if (tid) navigate(`/topics/${tid}`);
+    else if (tid) navigate(`/courses/${tid}`);
   }
 
   return (
@@ -145,8 +155,8 @@ export default function ReportsPage() {
               </Field>
             )}
             {has('topic') && (
-              <Field label="Topic">
-                <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="All topics" />
+              <Field label="Course">
+                <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="All courses" />
               </Field>
             )}
             {has('department') && (

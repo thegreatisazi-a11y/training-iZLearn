@@ -130,7 +130,7 @@ export async function notifyTrainingOverdue(userId: string, topicId: string, due
 }
 
 /**
- * 7.5: notify everyone with an active assignment to a topic that the course has
+ * 7.5: notify everyone with an active assignment to a course that the course has
  * been revised (and their supervisors, matching the trainingAssigned pattern).
  * Best-effort — never throws.
  */

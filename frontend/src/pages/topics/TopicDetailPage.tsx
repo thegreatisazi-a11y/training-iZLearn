@@ -326,7 +326,7 @@ export default function TopicDetailPage() {
     !!editTopicForm.dueDate && editTopicForm.dueDate < today && editTopicForm.dueDate !== loadedDates.dueDate;
 
   // Upload one or many files at once. Each becomes its own current material — a new
-  // upload no longer supersedes the topic's existing files.
+  // upload no longer supersedes the course's existing files.
   const [uploadPct, setUploadPct] = useState<number | null>(null);
   const uploadMut = useMutation({
     mutationFn: (files: File[]) => svc.materials.bulkUpload(files, id, setUploadPct),
@@ -339,7 +339,7 @@ export default function TopicDetailPage() {
         toast.success(r.uploaded > 1 ? `${r.uploaded} materials uploaded` : 'Material uploaded');
       }
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
-      // A material change can bump the course version — refresh the topic header.
+      // A material change can bump the course version — refresh the course header.
       qc.invalidateQueries({ queryKey: ['topic', id] });
     },
     onError: (e) => { setUploadPct(null); toast.error(apiError(e)); },
@@ -430,14 +430,14 @@ export default function TopicDetailPage() {
       return svc.topics.updateStatus(id, { status: statusChange, reasonForChange: (reason ?? '').trim(), signature: sig });
     },
     onSuccess: () => {
-      toast.success('Topic status updated');
+      toast.success('Course status updated');
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
     },
     onError: (e) => toast.error(apiError(e)),
   });
 
-  // G4: promote a published topic's staged draft edits to the live record (e-signed + confirm).
+  // G4: promote a published course's staged draft edits to the live record (e-signed + confirm).
   const publishDraftMut = useMutation({
     mutationFn: (signature: ESignaturePayload) => {
       const { reason, ...sig } = signature;
@@ -446,7 +446,7 @@ export default function TopicDetailPage() {
     onSuccess: () => {
       toast.success('Draft changes published — the live course is updated.');
       // Refresh everything affected so the staged → live flip (and version bump) shows
-      // immediately: the topic, its materials, its questions, and the version history.
+      // immediately: the course, its materials, its questions, and the version history.
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
@@ -471,7 +471,7 @@ export default function TopicDetailPage() {
             : 'Reading time updated; course duration updated.',
       );
       qc.invalidateQueries({ queryKey: ['materials', { topicId: id }] });
-      // Refresh the topic so the recomputed course duration / pending-change banner shows.
+      // Refresh the course so the recomputed course duration / pending-change banner shows.
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
       setReadTimeTarget(null);
@@ -508,7 +508,7 @@ export default function TopicDetailPage() {
         blockAfterMaxAttempts: editTopicForm.blockAfterMaxAttempts,
       }),
     onSuccess: () => {
-      toast.success(isPublished ? 'Details staged — publish changes to make them live.' : 'Topic details updated');
+      toast.success(isPublished ? 'Details staged — publish changes to make them live.' : 'Course details updated');
       qc.invalidateQueries({ queryKey: ['topic', id] });
       qc.invalidateQueries({ queryKey: ['topics'] });
       setEditTopicOpen(false);
@@ -519,7 +519,7 @@ export default function TopicDetailPage() {
   const addToBundlesMut = useMutation({
     mutationFn: () => svc.bundles.addTopicToBundles(id, selectedBundleIds),
     onSuccess: () => {
-      toast.success('Topic added to bundle(s)');
+      toast.success('Course added to bundle(s)');
       qc.invalidateQueries({ queryKey: ['bundles'] });
       setBundleDialogOpen(false);
       setSelectedBundleIds([]);
@@ -551,7 +551,7 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  // G4: discard a staged (pending) question draft on a published topic.
+  // G4: discard a staged (pending) question draft on a published course.
   const discardQuestionMut = useMutation({
     mutationFn: (qid: string) => svc.questions.remove(qid, 'Discarded pending question draft'),
     onSuccess: () => {
@@ -574,7 +574,7 @@ export default function TopicDetailPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  // Deep-link from the Topics list "Edit" action: ?edit=1 opens the edit dialog.
+  // Deep-link from the Courses list "Edit" action: ?edit=1 opens the edit dialog.
   useEffect(() => {
     if (topic && canEdit && searchParams.get('edit') === '1' && !editTopicOpen) {
       openEditTopic();
@@ -774,13 +774,13 @@ export default function TopicDetailPage() {
   // (the file's own requiredViewSeconds only updates on publish), so read it from there to
   // show the pending value in the Pending Changes table.
   const stagedReadTimes = (((t.draftMeta as { materialReadTimes?: Record<string, number> } | null) ?? {}).materialReadTimes ?? {});
-  // G4: split questions into live and staged (pending) for a published topic.
+  // G4: split questions into live and staged (pending) for a published course.
   const allQuestions = (questions?.data ?? []) as unknown as Question[];
   const liveQuestions = allQuestions.filter((q) => !q.isStaged); // includes pending-removal (still live until publish)
   const stagedQuestions = allQuestions.filter((q) => q.isStaged);
   const pendingRemovalQuestions = allQuestions.filter((q) => !q.isStaged && q.pendingRemoval);
   const isPublished = String(t.status) === 'PUBLISHED';
-  // G4: a published topic with staged metadata edits and/or staged material/question changes.
+  // G4: a published course with staged metadata edits and/or staged material/question changes.
   const hasDraftMeta = !!(t as { draftMeta?: unknown }).draftMeta;
   const hasPendingChanges = isPublished && (hasDraftMeta || stagedMaterials.length > 0 || stagedQuestions.length > 0 || pendingRemovalQuestions.length > 0);
   const materialNameById = (mid?: string | null) => (mid ? allMaterials.find((m) => m.id === mid)?.originalFileName ?? null : null);
@@ -792,7 +792,7 @@ export default function TopicDetailPage() {
 
   return (
     <div>
-      <button className="mb-3 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700" onClick={() => navigate('/topics')}>
+      <button className="mb-3 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700" onClick={() => navigate('/courses')}>
         <ArrowLeft className="h-4 w-4" /> Back to topics
       </button>
 
@@ -1036,7 +1036,7 @@ export default function TopicDetailPage() {
         <div className="mt-4 space-y-3">
           {histLoading && <PageLoader />}
           {!histLoading && ((history?.data ?? []) as VersionHistoryRow[]).length === 0 && (
-            <Card><CardContent><p className="text-sm text-slate-500">No version history yet. A history entry is recorded when a file is replaced, attached, or the topic is revised.</p></CardContent></Card>
+            <Card><CardContent><p className="text-sm text-slate-500">No version history yet. A history entry is recorded when a file is replaced, attached, or the course is revised.</p></CardContent></Card>
           )}
           {((history?.data ?? []) as VersionHistoryRow[]).map((h) => (
             <Card key={h.id}>
@@ -1372,7 +1372,7 @@ export default function TopicDetailPage() {
         open={!!statusChange}
         onClose={() => setStatusChange(null)}
         onConfirm={async (sig) => { await statusMut.mutateAsync(sig); setStatusChange(null); }}
-        title={statusChange === 'PUBLISHED' ? 'Publish Topic (e-signature required)' : statusChange === 'ARCHIVED' ? 'Archive Topic (e-signature required)' : 'Unpublish Topic (e-signature required)'}
+        title={statusChange === 'PUBLISHED' ? 'Publish Course (e-signature required)' : statusChange === 'ARCHIVED' ? 'Archive Course (e-signature required)' : 'Unpublish Course (e-signature required)'}
         defaultMeaning={statusChange === 'PUBLISHED' ? 'Approved' : statusChange === 'ARCHIVED' ? 'Performed' : 'Reviewed'}
         requireReason
       />
@@ -1404,7 +1404,7 @@ export default function TopicDetailPage() {
           </>
         }
       >
-        <p className="mb-3 text-xs text-slate-500">{isPublished ? 'Select one or more files to attach as pending changes — they go live when you revise the topic.' : 'Select one or more files to attach to this topic. Each is added as a current material.'}</p>
+        <p className="mb-3 text-xs text-slate-500">{isPublished ? 'Select one or more files to attach as pending changes — they go live when you revise the course.' : 'Select one or more files to attach to this course. Each is added as a current material.'}</p>
         <div className="max-h-80 space-y-2 overflow-y-auto">
           {((library?.data ?? []) as unknown as Material[]).filter((m) => m.topicId !== id).map((m) => {
             const checked = selectedLibraryIds.includes(m.id);
@@ -1507,7 +1507,7 @@ export default function TopicDetailPage() {
         open={editTopicOpen}
         onClose={() => setEditTopicOpen(false)}
         className="max-w-2xl"
-        title={`Edit Topic — ${t.title}`}
+        title={`Edit Course — ${t.title}`}
         footer={
           <>
             <Button variant="outline" onClick={() => setEditTopicOpen(false)}>Cancel</Button>
@@ -1527,7 +1527,7 @@ export default function TopicDetailPage() {
           </>
         }
       >
-        <p className="mb-2 text-xs text-slate-500">Topic code is system-owned and locked. Passing score is changed via its own e-signed action.</p>
+        <p className="mb-2 text-xs text-slate-500">Course code is system-owned and locked. Passing score is changed via its own e-signed action.</p>
         {/* Field order MUST mirror the create form (TopicsPage) exactly so a course shows
             the same inputs in the same order on edit as on creation. */}
         <Field label="Title" required><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>

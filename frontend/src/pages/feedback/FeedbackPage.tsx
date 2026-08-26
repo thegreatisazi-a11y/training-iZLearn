@@ -114,8 +114,8 @@ function CreateFormDialog({ open, onClose }: { open: boolean; onClose: () => voi
         </>
       }
     >
-      <Field label="Topic" required>
-        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a topic…" />
+      <Field label="Course" required>
+        <Select options={topicOpts} value={topicId} onChange={(e) => setTopicId(e.target.value)} placeholder="Select a course…" />
       </Field>
       <Field label="Title" required>
         <Input value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -306,7 +306,7 @@ export default function FeedbackPage() {
 
   const columns: Column<FeedbackForm>[] = [
     { key: 'title', header: 'Title' },
-    { key: 'topic', header: 'Topic', render: (r) => r.topicTitle ?? r.topicId },
+    { key: 'topic', header: 'Course', render: (r) => r.topicTitle ?? r.topicId },
     { key: 'questions', header: 'Questions', render: (r) => String(r.questions?.length ?? 0) },
     {
       key: 'actions',

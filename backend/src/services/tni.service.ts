@@ -30,7 +30,7 @@ export async function listTNI(q: PaginationQuery & { userId?: string; status?: s
     prisma.tNI.findMany({ where, skip: (q.page - 1) * q.pageSize, take: q.pageSize, orderBy: { createdAt: 'desc' } }),
     prisma.tNI.count({ where }),
   ]);
-  // J2: resolve user + topic ids → names so the Requests list shows the user and topic.
+  // J2: resolve user + course ids → names so the Requests list shows the user and course.
   const userIds = Array.from(new Set(rows.map((r) => r.userId).filter(Boolean)));
   const topicIds = Array.from(new Set(rows.map((r) => r.topicId).filter(Boolean)));
   const [users, topics] = await Promise.all([
@@ -50,11 +50,11 @@ export async function listTNI(q: PaginationQuery & { userId?: string; status?: s
 /**
  * Export the (filtered) TNI list as CSV. Exports every matching row, not just the page the
  * user is looking at, so the file matches the filters rather than the pagination — the same
- * approach the Topics, Users and Bundles list exports take.
+ * approach the Courses, Users and Bundles list exports take.
  */
 export async function exportTniCsv(q: PaginationQuery & { userId?: string; status?: string }): Promise<string> {
   const { data } = await listTNI({ ...q, page: 1, pageSize: 100000 });
-  const headers = ['User', 'Topic', 'Justification', 'Status', 'Identified On', 'Approved On'];
+  const headers = ['User', 'Course', 'Justification', 'Status', 'Identified On', 'Approved On'];
   const rows = data.map((t) => [
     t.userFullName ?? '',
     t.topicTitle ?? '',
@@ -73,13 +73,13 @@ export async function getTNI(id: string) {
 }
 
 /**
- * J2: create a TNI for one user across one or more topics — stored as one TNI row
- * per (user, topic). Topics that already have an open (PENDING/APPROVED) TNI for the
+ * J2: create a TNI for one user across one or more courses — stored as one TNI row
+ * per (user, course). Courses that already have an open (PENDING/APPROVED) TNI for the
  * user are skipped so the same need is not raised twice.
  */
 export async function createTNI(input: CreateTNIInput, identifiedBy: string) {
   const topicIds = Array.from(new Set([...(input.topicIds ?? []), ...(input.topicId ? [input.topicId] : [])]));
-  if (!topicIds.length) throw AppError.badRequest('Select at least one topic.');
+  if (!topicIds.length) throw AppError.badRequest('Select at least one course.');
 
   const existing = await prisma.tNI.findMany({
     where: { userId: input.userId, topicId: { in: topicIds }, isDeleted: false, status: { in: ['PENDING', 'APPROVED'] } },
@@ -87,7 +87,7 @@ export async function createTNI(input: CreateTNIInput, identifiedBy: string) {
   });
   const skip = new Set(existing.map((e) => e.topicId));
   const toCreate = topicIds.filter((t) => !skip.has(t));
-  if (!toCreate.length) throw AppError.conflict('An open TNI already exists for the selected topic(s).');
+  if (!toCreate.length) throw AppError.conflict('An open TNI already exists for the selected course(s).');
 
   const created = await Promise.all(
     toCreate.map((topicId) =>
@@ -192,8 +192,8 @@ function userFunctionalRoleIds(u: { designationId?: string | null; designationId
 }
 
 /**
- * The functional-role × topic requirement matrix: active functional roles
- * (DesignationMaster — e.g. "QA Auditor", "Analyst"), the PUBLISHED topic
+ * The functional-role × course requirement matrix: active functional roles
+ * (DesignationMaster — e.g. "QA Auditor", "Analyst"), the PUBLISHED course
  * catalogue, and the saved Required / Not-Required cells. Drives functional-role-
  * based auto-assignment. NOTE: columns are FUNCTIONAL roles (job functions), not
  * RBAC login roles (SUPER_ADMIN / TRAINER / …).
@@ -226,7 +226,7 @@ export async function setRequirement(input: SetTniRequirementInput, createdBy: s
     : await prisma.tniRequirement.create({
         data: { designationId: input.designationId, topicId: input.topicId, isRequired: input.isRequired, note: input.note ?? null, createdBy },
       });
-  // Task-1 (reverse sync): reflect the topic's Required functional roles back into the
+  // Task-1 (reverse sync): reflect the course's Required functional roles back into the
   // course details, so the course's Functional Role(s) always mirror the TNI matrix.
   await syncTopicDesignationsFromMatrix(input.topicId);
   return cell;
@@ -249,9 +249,9 @@ async function syncTopicDesignationsFromMatrix(topicId: string) {
 
 /**
  * CR-49: materialise training assignments from the Required cells of the matrix.
- * For each Required (functional role, topic) cell, every active user holding that
+ * For each Required (functional role, course) cell, every active user holding that
  * functional role (via designationId / designationIds) gets a ROLE_SPECIFIC
- * assignment for the (PUBLISHED) topic — skipping anyone who already has an
+ * assignment for the (PUBLISHED) course — skipping anyone who already has an
  * active/completed assignment for it. Optionally scoped to a single functional role.
  */
 export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Request) {
@@ -269,7 +269,7 @@ export async function applyRequirementMatrix(input: ApplyTniMatrixInput, req: Re
     select: { id: true, dueDate: true },
   });
   const publishable = new Set(publishedTopics.map((t) => t.id));
-  // Course-level default due date per topic (applied unless the matrix specifies its own).
+  // Course-level default due date per course (applied unless the matrix specifies its own).
   const topicDueDate = new Map(publishedTopics.map((t) => [t.id, t.dueDate]));
   const today = startOfDay(new Date());
 

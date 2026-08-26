@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import type { PermissionAction } from '@izlearn/shared';
 import { AppShell } from '@/components/layout/AppShell';
 import { ProtectedRoute } from './ProtectedRoute';
@@ -43,6 +43,12 @@ const SystemConfigPage = lazy(() => import('@/pages/system/SystemConfigPage'));
 const ProfilePage = lazy(() => import('@/pages/profile/ProfilePage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
+/** Preserves the id and any query string when redirecting /topics/:id -> /courses/:id. */
+function LegacyTopicRedirect() {
+  const { id } = useParams();
+  return <Navigate to={{ pathname: `/courses/${id}`, search: window.location.search }} replace />;
+}
+
 const gate = (module: string, action: PermissionAction, el: JSX.Element) => (
   <PermissionRoute module={module} action={action}>
     {el}
@@ -63,8 +69,11 @@ export function AppRoutes() {
             <Route path="/users/bulk" element={gate('userManagement', 'bulk_upload' as PermissionAction, <UserBulkUploadPage />)} />
             <Route path="/roles" element={gate('roleManagement', 'read', <RolesPage />)} />
             <Route path="/masters" element={gate('masterSetup', 'read', <MastersPage />)} />
-            <Route path="/topics" element={gate('courseManagement', 'read', <TopicsPage />)} />
-            <Route path="/topics/:id" element={gate('courseManagement', 'read', <TopicDetailPage />)} />
+            <Route path="/courses" element={gate('courseManagement', 'read', <TopicsPage />)} />
+            <Route path="/courses/:id" element={gate('courseManagement', 'read', <TopicDetailPage />)} />
+            {/* Legacy /topics links (bookmarks, older emails, browser history) still resolve. */}
+            <Route path="/topics" element={<Navigate to="/courses" replace />} />
+            <Route path="/topics/:id" element={<LegacyTopicRedirect />} />
             <Route path="/bundles" element={gate('bundleManagement', 'read', <BundlesPage />)} />
             <Route path="/bundles/:id" element={gate('bundleManagement', 'read', <BundleDetailPage />)} />
             <Route path="/materials" element={gate('materialManagement', 'read', <MaterialLibraryPage />)} />

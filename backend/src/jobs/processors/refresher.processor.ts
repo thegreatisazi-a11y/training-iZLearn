@@ -6,7 +6,7 @@ import { logger } from '../../config/logger';
  * Daily refresher check (Module 6 / CR-42).
  *
  * When a completed training's refresher date arrives, a fresh PENDING assignment
- * is materialized for the user+topic (only if no active assignment already exists),
+ * is materialized for the user+course (only if no active assignment already exists),
  * and the refresher marker on the completed assignment is cleared so it is not
  * recreated. This keeps refreshers out of the "pending" counts until they are
  * genuinely due.

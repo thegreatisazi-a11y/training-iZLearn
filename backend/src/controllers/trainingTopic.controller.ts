@@ -25,7 +25,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const csv = await svc.exportTopicsCsv({ status, search }, canManageCourses(req));
   await recordEvent({ action: 'EXPORT', entityType: 'TrainingTopic', entityId: 'catalogue', newValue: { status, search } });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="training-topics.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="training-courses.csv"');
   res.send(csv);
 });
 
@@ -35,12 +35,12 @@ export const get = asyncHandler(async (req: Request, res: Response) => {
 
 export const updateStatus = asyncHandler(async (req: Request, res: Response) => {
   const input = updateTopicStatusSchema.parse(req.body);
-  // Archiving (moving a topic to Archived/Obsolete) is additionally gated on the
+  // Archiving (moving a course to Archived/Obsolete) is additionally gated on the
   // 'archive' verb so the action can be granted independently of plain editing.
   if (input.status === 'ARCHIVED' && !hasPermission(req.user?.permissions, 'courseManagement', 'archive')) {
     throw AppError.forbidden('You do not have "archive" permission on courseManagement.');
   }
-  sendSuccess(res, await svc.updateTopicStatus(req.params.id, input.status, req), `Topic ${input.status.toLowerCase()}`);
+  sendSuccess(res, await svc.updateTopicStatus(req.params.id, input.status, req), `Course ${input.status.toLowerCase()}`);
 });
 
 export const history = asyncHandler(async (req: Request, res: Response) => {
@@ -51,23 +51,23 @@ export const history = asyncHandler(async (req: Request, res: Response) => {
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const topic = await svc.createTopic(req.body, req.user!.id);
-  sendCreated(res, topic, 'Training topic created');
+  sendCreated(res, topic, 'Training course created');
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.updateTopic(req.params.id, req.body), 'Training topic updated');
+  sendSuccess(res, await svc.updateTopic(req.params.id, req.body), 'Training course updated');
 });
 
-// G4: promote a published topic's staged draft edits to the live record (e-signed).
+// G4: promote a published course's staged draft edits to the live record (e-signed).
 export const publishDraftChanges = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.publishDraftChanges(req.params.id, req), 'Draft changes published');
 });
 
 export const revise = asyncHandler(async (req: Request, res: Response) => {
   const topic = await svc.reviseTopic(req.params.id, req);
-  sendCreated(res, topic, 'New topic version created');
+  sendCreated(res, topic, 'New course version created');
 });
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await svc.deactivateTopic(req.params.id), 'Training topic deactivated');
+  sendSuccess(res, await svc.deactivateTopic(req.params.id), 'Training course deactivated');
 });

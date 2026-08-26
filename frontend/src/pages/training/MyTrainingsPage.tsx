@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GraduationCap } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -26,7 +26,7 @@ interface MyTraining {
   dueDate: string | null;
   refresherDueDate: string | null;
   // Per-row version: a completed row keeps the version it was completed at; an actionable
-  // row shows the topic's current version. Falls back to the topic's current version.
+  // row shows the course's current version. Falls back to the course's current version.
   topicVersion?: number | null;
   topic: {
     id: string;
@@ -53,7 +53,10 @@ const STATUS_TONE: Record<string, string> = {
 export default function MyTrainingsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'blocked'>('all');
+  const [searchParams] = useSearchParams();
+  // Allow the dashboard tiles to deep-link into a pre-filtered view (?filter=pending, etc.).
+  const initialFilter = (['pending', 'completed', 'overdue', 'blocked'] as const).find((f) => f === searchParams.get('filter')) ?? 'all';
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed' | 'overdue' | 'blocked'>(initialFilter);
   const [retakeFor, setRetakeFor] = useState<MyTraining | null>(null);
   const [justification, setJustification] = useState('');
 
@@ -85,7 +88,7 @@ export default function MyTrainingsPage() {
   });
 
   const rows = useMemo(() => {
-    const all = (data ?? []).filter((t) => t.topic); // only show trainings whose topic still exists
+    const all = (data ?? []).filter((t) => t.topic); // only show trainings whose course still exists
     if (filter === 'pending') return all.filter((t) => ['PENDING', 'IN_PROGRESS'].includes(t.status));
     if (filter === 'completed') return all.filter((t) => t.status === 'COMPLETED' || t.result?.isPassed);
     if (filter === 'overdue') return all.filter((t) => t.status === 'OVERDUE');
@@ -105,7 +108,7 @@ export default function MyTrainingsPage() {
   }, [data]);
 
   const columns: Column<MyTraining>[] = [
-    { key: 'num', header: 'Topic No.', render: (r) => <span className="font-mono text-xs">{r.topic?.topicNumber || r.topic?.topicCode}</span> },
+    { key: 'num', header: 'Course No.', render: (r) => <span className="font-mono text-xs">{r.topic?.topicNumber || r.topic?.topicCode}</span> },
     { key: 'title', header: 'Training', render: (r) => <span className="font-medium text-slate-800">{r.topic?.title}</span> },
     { key: 'type', header: 'Type', render: (r) => (r.topic?.trainingType ?? '').replace(/_/g, ' ') },
     { key: 'duration', header: 'Duration', render: (r) => (r.topic?.durationMinutes ? `${r.topic.durationMinutes} min` : '—') },

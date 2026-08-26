@@ -81,6 +81,7 @@ interface SubmitResult {
   totalQuestions: number;
   correctCount: number;
   incorrectCount: number;
+  unattempted?: number;
   passingScorePercent: number;
   isPassed: boolean;
   isBlocked: boolean;
@@ -282,7 +283,7 @@ export default function TakeAssessmentPage() {
 
   const tabBlocked = useSingleTabGuard(phase === 'assessment' && !result);
 
-  // Resolve THIS topic's assignment so attempts link to it (drives the assignment's
+  // Resolve THIS course's assignment so attempts link to it (drives the assignment's
   // status: IN_PROGRESS → COMPLETED on pass / BLOCKED on max attempts). Without this
   // the assignment would stay PENDING even after passing or exhausting attempts.
   const assignmentsQ = useQuery({
@@ -324,7 +325,7 @@ export default function TakeAssessmentPage() {
       toast.error(apiError(e));
     },
   });
-  // CR-41: SOP / no-assessment topics complete via read + T&C acknowledgement.
+  // CR-41: SOP / no-assessment courses complete via read + T&C acknowledgement.
   const ackComplete = useMutation({
     mutationFn: () => svc.assessments.acknowledgeRead({ topicId, assignmentId }) as unknown as Promise<SubmitResult>,
     onSuccess: (r) => {
@@ -334,10 +335,10 @@ export default function TakeAssessmentPage() {
     onError: (e) => toast.error(apiError(e)),
   });
 
-  // // The read-and-understood declaration for this topic version. Queried so a trainee who
+  // // The read-and-understood declaration for this course version. Queried so a trainee who
   // // already declared (e.g. resuming after a failed attempt) sees it already confirmed.
   // const ackStatusQ = useQuery({
-    // queryKey: ['topic-ack', topicId],
+    // queryKey: ['course-ack', topicId],
     // queryFn: () => svc.assessments.acknowledgementStatus(topicId) as unknown as Promise<{ acknowledged: boolean; statementText: string }>,
     // enabled: !!topicId,
   // });
@@ -352,7 +353,7 @@ export default function TakeAssessmentPage() {
   // const ackTopic = useMutation({
     // mutationFn: () => svc.assessments.acknowledgeTopic(topicId),
     // onSuccess: () => {
-      // qc.invalidateQueries({ queryKey: ['topic-ack', topicId] });
+      // qc.invalidateQueries({ queryKey: ['course-ack', topicId] });
       // start.mutate();
     // },
     // onError: (e) => toast.error(apiError(e)),
@@ -371,7 +372,7 @@ export default function TakeAssessmentPage() {
     if (phase === 'instruction' && instructionQ.isSuccess && !instruction) setPhase('material');
   }, [phase, instructionQ.isSuccess, instruction]);
   const topicTitle = (topicQ.data as { title?: string } | undefined)?.title;
-  // BUG-04: show the topic number alongside the title wherever the topic is named.
+  // BUG-04: show the course number alongside the title wherever the course is named.
   const topicMeta0 = topicQ.data as { topicNumber?: string; topicCode?: string } | undefined;
   const topicNumber = topicMeta0?.topicNumber ?? topicMeta0?.topicCode;
   const topicLabel = topicTitle ? `${topicNumber ? `${topicNumber} – ` : ''}${topicTitle}` : undefined;
@@ -648,8 +649,13 @@ export default function TakeAssessmentPage() {
         ) +
         row(
           cell('Incorrect', String(result.incorrectCount)),
+          cell('Unattempted', String(result.unattempted ?? 0)),
           cell('Time on Assessment', fmtDuration(result.timeSpentSeconds)),
+        ) +
+        row(
           cell('Time on Reading', fmtDuration(result.readingTimeSeconds)),
+          `<td style="border-bottom:1px solid #eef2f7;"></td>`,
+          `<td style="border-bottom:1px solid #eef2f7;"></td>`,
         ) +
         `</table>`;
       const summary = banner + details;
@@ -696,6 +702,7 @@ export default function TakeAssessmentPage() {
               <div>Passing score: {result.passingScorePercent}%</div>
               <div className="text-green-700">Correct: {result.correctCount}</div>
               <div className="text-red-700">Incorrect: {result.incorrectCount}</div>
+              <div className="text-slate-500">Unattempted: {result.unattempted ?? 0}</div>
               <div>
                 Attempt {result.attemptNumber} of {result.maxAttempts}
               </div>

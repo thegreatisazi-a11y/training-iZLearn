@@ -67,7 +67,7 @@ export async function getSchedule(id: string) {
   const rawTrainees = await prisma.trainingAssignment.findMany({
     where: { scheduleId: id, isDeleted: false },
   });
-  // Resolve trainee names/codes and the topic title so the UI shows names, not raw ids.
+  // Resolve trainee names/codes and the course title so the UI shows names, not raw ids.
   const userIds = Array.from(new Set(rawTrainees.map((t) => t.userId)));
   const [users, topic] = await Promise.all([
     userIds.length ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, employeeId: true } }) : [],
@@ -117,6 +117,18 @@ export async function createSchedule(input: CreateScheduleInput, createdBy: stri
     if (clash) throw AppError.badRequest('This trainer already has a schedule on the selected day.');
   }
 
+  // The delivery type is DERIVED from the course, never entered by hand: a schedule is
+  // always for a course and the course already carries its training type(s), so a second
+  // hand-picked copy could only ever drift (it used to be a hard-coded dropdown that no
+  // longer matched the Training Type master). Doubles as a course-exists check.
+  const topic = await prisma.trainingTopic.findFirst({
+    where: { id: input.topicId, isDeleted: false },
+    select: { trainingType: true, trainingTypes: true },
+  });
+  if (!topic) throw AppError.notFound('The selected course no longer exists.');
+  const topicTypes = Array.isArray(topic.trainingTypes) ? (topic.trainingTypes as string[]) : [];
+  const derivedTrainingType = topicTypes[0] || topic.trainingType;
+
   const schedule = await auditedTransaction(prisma, async (tx) => {
     const created = await tx.trainingSchedule.create({
       data: {
@@ -124,7 +136,7 @@ export async function createSchedule(input: CreateScheduleInput, createdBy: stri
         scheduledDate: input.scheduledDate,
         trainerId: input.trainerId ?? null,
         trainerName: input.trainerName?.trim() || null, // external trainer name (when no user picked)
-        trainingType: input.trainingType,
+        trainingType: derivedTrainingType,
         methodology: input.methodology ?? null,
         venue: input.venue ?? null,
         maxTrainees: input.maxTrainees ?? null,
@@ -243,7 +255,7 @@ export async function createOjtRecord(input: OjtRecordInput, createdBy: string) 
 }
 
 /**
- * Mark a (user, topic) training as COMPLETED: complete an existing active assignment if
+ * Mark a (user, course) training as COMPLETED: complete an existing active assignment if
  * present, otherwise create a COMPLETED one. Used by OJT and offline records, which
  * document training that has already taken place. Runs inside an audited transaction.
  */
