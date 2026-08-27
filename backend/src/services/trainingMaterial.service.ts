@@ -39,25 +39,38 @@ function isPublished(status: string): boolean {
 }
 
 /**
- * Item 1: block duplicate file names. Within a course (`topicId`) or the Material
- * Library (`library`), a file whose name already matches an active (non-deleted,
- * non-obsolete) material is rejected — so the same file can't be uploaded/attached
- * twice. Case-insensitive; superseded prior versions never count (Replace still works).
+ * Item 1: block duplicate file names. A file whose name already matches an active
+ * (non-deleted, non-obsolete) material is rejected. A course upload is checked against BOTH
+ * that course AND the Material Library — the library is the controlled master set, so if the
+ * file already exists there the user must attach it from the library instead of re-uploading
+ * a second copy. Case-insensitive; superseded prior versions never count (Replace still works).
  */
-async function assertNoDuplicateName(originalName: string, scope: { topicId: string } | { library: true }) {
-  const where: Prisma.TrainingMaterialWhereInput = {
+async function assertNoDuplicateName(
+  originalName: string,
+  scope: { topicId: string; skipLibraryCheck?: boolean } | { library: true },
+) {
+  const base: Prisma.TrainingMaterialWhereInput = {
     isDeleted: false,
     isObsolete: false,
     originalFileName: { equals: originalName, mode: 'insensitive' },
-    ...('library' in scope ? { topicId: '' } : { topicId: scope.topicId }),
   };
-  const existing = await prisma.trainingMaterial.findFirst({ where });
-  if (existing) {
-    throw AppError.badRequest(
-      'library' in scope
-        ? `A file named "${originalName}" already exists in the Material Library.`
-        : `A file named "${originalName}" is already attached to this course.`,
-    );
+  // Library-level material is stored with an empty topicId. Skipped when attaching an existing
+  // library file to a course (it is in the library by definition).
+  if ('library' in scope || !scope.skipLibraryCheck) {
+    const inLibrary = await prisma.trainingMaterial.findFirst({ where: { ...base, topicId: '' } });
+    if (inLibrary) {
+      throw AppError.badRequest(
+        'library' in scope
+          ? `A file named "${originalName}" already exists in the Material Library.`
+          : `A file named "${originalName}" already exists in the Material Library. Attach it from the library instead of uploading another copy.`,
+      );
+    }
+  }
+  if (!('library' in scope)) {
+    const inCourse = await prisma.trainingMaterial.findFirst({ where: { ...base, topicId: scope.topicId } });
+    if (inCourse) {
+      throw AppError.badRequest(`A file named "${originalName}" is already attached to this course.`);
+    }
   }
 }
 
@@ -279,8 +292,9 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   const topic = await prisma.trainingTopic.findFirst({ where: { id: topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training course not found');
 
-  // Item 1: don't attach a library file whose name is already present in the course.
-  await assertNoDuplicateName(source.originalFileName, { topicId });
+  // Item 1: don't attach a library file whose name is already present in the course. The
+  // library check is skipped here — this file comes FROM the library.
+  await assertNoDuplicateName(source.originalFileName, { topicId, skipLibraryCheck: true });
 
   const storedFileName = generateStoredName(source.originalFileName);
   const destKey = materialKey(storedFileName);

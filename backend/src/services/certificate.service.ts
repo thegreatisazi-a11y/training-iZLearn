@@ -84,6 +84,11 @@ export async function issueForAttempt(attemptId: string) {
   const key = `certificates/${certificateNumber}.pdf`;
 
   const completionDate = formatDate(attempt.completedAt ?? new Date(), org.timezone);
+  // A reading-only course is completed by read & acknowledge — there is no assessment, so no
+  // score is printed. (Checked via the question snapshot so legacy attempts that stored a
+  // placeholder 100% are covered too.)
+  const gradedAssessment = ((attempt.questionsUsed as unknown[] | null) ?? []).length > 0;
+  const certScore = gradedAssessment ? attempt.score ?? null : null;
 
   // Use the admin-configured default template for this certificate type when one
   // exists; otherwise fall back to the built-in default layout (UR-36 / Module 8).
@@ -100,7 +105,7 @@ export async function issueForAttempt(attemptId: string) {
       topicCode: topic.topicCode,
       topicVersion: String(attempt.topicVersion ?? topic.currentVersion),
       completionDate,
-      score: attempt.score !== null && attempt.score !== undefined ? String(attempt.score) : '',
+      score: certScore !== null ? String(certScore) : '',
       certificateNumber,
       orgName: org.name,
     };
@@ -119,7 +124,7 @@ export async function issueForAttempt(attemptId: string) {
       topicTitle: topic.title,
       topicCode: topic.topicCode,
       topicVersion: attempt.topicVersion ?? topic.currentVersion,
-      score: attempt.score ?? null,
+      score: certScore,
       completionDate,
       certificateNumber,
     });

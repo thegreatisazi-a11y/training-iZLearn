@@ -298,6 +298,11 @@ model MaterialViewLog {
   requiredSeconds Int       @default(0)
   // A4: accumulated reading time so a closed-mid-reading session can resume where it left.
   elapsedSeconds  Int       @default(0)
+  // Lightweight end-of-document control: set once the user has reached the LAST page of this
+  // material. Deliberately NOT per-page coverage (jumping straight to the last page counts) —
+  // it only gates when the "read and understood" declaration becomes available. Recorded
+  // server-side so the client cannot skip the check.
+  reachedLastPage Boolean   @default(false)
   // // Page-coverage control: the distinct 1-based page numbers this user has actually dwelled
   // // on, and the page count that had to be covered. Persisted (like elapsedSeconds) so
   // // coverage survives a closed session, and enforced server-side in completeMaterialView.
@@ -554,6 +559,9 @@ model OfflineTrainingRecord {
   topicId         String
   venue           String
   trainerName     String
+  // Set when the trainer is an internal user (null for an external trainer). Lets the server
+  // enforce "the trainer cannot also be a trainee" on this record, not just in the UI.
+  trainerId       String?
   durationMinutes Int
   trainingDate    DateTime
   traineeIds      Json // array of userId
@@ -661,7 +669,9 @@ model CertificateTemplate {
   orgName                    String?         // template override for the org name (blank → System Config org.name)
   headerText                 String          @default("Certificate of Training Completion")
   subHeaderText              String          @default("This is to certify that")
-  bodyText                   String          @default("{{employeeName}} ({{employeeId}}) has successfully completed the training {{topicName}} [{{topicCode}}] with a score of {{score}}% on {{completionDate}}.")
+  // The employee's name is rendered as its own field on the certificate, so the body starts
+  // after it. {{score}} (and its connector) is dropped at render time for reading-only courses.
+  bodyText                   String          @default("has successfully completed the training {{topicName}} [{{topicCode}}], version {{topicVersion}}, on {{completionDate}} with {{score}}%.")
   footerText                 String          @default("Certificate No: {{certificateNumber}}")
   // Per-field text sizes (px). Optional so pre-existing templates read cleanly; the
   // renderer applies the built-in default when a value is absent.

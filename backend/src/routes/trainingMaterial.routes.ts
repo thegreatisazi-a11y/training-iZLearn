@@ -44,6 +44,8 @@ router.post('/:id/view/start', c.startView);
 router.post('/:id/view/complete', c.completeView);
 // A4: auto-save reading progress so a session can resume where the user left off.
 router.post('/:id/view/progress', c.saveViewProgress);
+// Record that the trainee reached the last page of this material (gates the acknowledgement).
+router.post('/:id/view/last-page', c.markLastPage);
 // // Page-coverage control: credit the page currently on screen (server validates the dwell).
 // router.post('/:id/view/page', c.recordPageView);
 // Set per-material required reading time (course managers / material managers).

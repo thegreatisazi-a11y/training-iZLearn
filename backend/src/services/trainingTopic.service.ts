@@ -179,13 +179,28 @@ async function assertTrainingTypesAllowed(codes: (string | undefined)[]) {
 const NO_QUESTIONS_TO_PUBLISH_MSG =
   'This course requires an assessment but has no questions. Add at least one question, or turn off "Requires assessment" to publish it as a reading-only course.';
 
+// Companion guard: a reading-only course IS its material, so it must carry at least one live
+// document before it can go live — otherwise a learner is asked to confirm they have "read &
+// understood" content that does not exist.
+const NO_MATERIAL_TO_PUBLISH_MSG =
+  'This is a reading-only course but has no training document attached. Upload or attach at least one document before publishing.';
+
+/** Live (non-staged, current) document count for a course. */
+async function liveMaterialCount(topicId: string): Promise<number> {
+  return prisma.trainingMaterial.count({
+    where: { topicId, isDeleted: false, isObsolete: false, isStaged: false, isCurrentVersion: true },
+  });
+}
+
 export async function createTopic(input: CreateTopicInput, createdBy: string) {
   await assertTrainingTypesAllowed([input.trainingType, ...(input.trainingTypes ?? [])]);
-  // "Create & Publish" of an assessment course is impossible to satisfy — a brand-new course
-  // has no questions yet. Require it to be saved as a draft first (then add questions & publish).
-  if ((input.status ?? 'DRAFT') === 'PUBLISHED' && (input.requiresAssessment ?? true)) {
+  // "Create & Publish" can never be satisfied by a brand-new course: it has no questions and no
+  // documents yet. Require it to be saved as a draft first, then published once its content is in.
+  if ((input.status ?? 'DRAFT') === 'PUBLISHED') {
     throw AppError.badRequest(
-      'A new assessment course has no questions yet — save it as a draft, add questions, then publish. (Or turn off "Requires assessment" to publish it as a reading-only course.)',
+      (input.requiresAssessment ?? true)
+        ? 'A new assessment course has no questions yet — save it as a draft, add questions, then publish.'
+        : 'A new reading-only course has no document yet — save it as a draft, attach the training document, then publish.',
     );
   }
   const sequence = (await prisma.trainingTopic.count()) + 1;
@@ -329,6 +344,10 @@ export async function publishDraftChanges(id: string, req: Request) {
       where: { topicId: id, isActive: true, isDeleted: false, isStaged: false, pendingRemoval: false },
     });
     if (liveKept + stagedQuestionCount === 0) throw AppError.badRequest(NO_QUESTIONS_TO_PUBLISH_MSG);
+  } else if ((await liveMaterialCount(id)) + stagedCount === 0) {
+    // Turning a course into (or keeping it as) reading-only requires something to read — count
+    // live documents plus any staged uploads that go live with this publish.
+    throw AppError.badRequest(NO_MATERIAL_TO_PUBLISH_MSG);
   }
   await signFromRequest(req, 'TrainingTopic', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
@@ -469,10 +488,15 @@ export async function publishDraftChanges(id: string, req: Request) {
  */
 export async function updateTopicStatus(id: string, status: TopicStatus, req: Request) {
   const topic = await getTopic(id);
-  // Block publishing an assessment course with no questions (before consuming the e-signature).
-  if (status === 'PUBLISHED' && topic.requiresAssessment) {
-    const questionCount = await prisma.question.count({ where: { topicId: id, isActive: true, isDeleted: false, isStaged: false } });
-    if (questionCount === 0) throw AppError.badRequest(NO_QUESTIONS_TO_PUBLISH_MSG);
+  // Block publishing a misconfigured course (before consuming the e-signature): an assessment
+  // course with no questions, or a reading-only course with no document to read.
+  if (status === 'PUBLISHED') {
+    if (topic.requiresAssessment) {
+      const questionCount = await prisma.question.count({ where: { topicId: id, isActive: true, isDeleted: false, isStaged: false } });
+      if (questionCount === 0) throw AppError.badRequest(NO_QUESTIONS_TO_PUBLISH_MSG);
+    } else if ((await liveMaterialCount(id)) === 0) {
+      throw AppError.badRequest(NO_MATERIAL_TO_PUBLISH_MSG);
+    }
   }
   // Every controlled lifecycle transition is e-signed (publish / unpublish / archive).
   const meaning = status === 'PUBLISHED' ? 'Approved' : status === 'ARCHIVED' ? 'Performed' : 'Reviewed';

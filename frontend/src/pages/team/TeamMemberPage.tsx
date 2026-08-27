@@ -36,6 +36,8 @@ interface AssignmentRow {
   extraAttempts?: number | null;
   attemptsUsed: number;
   bestScore?: number | null;
+  /** False for a reading-only course completed by read & acknowledge (no score/attempts). */
+  gradedAssessment?: boolean;
   isPassed: boolean;
   isBlocked: boolean;
   pendingRetakeId?: string | null;
@@ -187,6 +189,8 @@ export default function TeamMemberPage() {
       key: 'attempts',
       header: 'Attempts',
       render: (r) => {
+        // A reading-only completion has no assessment attempts to report.
+        if (r.isPassed && !r.gradedAssessment) return <span className="text-slate-400">—</span>;
         const max = (r.maxAttempts ?? 0) + (r.extraAttempts ?? 0);
         return <span className="text-sm">{r.attemptsUsed}{max ? ` / ${max}` : ''}{r.extraAttempts ? <span className="ml-1 text-xs text-emerald-600">(+{r.extraAttempts})</span> : null}</span>;
       },
@@ -196,7 +200,14 @@ export default function TeamMemberPage() {
       key: 'result',
       header: 'Result',
       render: (r) =>
-        r.isPassed ? <Badge tone="COMPLETED">Passed</Badge> : r.isBlocked ? <Badge tone="REJECTED">Blocked</Badge> : <span className="text-slate-400">—</span>,
+        r.isPassed ? (
+          // Distinguish a graded pass from a read & acknowledged (reading-only) completion.
+          <Badge tone="COMPLETED">{r.gradedAssessment ? 'Passed' : 'Acknowledged'}</Badge>
+        ) : r.isBlocked ? (
+          <Badge tone="REJECTED">Blocked</Badge>
+        ) : (
+          <span className="text-slate-400">—</span>
+        ),
     },
     { key: 'due', header: 'Due', render: (r) => formatDate(r.dueDate) },
     {
@@ -209,15 +220,18 @@ export default function TeamMemberPage() {
 
   if (isLoading) return <PageLoader />;
 
+  // Counts are mutually exclusive and cover every row, so Completed + In progress/pending +
+  // Overdue + Blocked always adds up to Assigned. OVERDUE previously fell into "pending".
   const summary = (data?.assignments ?? []).reduce(
     (acc, a) => {
       acc.total += 1;
       if (a.isPassed || a.status === 'COMPLETED' || a.status === 'WAIVED') acc.completed += 1;
-      else if (a.isBlocked) acc.blocked += 1;
+      else if (a.isBlocked || a.status === 'BLOCKED') acc.blocked += 1;
+      else if (a.status === 'OVERDUE') acc.overdue += 1;
       else acc.pending += 1;
       return acc;
     },
-    { total: 0, completed: 0, pending: 0, blocked: 0 },
+    { total: 0, completed: 0, pending: 0, overdue: 0, blocked: 0 },
   );
 
   return (
@@ -240,10 +254,11 @@ export default function TeamMemberPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-5">
         <Card><CardContent><div className="text-2xl font-semibold text-slate-800">{summary.total}</div><div className="text-xs text-slate-500">Assigned</div></CardContent></Card>
         <Card><CardContent><div className="text-2xl font-semibold text-green-600">{summary.completed}</div><div className="text-xs text-slate-500">Completed</div></CardContent></Card>
         <Card><CardContent><div className="text-2xl font-semibold text-amber-600">{summary.pending}</div><div className="text-xs text-slate-500">In progress / pending</div></CardContent></Card>
+        <Card><CardContent><div className="text-2xl font-semibold text-red-600">{summary.overdue}</div><div className="text-xs text-slate-500">Overdue</div></CardContent></Card>
         <Card><CardContent><div className="text-2xl font-semibold text-red-600">{summary.blocked}</div><div className="text-xs text-slate-500">Blocked</div></CardContent></Card>
       </div>
 

@@ -133,6 +133,88 @@ export async function saveMaterialProgress(userId: string, materialId: string, e
   return prisma.materialViewLog.update({ where: { id: log.id }, data: { elapsedSeconds: next } });
 }
 
+/**
+ * Record that the user has reached the LAST page of this material. Deliberately a single flag,
+ * not per-page coverage: scrolling/jumping straight to the last page counts. Combined with the
+ * per-material reading time, this gates when the "read and understood" declaration appears.
+ * Idempotent — reaching the end again is a no-op.
+ */
+export async function markLastPageReached(userId: string, materialId: string) {
+  const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
+  if (!material) throw AppError.notFound('Training material not found');
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
+  const topicVersion = topic?.currentVersion ?? 1;
+  const requiredSeconds = requiredFor(material, topic);
+  const log = await prisma.materialViewLog.upsert({
+    where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
+    update: {},
+    create: { userId, materialId, topicId: material.topicId, topicVersion, requiredSeconds },
+  });
+  if (log.reachedLastPage) return log;
+  return prisma.materialViewLog.update({ where: { id: log.id }, data: { reachedLastPage: true } });
+}
+
+/**
+ * File types with no "last page" to reach, so the end-of-document gate does not apply:
+ *  - media (image/video/audio) — shown whole in a native player, nothing to page through;
+ *  - plain-text types — rendered as a short read-only block (these must match the frontend's
+ *    TEXT_EXTS, otherwise the gate could never be satisfied for them).
+ * Everything else (pdf, doc/docx, ppt/pptx, xls/xlsx) is scrollable and IS gated.
+ */
+const NON_PAGINATED = new Set([
+  'mp4', 'webm', 'mov', 'avi', 'mkv',
+  'mp3', 'wav', 'ogg', 'm4a',
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
+  'txt', 'csv', 'log', 'md', 'json',
+]);
+export function paginates(fileType: string): boolean {
+  return !NON_PAGINATED.has((fileType || '').toLowerCase());
+}
+
+/**
+ * The acknowledgement ("I have read and understood the training contents.") must be given in the
+ * SAME run that finishes the reading. If a user satisfied every material (required time met AND
+ * last page reached) but left without acknowledging, their reading progress is cleared so they
+ * must read again — otherwise the declaration could be dodged indefinitely by just closing the
+ * tab. Called when the reading screen is (re)opened.
+ *
+ * Only ever clears an IN-PROGRESS, un-acknowledged run: if the course is already completed
+ * (a passing attempt exists for this version) nothing is touched.
+ */
+export async function resetUnacknowledgedReading(userId: string, topicId: string): Promise<boolean> {
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
+  if (!topic) return false;
+  const topicVersion = topic.currentVersion ?? 1;
+
+  // Already completed this version → keep the record; never reset a finished course.
+  const completed = await prisma.assessmentAttempt.findFirst({
+    where: { userId, topicId, topicVersion, isPassed: true, isDeleted: false },
+  });
+  if (completed) return false;
+
+  const materials = await prisma.trainingMaterial.findMany({
+    where: { topicId, isDeleted: false, isCurrentVersion: true, isObsolete: false },
+    select: { id: true, fileType: true },
+  });
+  if (materials.length === 0) return false;
+
+  const logs = await prisma.materialViewLog.findMany({ where: { userId, topicId, topicVersion } });
+  const logByMat = new Map(logs.map((l) => [l.materialId, l]));
+
+  // Was the declaration reachable on the previous visit? (time met AND end reached, every file)
+  const allSatisfied = materials.every((m) => {
+    const log = logByMat.get(m.id);
+    if (!log) return false;
+    if (!log.isCompleted) return false; // required reading time not yet met
+    return paginates(m.fileType) ? log.reachedLastPage : true;
+  });
+  if (!allSatisfied) return false; // not reachable → normal resume, nothing cleared
+
+  // Reachable but never acknowledged → start the reading over.
+  await prisma.materialViewLog.deleteMany({ where: { userId, topicId, topicVersion } });
+  return true;
+}
+
 /** Mark a material as read — only succeeds once the required wall-clock time has elapsed. */
 // /**
  // * Credit one page as read. The page number is taken from the client (it is the page actually
@@ -263,6 +345,9 @@ export async function hasCompletedRequiredReading(userId: string, topicId: strin
 
 /** Per-material reading status for the current user + version (drives the UI). */
 export async function getReadingStatus(userId: string, topicId: string) {
+  // Opening the reading screen is the point at which a previous, finished-but-unacknowledged run
+  // is discarded (see resetUnacknowledgedReading) — so the status below reflects the fresh start.
+  await resetUnacknowledgedReading(userId, topicId).catch(() => undefined);
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   // const course = (await prisma.trainingTopic.findUnique({ where: { id: topicId } })) as (TopicLike & { currentVersion?: number }) | null;
   const topicVersion = topic?.currentVersion ?? 1;
@@ -282,6 +367,10 @@ export async function getReadingStatus(userId: string, topicId: string) {
       isCompleted: log?.isCompleted ?? false,
       // A4: resume support — how far the user had read previously.
       elapsedSeconds: log?.elapsedSeconds ?? 0,
+      // End-of-document gate for the acknowledgement. Non-paginating types (video/audio/image/
+      // text) have no last page, so they are always considered satisfied.
+      paginates: paginates(m.fileType),
+      reachedLastPage: paginates(m.fileType) ? log?.reachedLastPage ?? false : true,
     };
   });
 //

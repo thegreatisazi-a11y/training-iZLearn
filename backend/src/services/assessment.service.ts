@@ -562,6 +562,16 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
   }
   if (topic.requiresAssessment) throw AppError.badRequest('This training requires an assessment and cannot be completed by acknowledgement.');
 
+  // A reading-only course IS its material: with no document attached there is nothing to read,
+  // so "I have read & understood" would be meaningless and the training would be completable
+  // with no content at all. Refuse until the course has at least one live document.
+  const materialCount = await prisma.trainingMaterial.count({
+    where: { topicId, isDeleted: false, isObsolete: false, isStaged: false, isCurrentVersion: true },
+  });
+  if (materialCount === 0) {
+    throw AppError.badRequest('This course has no training document to read yet. Please contact your administrator.');
+  }
+
   const readingDone = await hasCompletedRequiredReading(userId, topicId, topic.currentVersion);
   if (!readingDone) throw AppError.forbidden('You must finish the required reading time before completing this training.');
 
@@ -585,7 +595,10 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
       topicVersion: topic.currentVersion,
       assignmentId: assignmentId ?? null,
       attemptNumber: 1,
-      score: 100,
+      // No assessment was taken, so there is NO score to report (a fabricated 100% would show
+      // up as a real result on the certificate, team records and reports). Completion is
+      // carried by isPassed + the read & acknowledged marker instead.
+      score: null,
       isPassed: true,
       answers: { acknowledged: true } as unknown as object,
       questionsUsed: [] as unknown as object,
@@ -620,18 +633,30 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
     newValue: { completedByAcknowledgement: true, topicId },
   });
 
+  // Actual time this user spent reading this course version's materials, so the completion
+  // screen/print can report it (it was previously omitted and rendered as "—").
+  const ackReadingLogs = await prisma.materialViewLog.findMany({
+    where: { userId, topicId, topicVersion: topic.currentVersion },
+    select: { elapsedSeconds: true },
+  });
+  const ackReadingSeconds = ackReadingLogs.reduce((s, l) => s + (l.elapsedSeconds ?? 0), 0);
+
   return {
     attemptId: attempt.id,
-    score: 100,
+    // No assessment was taken — there is no score to report (see the attempt record above).
+    score: 0,
     totalQuestions: 0,
     attempted: 0,
     correctCount: 0,
     incorrectCount: 0,
+    unattempted: 0,
     passingScorePercent: topic.passingScorePercent,
     isPassed: true,
     isBlocked: false,
     attemptNumber: 1,
     maxAttempts: topic.maxAttempts,
+    timeSpentSeconds: 0,
+    readingTimeSeconds: ackReadingSeconds,
     certificateId,
   };
 }
@@ -651,17 +676,24 @@ export async function listAttempts(filters: { userId?: string; topicId?: string 
     ? await prisma.trainingTopic.findMany({ where: { id: { in: topicIds } }, select: { id: true, title: true, topicNumber: true, topicCode: true } })
     : [];
   const tMap = new Map(topics.map((t) => [t.id, t]));
-  return rows.map((r) => {
-    const t = tMap.get(r.topicId);
-    return {
-      ...r,
-      topicTitle: t?.title ?? null,
-      topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
-      timeSpentSeconds: r.completedAt ? Math.max(0, Math.round((r.completedAt.getTime() - r.startedAt.getTime()) / 1000)) : null,
-      // The recorded failure/submission reason + human label for display in records.
-      submissionReasonLabel: r.submissionReason ? failureReasonLabel(r.submissionReason as AssessmentFailureReason) : null,
-    };
-  });
+  return (
+    rows
+      // A reading-only course is completed by read + acknowledge and records a marker attempt
+      // with no questions. That is a training completion, not an assessment, so it must not
+      // appear in assessment lists (it shows as Completed under My Trainings instead).
+      .filter((r) => ((r.questionsUsed as unknown[] | null) ?? []).length > 0)
+      .map((r) => {
+        const t = tMap.get(r.topicId);
+        return {
+          ...r,
+          topicTitle: t?.title ?? null,
+          topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
+          timeSpentSeconds: r.completedAt ? Math.max(0, Math.round((r.completedAt.getTime() - r.startedAt.getTime()) / 1000)) : null,
+          // The recorded failure/submission reason + human label for display in records.
+          submissionReasonLabel: r.submissionReason ? failureReasonLabel(r.submissionReason as AssessmentFailureReason) : null,
+        };
+      })
+  );
 }
 
 export async function getAttempt(id: string) {
@@ -729,7 +761,11 @@ export async function listManagedAttempts(
   ]);
   const tMap = new Map(topics.map((t) => [t.id, t]));
   const uMap = new Map(people.map((u) => [u.id, u]));
-  return rows.map((r) => {
+  return rows
+    // Reading-only completions (no questions) are training records, not assessments — see
+    // listAttempts. Keep them out of the managed "completed tests" list too.
+    .filter((r) => ((r.questionsUsed as unknown[] | null) ?? []).length > 0)
+    .map((r) => {
     const t = tMap.get(r.topicId);
     const u = uMap.get(r.userId);
     return {

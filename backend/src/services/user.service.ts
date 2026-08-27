@@ -938,15 +938,40 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
     : [];
   const tMap = new Map(topics.map((t) => [t.id, t]));
 
-  // Per-course attempt summary (attempts are keyed by user+course, not by assignment).
-  const byTopic = new Map<string, { used: number; best: number | null; passed: boolean }>();
-  for (const a of attempts) {
-    const s = byTopic.get(a.topicId) ?? { used: 0, best: null, passed: false };
+  // Attempt summary computed PER-ASSIGNMENT (attempts carry the assignmentId they were taken
+  // under), so a re-training assignment on a revised course shows only ITS OWN attempts and the
+  // version it was completed at — instead of every row repeating the course's aggregate totals
+  // (which produced "4 / 2" attempts and the newest version on every historical row).
+  type Sum = { used: number; best: number | null; passed: boolean; passedVersion: number | null; hasQuestions: boolean };
+  const blank = (): Sum => ({ used: 0, best: null, passed: false, passedVersion: null, hasQuestions: false });
+  const merge = (m: Map<string, Sum>, key: string, a: (typeof attempts)[number]) => {
+    const s = m.get(key) ?? blank();
     if (a.completedAt) s.used += 1;
-    if (a.score != null) s.best = s.best == null ? a.score : Math.max(s.best, a.score);
-    if (a.isPassed) s.passed = true;
-    byTopic.set(a.topicId, s);
+    // A reading-only (acknowledgement) completion has no questions and stores a placeholder
+    // score — it must not surface as a "100%" best score. Only graded attempts set a score.
+    const graded = ((a.questionsUsed as unknown[] | null) ?? []).length > 0;
+    if (graded) {
+      s.hasQuestions = true;
+      if (a.score != null) s.best = s.best == null ? a.score : Math.max(s.best, a.score);
+    }
+    if (a.isPassed) {
+      s.passed = true;
+      if (a.topicVersion != null && (s.passedVersion === null || a.topicVersion > s.passedVersion)) {
+        s.passedVersion = a.topicVersion;
+      }
+    }
+    m.set(key, s);
+  };
+  const byAssignment = new Map<string, Sum>();
+  const byTopic = new Map<string, Sum>();
+  for (const a of attempts) {
+    if (a.assignmentId) merge(byAssignment, a.assignmentId, a);
+    merge(byTopic, a.topicId, a);
   }
+  // Prefer this assignment's own attempts; a COMPLETED row with no linked attempt falls back to
+  // the course-level summary (legacy attempts recorded without an assignmentId).
+  const sumFor = (a: { id: string; topicId: string; status: string }): Sum =>
+    byAssignment.get(a.id) ?? (a.status === 'COMPLETED' ? byTopic.get(a.topicId) ?? blank() : blank());
   const pendingRetakeByAssignment = new Map(
     retakeRequests.filter((r) => r.status === 'PENDING_APPROVAL').map((r) => [r.assignmentId, r.id]),
   );
@@ -962,7 +987,7 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
       })
       .map((a) => {
       const t = tMap.get(a.topicId);
-      const sum = byTopic.get(a.topicId) ?? { used: 0, best: null, passed: false };
+      const sum = sumFor(a);
       // Effective status: a passing attempt means COMPLETED even if the assignment
       // row wasn't updated (e.g. an attempt taken without a linked assignmentId).
       const effectiveStatus = sum.passed ? 'COMPLETED' : a.status;
@@ -972,7 +997,9 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
         topic: t?.title ?? a.topicId,
         topicNumber: t?.topicNumber ?? t?.topicCode ?? null,
         trainingType: t?.trainingType ?? null,
-        version: t?.currentVersion ?? null,
+        // A completed row keeps the version it was actually completed at; an open row shows the
+        // course's current version (the one the user will take).
+        version: (effectiveStatus === 'COMPLETED' ? sum.passedVersion : null) ?? t?.currentVersion ?? null,
         isSuperseded: !!t?.supersededByTopicId,
         status: effectiveStatus,
         dueDate: a.dueDate,
@@ -980,7 +1007,10 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
         maxAttempts: t?.maxAttempts ?? null,
         extraAttempts: a.extraAttempts,
         attemptsUsed: sum.used,
-        bestScore: sum.best,
+        // Null for a reading-only completion — there is no score to report.
+        bestScore: sum.hasQuestions ? sum.best : null,
+        // Distinguishes a graded pass from a read & acknowledged completion in the UI.
+        gradedAssessment: sum.hasQuestions,
         isPassed: sum.passed,
         isBlocked: effectiveStatus === 'BLOCKED',
         pendingRetakeId: pendingRetakeByAssignment.get(a.id) ?? null,

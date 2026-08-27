@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ArrowLeft, Clock, Printer } from 'lucide-react';
@@ -24,6 +24,10 @@ interface ReadingItem {
   requiredSeconds: number;
   isCompleted: boolean;
   elapsedSeconds?: number;
+  /** Whether this type paginates at all (video/audio/image/text do not). */
+  paginates?: boolean;
+  /** True once the last page has been reached — always true for non-paginating types. */
+  reachedLastPage?: boolean;
   // /** Coverage state. totalPages null = coverage doesn't apply to this material. */
   // totalPages?: number | null;
   // pagesViewed?: number[];
@@ -250,7 +254,11 @@ export default function TakeAssessmentPage() {
   // CR-38: one question at a time + countdown.
   const [current, setCurrent] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
-  const [tcChecked, setTcChecked] = useState(false); // CR-41: SOP T&C acknowledgement
+  // The read-and-understood declaration. Required on BOTH paths: it gates the assessment, and
+  // (CR-41) completes a reading-only course.
+  const [tcChecked, setTcChecked] = useState(false);
+  // Materials whose LAST page has been reached during this session (the server also persists it).
+  const [lastPageSeen, setLastPageSeen] = useState<Set<string>>(new Set());
   // // The read-and-understood declaration. Required on BOTH paths: it gates the assessment,
   // // and (CR-41) completes a no-assessment SOP.
   // const [tcChecked, setTcChecked] = useState(false);
@@ -325,6 +333,13 @@ export default function TakeAssessmentPage() {
       toast.error(apiError(e));
     },
   });
+  // Reaching the last page of a document is recorded server-side (best-effort) and mirrored
+  // locally so the declaration unlocks immediately without waiting for a refetch.
+  const onLastPageReached = useCallback((materialId: string) => {
+    setLastPageSeen((prev) => (prev.has(materialId) ? prev : new Set(prev).add(materialId)));
+    svc.materials.markLastPage(materialId).catch(() => undefined);
+  }, []);
+
   // CR-41: SOP / no-assessment courses complete via read + T&C acknowledgement.
   const ackComplete = useMutation({
     mutationFn: () => svc.assessments.acknowledgeRead({ topicId, assignmentId }) as unknown as Promise<SubmitResult>,
@@ -379,6 +394,14 @@ export default function TakeAssessmentPage() {
   const mats = useMemo(() => (readingQ.data ?? []) as ReadingItem[], [readingQ.data]);
   const active = mats[activeMaterialIdx];
   const allDone = mats.length === 0 || mats.every((m) => done.has(m.materialId));
+  // End-of-document gate: every paginated file must have had its LAST page reached (server-recorded,
+  // plus anything reached in this session). Non-paginating types are always satisfied.
+  const allEndsReached =
+    mats.length > 0 &&
+    mats.every((m) => m.paginates === false || m.reachedLastPage === true || lastPageSeen.has(m.materialId));
+  // The read-and-understood declaration only becomes available once the required reading TIME is
+  // met for every file AND the end of every document has been reached.
+  const ackAvailable = allDone && allEndsReached;
 
   // Seed completed/required state once the reading status loads.
   // A4: resume — subtract any previously-saved elapsed time from the remaining countdown.
@@ -602,6 +625,10 @@ export default function TakeAssessmentPage() {
   }
 
   if (result) {
+    // A reading-only course (requiresAssessment = false) is completed by read + acknowledge and
+    // has no questions — so there is no score/pass-fail to report. Present it as a completion
+    // record rather than an assessment result.
+    const isReadingCompletion = (result.totalQuestions ?? 0) === 0;
     // BUG-07: the printout must mirror the full on-screen result — summary AND every
     // question with the user's answer, the correct answer and any explanation.
     const printResult = async () => {
@@ -618,12 +645,16 @@ export default function TakeAssessmentPage() {
       const department = profile?.departmentName || '—';
       const completedOn = formatDateTime(new Date().toISOString());
       const passed = result.isPassed;
-      const accent = passed ? '#15803d' : '#b91c1c';
-      const accentBg = passed ? '#dcfce7' : '#fee2e2';
-      // Prominent pass/fail banner with the headline score (score + passing score live here,
-      // so they're intentionally not repeated in the grid below).
-      const banner =
-        `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
+      const accent = isReadingCompletion ? '#15803d' : passed ? '#15803d' : '#b91c1c';
+      const accentBg = isReadingCompletion ? '#dcfce7' : passed ? '#dcfce7' : '#fee2e2';
+      // A reading-only course has no score to report — show a plain completion banner instead
+      // of a pass/fail + percentage (there was no assessment).
+      const banner = isReadingCompletion
+        ? `<div style="border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
+          `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">COMPLETED</div>` +
+          `<div style="font-size:11px;color:#64748b;margin-top:2px;">Read &amp; acknowledged — no assessment for this course</div>` +
+          `</div>`
+        : `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
         `border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
         `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">${passed ? 'PASSED' : 'FAILED'}</div>` +
         `<div style="text-align:right;color:#334155;">` +
@@ -635,29 +666,36 @@ export default function TakeAssessmentPage() {
         `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:2px;">${escapeHtml(label)}</div>` +
         `<div style="font-size:13px;font-weight:600;color:#1e293b;">${value}</div></td>`;
       const row = (...cells: string[]) => `<tr>${cells.join('')}</tr>`;
-      const details =
-        `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
-        row(
-          cell('Employee', escapeHtml(employeeName)),
-          cell('Employee ID', escapeHtml(employeeCode)),
-          cell('Department', escapeHtml(department)),
-        ) +
-        row(
-          cell('Completed On', escapeHtml(completedOn)),
-          cell('Attempt', `${result.attemptNumber} of ${result.maxAttempts}`),
-          cell('Correct', String(result.correctCount)),
-        ) +
-        row(
-          cell('Incorrect', String(result.incorrectCount)),
-          cell('Unattempted', String(result.unattempted ?? 0)),
-          cell('Time on Assessment', fmtDuration(result.timeSpentSeconds)),
-        ) +
-        row(
-          cell('Time on Reading', fmtDuration(result.readingTimeSeconds)),
-          `<td style="border-bottom:1px solid #eef2f7;"></td>`,
-          `<td style="border-bottom:1px solid #eef2f7;"></td>`,
-        ) +
-        `</table>`;
+      const blank = `<td style="border-bottom:1px solid #eef2f7;"></td>`;
+      const identityRow = row(
+        cell('Employee', escapeHtml(employeeName)),
+        cell('Employee ID', escapeHtml(employeeCode)),
+        cell('Department', escapeHtml(department)),
+      );
+      // Reading-only completion: identity + when + reading time. No score/question counts.
+      const details = isReadingCompletion
+        ? `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
+          identityRow +
+          row(
+            cell('Completed On', escapeHtml(completedOn)),
+            cell('Completion Method', 'Read &amp; acknowledged'),
+            cell('Time on Reading', fmtDuration(result.readingTimeSeconds)),
+          ) +
+          `</table>`
+        : `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
+          identityRow +
+          row(
+            cell('Completed On', escapeHtml(completedOn)),
+            cell('Attempt', `${result.attemptNumber} of ${result.maxAttempts}`),
+            cell('Correct', String(result.correctCount)),
+          ) +
+          row(
+            cell('Incorrect', String(result.incorrectCount)),
+            cell('Unattempted', String(result.unattempted ?? 0)),
+            cell('Time on Assessment', fmtDuration(result.timeSpentSeconds)),
+          ) +
+          row(cell('Time on Reading', fmtDuration(result.readingTimeSeconds)), blank, blank) +
+          `</table>`;
       const summary = banner + details;
       const review = result.allDetails?.length ? result.allDetails : result.incorrectDetails ?? [];
       const questions = review
@@ -671,15 +709,16 @@ export default function TakeAssessmentPage() {
             `</div>`,
         )
         .join('');
+      const docTitle = isReadingCompletion ? 'Training Completion Record' : 'Assessment Result';
       printHtml(
-        'Assessment Result',
-        `<h1>${escapeHtml(heading)}</h1><div class="sub">Assessment Result</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
+        docTitle,
+        `<h1>${escapeHtml(heading)}</h1><div class="sub">${docTitle}</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
       );
     };
     return (
       <div>
         <PageHeader
-          title="Assessment Result"
+          title={isReadingCompletion ? 'Training Completed' : 'Assessment Result'}
           description={
             `${(start.data?.topicNumber ?? start.data?.topicCode ?? topicNumber) ? `${start.data?.topicNumber ?? start.data?.topicCode ?? topicNumber} – ` : ''}${start.data?.topicTitle ?? topicTitle ?? ''}`
           }
@@ -690,33 +729,50 @@ export default function TakeAssessmentPage() {
           }
         />
         <Card className="mb-4">
-          <CardContent className="flex flex-wrap items-center gap-6">
-            <div className="flex items-center gap-3">
-              {result.isPassed ? <CheckCircle2 className="h-10 w-10 text-green-600" /> : <XCircle className="h-10 w-10 text-red-600" />}
-              <div>
-                <div className="text-3xl font-semibold text-slate-800">{result.score}%</div>
-                <Badge tone={result.isPassed ? 'COMPLETED' : 'REJECTED'}>{result.isPassed ? 'Passed' : 'Failed'}</Badge>
+          {isReadingCompletion ? (
+            /* Reading-only course: no assessment, so no score / pass-fail / question counts. */
+            <CardContent className="flex flex-wrap items-center gap-6">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="h-10 w-10 text-green-600" />
+                <div>
+                  <Badge tone="COMPLETED">Completed</Badge>
+                  <div className="mt-1 text-sm text-slate-600">Read &amp; acknowledged</div>
+                </div>
               </div>
-            </div>
-            <div className="text-sm text-slate-600">
-              <div>Passing score: {result.passingScorePercent}%</div>
-              <div className="text-green-700">Correct: {result.correctCount}</div>
-              <div className="text-red-700">Incorrect: {result.incorrectCount}</div>
-              <div className="text-slate-500">Unattempted: {result.unattempted ?? 0}</div>
-              <div>
-                Attempt {result.attemptNumber} of {result.maxAttempts}
+              <div className="text-sm text-slate-600">
+                <div>Time on reading: <strong>{fmtDuration(result.readingTimeSeconds)}</strong></div>
+                <div className="text-slate-500">This course has no assessment.</div>
               </div>
-            </div>
-            {/* BUG-05: actual time the user spent (not just the minimum required). */}
-            <div className="text-sm text-slate-600">
-              <div>Time on assessment: <strong>{fmtDuration(result.timeSpentSeconds)}</strong></div>
-              <div>Time on reading: <strong>{fmtDuration(result.readingTimeSeconds)}</strong></div>
-              {/* The recorded reason this attempt ended (transparency for technical failures). */}
-              {result.submissionReasonLabel && result.submissionReason !== 'USER_SUBMITTED' && (
-                <div>Ended due to: <strong>{result.submissionReasonLabel}</strong></div>
-              )}
-            </div>
-          </CardContent>
+            </CardContent>
+          ) : (
+            <CardContent className="flex flex-wrap items-center gap-6">
+              <div className="flex items-center gap-3">
+                {result.isPassed ? <CheckCircle2 className="h-10 w-10 text-green-600" /> : <XCircle className="h-10 w-10 text-red-600" />}
+                <div>
+                  <div className="text-3xl font-semibold text-slate-800">{result.score}%</div>
+                  <Badge tone={result.isPassed ? 'COMPLETED' : 'REJECTED'}>{result.isPassed ? 'Passed' : 'Failed'}</Badge>
+                </div>
+              </div>
+              <div className="text-sm text-slate-600">
+                <div>Passing score: {result.passingScorePercent}%</div>
+                <div className="text-green-700">Correct: {result.correctCount}</div>
+                <div className="text-red-700">Incorrect: {result.incorrectCount}</div>
+                <div className="text-slate-500">Unattempted: {result.unattempted ?? 0}</div>
+                <div>
+                  Attempt {result.attemptNumber} of {result.maxAttempts}
+                </div>
+              </div>
+              {/* BUG-05: actual time the user spent (not just the minimum required). */}
+              <div className="text-sm text-slate-600">
+                <div>Time on assessment: <strong>{fmtDuration(result.timeSpentSeconds)}</strong></div>
+                <div>Time on reading: <strong>{fmtDuration(result.readingTimeSeconds)}</strong></div>
+                {/* The recorded reason this attempt ended (transparency for technical failures). */}
+                {result.submissionReasonLabel && result.submissionReason !== 'USER_SUBMITTED' && (
+                  <div>Ended due to: <strong>{result.submissionReasonLabel}</strong></div>
+                )}
+              </div>
+            </CardContent>
+          )}
         </Card>
 
         {result.isPassed && result.certificateId && (
@@ -872,14 +928,18 @@ export default function TakeAssessmentPage() {
               Progress: <strong>{doneCount}/{totalChapters}</strong> · {progressPct}%
             </div>
             {requiresAssessment && (
-              <Button disabled={!allDone || start.isPending} onClick={() => start.mutate()}>
-                {start.isPending ? 'Starting…' : 'Continue to Assessment'}
-              {/* <Button
-                disabled={!allDone || !tcChecked || start.isPending || ackTopic.isPending}
-                title={!allDone ? 'Finish reading every chapter in full first.' : !tcChecked ? 'Confirm the acknowledgement below to continue.' : undefined}
-                onClick={beginAssessment}
+              <Button
+                disabled={!ackAvailable || !tcChecked || start.isPending}
+                title={
+                  !ackAvailable
+                    ? 'Read every file for its required time and reach the end of each document first.'
+                    : !tcChecked
+                      ? 'Confirm the acknowledgement below to continue.'
+                      : undefined
+                }
+                onClick={() => start.mutate()}
               >
-                {start.isPending || ackTopic.isPending ? 'Starting…' : 'Continue to Assessment'} */}
+                {start.isPending ? 'Starting…' : 'Continue to Assessment'}
               </Button>
             )}
           </div>
@@ -962,6 +1022,9 @@ export default function TakeAssessmentPage() {
                       fileType={active.fileType}
                       heightClass="h-[72vh]"
                       onReady={(mid) => setReadyIds((s) => (s.has(mid) ? s : new Set(s).add(mid)))}
+                      // Unlocks the read-and-understood declaration once the end of every
+                      // document has been reached (no per-page tracking — see onLastPage).
+                      onLastPage={onLastPageReached}
                       // // Only records WHERE the trainee is. The page count and whether coverage
                       // // applies at all come from the server (reading-status), which is the sole
                       // // authority — a client-reported total could otherwise either weaken the
@@ -1009,40 +1072,60 @@ export default function TakeAssessmentPage() {
               </span>
             )}
           </div>
-          {!requiresAssessment && (
-          // {/*
-            // The read-and-understood declaration. Deliberately NOT rendered until every chapter
-            // is fully read (time + every page) — the trainee should not see something to tick
-            // while material is still outstanding. On the SOP path it completes the training; on
-            // the assessment path it unlocks the assessment. Both are re-verified server-side.
-          // */}
-          // {allDone && (
+          {/* No document attached → nothing to read, so the read-and-understood declaration is
+              meaningless and must not be offered (the server refuses it too). */}
+          {!requiresAssessment && mats.length === 0 && (
+            <p className="text-sm text-amber-700">
+              This course has no training document yet, so it cannot be completed. Please contact your administrator.
+            </p>
+          )}
+          {/* The read-and-understood declaration, shown on BOTH paths and only once the reading
+              is genuinely finished: the required TIME is met for every file AND the end of every
+              document has been reached. On a reading-only course it completes the training; on an
+              assessment course it unlocks the assessment. Both are re-verified server-side. */}
+          {mats.length > 0 && ackAvailable && (
             <div className="flex flex-col items-end gap-2">
+              {/* This declaration is about the COURSE CONTENT. It is NOT the global
+                  instruction-file acknowledgement — that has its own checkbox on the instruction
+                  step, which only appears when an instruction file is configured. */}
               <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" disabled={!allDone} checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
-                I have read &amp; understood (I accept the Terms &amp; Conditions).
-              {/* <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                 <input type="checkbox" checked={tcChecked} onChange={(e) => setTcChecked(e.target.checked)} />
-                {ackStatement} */}
+                I have read and understood the training contents.
               </label>
-              <Button disabled={!allDone || !tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
-                {ackComplete.isPending ? 'Completing…' : 'Mark as read & complete'}
-              </Button>
-              {/* {!requiresAssessment && (
+              {!requiresAssessment && (
                 <Button disabled={!tcChecked || ackComplete.isPending} onClick={() => ackComplete.mutate()}>
                   {ackComplete.isPending ? 'Completing…' : 'Mark as read & complete'}
                 </Button>
-              )} */}
+              )}
             </div>
           )}
         </div>
-        {/* Why the tick box isn't available yet — otherwise its absence just looks broken.
-        {!allDone && mats.length > 0 && (
-          <p className="mt-3 text-xs text-slate-400">
-            The “{ackStatement}” confirmation becomes available once every chapter has been read in full — every page of each
-            document, and every sheet of each workbook.
-          </p>
-        )} */}
+        {/* Why the tick box isn't available yet — naming the outstanding files, otherwise its
+            absence just looks broken and there is no way to tell what is missing. */}
+        {mats.length > 0 && !ackAvailable && (
+          <div className="mt-3 text-xs text-slate-400">
+            <p>
+              The “I have read and understood the training contents.” confirmation becomes available once every file has been
+              read for its required time and you have reached the end of every document.
+            </p>
+            {(() => {
+              const needsTime = mats.filter((m) => !done.has(m.materialId));
+              const needsEnd = mats.filter(
+                (m) => m.paginates !== false && m.reachedLastPage !== true && !lastPageSeen.has(m.materialId),
+              );
+              return (
+                <>
+                  {needsTime.length > 0 && (
+                    <p className="mt-1">Still to read for the required time: {needsTime.map((m) => m.originalFileName).join(', ')}.</p>
+                  )}
+                  {needsEnd.length > 0 && (
+                    <p className="mt-1">Scroll to the end of: {needsEnd.map((m) => m.originalFileName).join(', ')}.</p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
       </div>
     );
   }

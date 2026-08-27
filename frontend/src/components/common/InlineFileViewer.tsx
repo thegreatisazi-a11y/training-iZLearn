@@ -62,6 +62,7 @@ export function InlineFileViewer({
   fileType,
   heightClass = 'h-[80vh]',
   onReady,
+  onLastPage,
   // onPageChange,
 }: {
   materialId: string;
@@ -71,6 +72,10 @@ export function InlineFileViewer({
   /** Fired once the file has finished loading and is visible — used by the reading
    *  gate so the read-time countdown only starts after the file is actually shown. */
   onReady?: (materialId: string) => void;
+  /** Fired once when the LAST page of a paginated document has been reached (however the user
+   *  got there — scrolling, the toolbar, arrow keys or jumping straight to the end). The reading
+   *  gate uses this to unlock the read-and-understood declaration. Not per-page tracking. */
+  onLastPage?: (materialId: string) => void;
   // /**
    // * Fired with the page currently on screen (and the document's total pages) whenever it
    // * changes — however it changed: scrolling, the toolbar, the arrow keys, or the slideshow.
@@ -181,7 +186,7 @@ export function InlineFileViewer({
   if (rendersAsPdf) {
     // Presentations open in slideshow (one-slide-at-a-time) mode by default; any PDF can
     // still be switched into it from the toolbar.
-    return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} defaultSlideshow={ext === 'ppt' || ext === 'pptx'} />;
+    return <PdfDocViewer url={url} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} defaultSlideshow={ext === 'ppt' || ext === 'pptx'} onLastPage={onLastPage ? () => onLastPage(materialId) : undefined} />;
     // return (
       // <PdfDocViewer
         // url={url}
@@ -196,7 +201,7 @@ export function InlineFileViewer({
   }
 
   if (isDocx || isXlsx) {
-    return <OfficeHtmlViewer blob={blob} kind={isDocx ? 'docx' : 'xlsx'} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} />;
+    return <OfficeHtmlViewer blob={blob} kind={isDocx ? 'docx' : 'xlsx'} heightClass={heightClass} lockClass={lockClass} lockStyle={lockStyle} onCtx={onCtx} onLastPage={onLastPage ? () => onLastPage(materialId) : undefined} />;
     // return (
       // <OfficeHtmlViewer
         // blob={blob}
@@ -294,6 +299,36 @@ function rowsToTableHtml(rows: unknown[][]): string {
  * DOMPurify, and the surface is view-only (no selection/copy). On failure it falls back to
  * the download-to-view panel.
  */
+/**
+ * Fires `onEnd` ONCE when the returned scroller reaches its bottom — the "last page" equivalent
+ * for continuously-scrolling documents (docx/xlsx). Content that fits without scrolling counts as
+ * already at the end. `ready` re-arms it when a new document finishes rendering.
+ */
+function useReachedEnd(onEnd: (() => void) | undefined, ready: unknown) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
+  const firedRef = useRef(false);
+  useEffect(() => {
+    firedRef.current = false;
+  }, [ready]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !onEndRef.current) return;
+    const check = () => {
+      if (firedRef.current) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= 8) {
+        firedRef.current = true;
+        onEndRef.current?.();
+      }
+    };
+    check();
+    el.addEventListener('scroll', check, { passive: true });
+    return () => el.removeEventListener('scroll', check);
+  }, [ready]);
+  return ref;
+}
+
 function OfficeHtmlViewer({
   blob,
   kind,
@@ -301,6 +336,7 @@ function OfficeHtmlViewer({
   lockClass,
   lockStyle,
   onCtx,
+  onLastPage,
   // onSheetChange,
 }: {
   blob: Blob | null;
@@ -309,11 +345,15 @@ function OfficeHtmlViewer({
   lockClass: string;
   lockStyle: { userSelect: 'none' };
   onCtx: (e: MouseEvent) => void;
+  /** Fired once when the bottom of the document has been reached (its "last page"). */
+  onLastPage?: () => void;
   // /** Reports the worksheet on screen (1-based) and the total, for sheet-coverage tracking. */
   // onSheetChange?: (sheet: number, totalSheets: number) => void;
 }) {
   const [html, setHtml] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // End-of-document gate: reaching the bottom of this scroller is this format's "last page".
+  const endScrollRef = useReachedEnd(onLastPage, html);
   // // Set when the workbook is too big to render as a DOM table — see XLSX_INLINE_MAX_*.
   // const [tooLarge, setTooLarge] = useState<string>('');
   // const scrollRef = useRef<HTMLDivElement>(null);
@@ -405,8 +445,12 @@ function OfficeHtmlViewer({
   if (failed) return <PreviewUnavailable heightClass={heightClass} message="This document couldn’t be rendered. Download it to view." />;
   if (html === null) return <div className="flex h-40 items-center justify-center text-sm text-slate-500">Rendering preview…</div>;
   return (
-    <div className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}>
-    {/* <div ref={scrollRef} className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}> */}
+    <div
+      ref={endScrollRef}
+      className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`}
+      style={lockStyle}
+      onContextMenu={onCtx}
+    >
       <div className="prose prose-sm max-w-none p-4 text-slate-800" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
     </div>
   );
@@ -457,6 +501,7 @@ function PdfDocViewer({
   lockStyle,
   onCtx,
   defaultSlideshow,
+  onLastPage,
   // onPageChange,
 }: {
   url: string;
@@ -466,6 +511,8 @@ function PdfDocViewer({
   onCtx: (e: MouseEvent) => void;
   /** Start in one-slide-at-a-time presentation mode (used for ppt/pptx). */
   defaultSlideshow?: boolean;
+  /** Fired once when the last page has been reached (see InlineFileViewer.onLastPage). */
+  onLastPage?: () => void;
   // /** Reports the page on screen (and the total) for the page-coverage reading control. */
   // onPageChange?: (page: number, numPages: number) => void;
 }) {
@@ -505,15 +552,38 @@ function PdfDocViewer({
     };
   }, [url]);
 
-  // // Report the page on screen for the page-coverage control. Held in a ref so a caller that
-  // // passes an inline arrow function doesn't re-fire this on every render — it fires only when
-  // // the page (or the loaded document) actually changes.
-  // const onPageChangeRef = useRef(onPageChange);
-  // onPageChangeRef.current = onPageChange;
-  // useEffect(() => {
-    // if (numPages > 0) onPageChangeRef.current?.(page, numPages);
-  // }, [page, numPages]);
-//
+  // Fire ONCE when the last page is reached, however the user got there (scroll, toolbar, keys,
+  // or jumping straight to the end). Held in a ref so an inline arrow function from the caller
+  // doesn't re-trigger this on every render; `firedLastPageRef` keeps it single-shot per document.
+  const onLastPageRef = useRef(onLastPage);
+  onLastPageRef.current = onLastPage;
+  const firedLastPageRef = useRef(false);
+  useEffect(() => {
+    // New document loaded → allow the callback to fire again.
+    firedLastPageRef.current = false;
+  }, [url]);
+  const fireLastPage = useCallback(() => {
+    if (firedLastPageRef.current) return;
+    firedLastPageRef.current = true;
+    onLastPageRef.current?.();
+  }, []);
+  useEffect(() => {
+    if (numPages > 0 && page >= numPages) fireLastPage();
+  }, [page, numPages, fireLastPage]);
+  // Safety net: the page indicator tracks the page under a marker 35% down the viewport, so a
+  // final page shorter than that never becomes "current" even when the user is at the very
+  // bottom. Treat reaching the bottom of the scroller as reaching the end of the document.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || numPages === 0) return;
+    const check = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= 8) fireLastPage();
+    };
+    check(); // a document that fits without scrolling is already fully shown
+    el.addEventListener('scroll', check, { passive: true });
+    return () => el.removeEventListener('scroll', check);
+  }, [numPages, fireLastPage]);
+
   // Track the scroll viewport size to compute fit scales.
   useLayoutEffect(() => {
     const el = scrollRef.current;

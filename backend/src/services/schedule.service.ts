@@ -215,6 +215,11 @@ export async function cancelSchedule(id: string) {
 // ---- OJT records ------------------------------------------------------------
 
 export async function createOjtRecord(input: OjtRecordInput, createdBy: string) {
+  // Module 6: a person cannot evaluate their own OJT (also enforced by the shared schema —
+  // kept here so any non-HTTP caller of this service is covered too).
+  if (input.evaluatorId && input.evaluatorId === input.userId) {
+    throw AppError.badRequest('The evaluator cannot be the trainee of the same OJT record.');
+  }
   // evaluationDate is constrained to past/present by the shared schema.
   // An OJT record is evidence of training that ALREADY happened, so it is recorded
   // together with a COMPLETED training assignment for the trainee (visible in their
@@ -335,12 +340,18 @@ async function withTopicAndUserNames<T extends Record<string, unknown>>(
 // ---- Offline / classroom training -------------------------------------------
 
 export async function createOfflineTraining(input: OfflineTrainingInput, createdBy: string) {
+  // Module 6: an internal trainer can never also be a trainee (also enforced by the schema —
+  // kept here so any non-HTTP caller of this service is covered too).
+  if (input.trainerId && input.traineeIds.includes(input.trainerId)) {
+    throw AppError.badRequest('The trainer cannot be a trainee in the same training.');
+  }
   return auditedTransaction(prisma, async (tx) => {
     const record = await tx.offlineTrainingRecord.create({
       data: {
         topicId: input.topicId,
         venue: input.venue,
         trainerName: input.trainerName,
+        trainerId: input.trainerId ?? null,
         durationMinutes: input.durationMinutes,
         trainingDate: input.trainingDate,
         traineeIds: input.traineeIds as Prisma.InputJsonValue,

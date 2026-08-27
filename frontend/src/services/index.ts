@@ -153,6 +153,8 @@ export const svc = {
     completeView: (id: string) => data(api.post(`/materials/${id}/view/complete`, {})),
     // A4: auto-save accumulated reading seconds so the session can resume.
     saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
+    /** Record that the trainee reached the last page of this material (gates the acknowledgement). */
+    markLastPage: (id: string) => data(api.post(`/materials/${id}/view/last-page`, {})),
     readingStatus: (topicId: string) => data(api.get('/materials/reading-status', { params: { topicId } })),
     // /** Report the page on screen; the server decides whether it has been dwelled on long enough. */
     // recordPage: (id: string, page: number) => data(api.post(`/materials/${id}/view/page`, { page })),

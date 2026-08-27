@@ -272,6 +272,12 @@ export const saveViewProgress = asyncHandler(async (req: Request, res: Response)
   // sendSuccess(res, await viewSvc.recordPageView(req.user!.id, req.params.id, page));
 // });
 //
+// Record that the trainee reached the LAST page of this material (gates the read-and-understood
+// declaration). Personal action — ownership is implicit (always the caller's own progress).
+export const markLastPage = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await viewSvc.markLastPageReached(req.user!.id, req.params.id), 'End of document reached');
+});
+
 export const readingStatus = asyncHandler(async (req: Request, res: Response) => {
   const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : '';
   if (!topicId) throw AppError.badRequest('topicId is required.');

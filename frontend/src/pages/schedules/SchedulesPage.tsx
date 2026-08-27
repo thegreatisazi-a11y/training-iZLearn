@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -97,6 +97,19 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
   const isExtTrainer = trainerId === OTHER_PERSON;
   const trainerValid = isExtTrainer ? !!trainerOther.trim() : !!trainerId;
 
+  // Module 6: an internal trainer can never be a trainee on the same schedule — hide them from
+  // the trainee picker (and drop them if they were already selected) so the conflict can't be
+  // created at all. An external trainer has no user id, so nothing is excluded for them.
+  const traineeOptions = useMemo<Option[]>(
+    () => (isExtTrainer || !trainerId ? userOpts : userOpts.filter((o) => o.value !== trainerId)),
+    [userOpts, trainerId, isExtTrainer],
+  );
+  useEffect(() => {
+    if (!isExtTrainer && trainerId && traineeIds.includes(trainerId)) {
+      setTraineeIds((ids) => ids.filter((id) => id !== trainerId));
+    }
+  }, [trainerId, isExtTrainer, traineeIds]);
+
   function reset() {
     setTopicId('');
     setScheduledDate('');
@@ -179,8 +192,8 @@ function NewScheduleDialog({ open, onClose, onSaved }: { open: boolean; onClose:
       <Field label="Max trainees">
         <Input type="number" min={1} value={maxTrainees} onChange={(e) => setMaxTrainees(e.target.value)} placeholder="Optional" />
       </Field>
-      <Field label="Trainees">
-        <MultiSelect options={userOpts} value={traineeIds} onChange={setTraineeIds} />
+      <Field label="Trainees" hint={!isExtTrainer && trainerId ? 'The selected trainer cannot also be a trainee and is not listed.' : undefined}>
+        <MultiSelect options={traineeOptions} value={traineeIds} onChange={setTraineeIds} />
       </Field>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </Dialog>
@@ -193,7 +206,6 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
   const users = useLookup('users');
   const topicOpts = useMemo<Option[]>(() => (topics.data ?? []).map((t) => ({ value: String(t.id), label: (t.topicNumber || t.topicCode) ? `${t.topicNumber || t.topicCode} – ${t.title ?? ''}` : String(t.title ?? t.id) })), [topics.data]);
   const userOpts = useMemo<Option[]>(() => (users.data ?? []).map((u) => ({ value: String(u.id), label: `${u.fullName} (${u.employeeId})` })), [users.data]);
-  const evaluatorOptions = useMemo<Option[]>(() => [...userOpts, { value: OTHER_PERSON, label: 'Other (external evaluator)…' }], [userOpts]);
   const today = new Date().toISOString().slice(0, 10);
 
   const [topicId, setTopicId] = useState('');
@@ -208,6 +220,16 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
 
   const isExtEvaluator = evaluatorId === OTHER_PERSON;
   const evaluatorValid = isExtEvaluator ? !!evaluatorOther.trim() : !!evaluatorId;
+
+  // Module 6: a person can't evaluate their own OJT — hide the selected trainee from the
+  // evaluator list (and clear the evaluator if the trainee is changed to that same person).
+  const evaluatorOptions = useMemo<Option[]>(
+    () => [...(userId ? userOpts.filter((o) => o.value !== userId) : userOpts), { value: OTHER_PERSON, label: 'Other (external evaluator)…' }],
+    [userOpts, userId],
+  );
+  useEffect(() => {
+    if (userId && evaluatorId === userId) setEvaluatorId('');
+  }, [userId, evaluatorId]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -255,7 +277,7 @@ function OjtDialog({ open, onClose, onSaved }: { open: boolean; onClose: () => v
       <Field label="Trainee" required>
         <Select options={userOpts} value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="Select a trainee…" />
       </Field>
-      <Field label="Evaluator" required>
+      <Field label="Evaluator" required hint={userId ? 'The selected trainee cannot evaluate their own OJT and is not listed.' : undefined}>
         <Select options={evaluatorOptions} value={evaluatorId} onChange={(e) => setEvaluatorId(e.target.value)} placeholder="Select an evaluator…" />
       </Field>
       {isExtEvaluator && (
@@ -306,9 +328,31 @@ function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () 
       ? trainerOther.trim()
       : String((users.data ?? []).find((u) => String(u.id) === trainerSel)?.fullName ?? '');
 
+  // Same rule as a scheduled session: an internal trainer can't be listed as a trainee.
+  const isExtTrainer = trainerSel === OTHER_PERSON;
+  const traineeOptions = useMemo<Option[]>(
+    () => (isExtTrainer || !trainerSel ? userOpts : userOpts.filter((o) => o.value !== trainerSel)),
+    [userOpts, trainerSel, isExtTrainer],
+  );
+  useEffect(() => {
+    if (!isExtTrainer && trainerSel && traineeIds.includes(trainerSel)) {
+      setTraineeIds((ids) => ids.filter((id) => id !== trainerSel));
+    }
+  }, [trainerSel, isExtTrainer, traineeIds]);
+
   const mutation = useMutation({
     mutationFn: () =>
-      svc.schedules.createOffline({ topicId, venue, trainerName: resolvedTrainerName, durationMinutes: Number(durationMinutes), trainingDate, traineeIds }),
+      svc.schedules.createOffline({
+        topicId,
+        venue,
+        trainerName: resolvedTrainerName,
+        // Send the internal trainer's user id (omitted for an external trainer) so the server
+        // can enforce the trainer-cannot-be-trainee rule on this record too.
+        trainerId: isExtTrainer ? undefined : trainerSel || undefined,
+        durationMinutes: Number(durationMinutes),
+        trainingDate,
+        traineeIds,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['offline-records'] });
       qc.invalidateQueries({ queryKey: ['schedules'] });
@@ -356,8 +400,8 @@ function OfflineDialog({ open, onClose, onSaved }: { open: boolean; onClose: () 
       <Field label="Training date" required>
         <Input type="date" max={today} value={trainingDate} onChange={(e) => setTrainingDate(e.target.value)} />
       </Field>
-      <Field label="Trainees">
-        <MultiSelect options={userOpts} value={traineeIds} onChange={setTraineeIds} />
+      <Field label="Trainees" hint={!isExtTrainer && trainerSel ? 'The selected trainer cannot also be a trainee and is not listed.' : undefined}>
+        <MultiSelect options={traineeOptions} value={traineeIds} onChange={setTraineeIds} />
       </Field>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </Dialog>

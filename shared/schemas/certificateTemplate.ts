@@ -51,7 +51,14 @@ export const certificateTemplateSchema = z.object({
   orgName: z.string().optional(),
   headerText: z.string().default('Certificate of Training Completion'),
   subHeaderText: z.string().default('This is to certify that'),
-  bodyText: z.string().default(''),
+  /** Default body: placeholders are separated with real words/punctuation so the sentence reads
+   *  correctly. {{score}} is dropped automatically for reading-only courses (see
+   *  applyPlaceholders), leaving a complete sentence. */
+  bodyText: z
+    .string()
+    .default(
+      'has successfully completed the training {{topicName}} [{{topicCode}}], version {{topicVersion}}, on {{completionDate}} with {{score}}%.',
+    ),
   footerText: z.string().default('Certificate No: {{certificateNumber}}'),
   // Per-field text sizes (px). Each certificate field is independently sizable so
   // the layout can be tuned without touching the others.
@@ -135,7 +142,21 @@ function esc(s: string): string {
 
 /** Replace {{placeholders}} with data, escaping the substituted values. */
 export function applyPlaceholders(text: string, data: CertificatePlaceholderData): string {
-  return esc(text ?? '').replace(/\{\{(\w+)\}\}/g, (_m, key: string) => {
+  let src = text ?? '';
+  // A reading-only course has no assessment, so {{score}} resolves to nothing. Drop the whole
+  // score phrase (leading connector + token + "%") rather than leaving a dangling fragment
+  // such as "…completed the training with" or a stray "Score: ". Longest connector first so
+  // "with a score of" is consumed as a unit. Only applies when there is no score.
+  if (!((data as unknown as Record<string, string>).score ?? '').trim()) {
+    src = src
+      .replace(
+        /[,;]?\s*(?:with\s+(?:a|an)\s+score(?:\s+of)?|with\s+score(?:\s+of)?|with(?:\s+(?:a|an))?|scoring|score(?:\s+of)?\s*:?|and)?\s*\{\{score\}\}\s*%?/gi,
+        '',
+      )
+      .replace(/\s{2,}/g, ' ')
+      .trimEnd();
+  }
+  return esc(src).replace(/\{\{(\w+)\}\}/g, (_m, key: string) => {
     const v = (data as unknown as Record<string, string>)[key];
     return v === undefined ? `{{${key}}}` : esc(v);
   });

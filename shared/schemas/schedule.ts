@@ -50,15 +50,30 @@ export const ojtRecordSchema = z
   .refine((d) => !!d.evaluatorId || !!(d.evaluatorName && d.evaluatorName.trim()), {
     message: 'Select an evaluator or enter an external evaluator name.',
     path: ['evaluatorId'],
+  })
+  // Module 6: a person cannot evaluate their own on-the-job training. (Only applies to an
+  // internal evaluator — an external evaluator has no user id.)
+  .refine((d) => !d.evaluatorId || d.evaluatorId !== d.userId, {
+    message: 'The evaluator cannot be the trainee of the same OJT record.',
+    path: ['evaluatorId'],
   });
 export type OjtRecordInput = z.infer<typeof ojtRecordSchema>;
 
-export const offlineTrainingSchema = z.object({
-  topicId: uuid,
-  venue: nonEmptyString,
-  trainerName: nonEmptyString,
-  durationMinutes: z.coerce.number().int().positive(),
-  trainingDate: z.coerce.date().max(new Date(), { message: 'Date cannot be in the future' }),
-  traineeIds: z.array(uuid).default([]),
-});
+export const offlineTrainingSchema = z
+  .object({
+    topicId: uuid,
+    venue: nonEmptyString,
+    trainerName: nonEmptyString,
+    /** Set when the trainer is an internal user; omitted for an external trainer. */
+    trainerId: uuid.optional(),
+    durationMinutes: z.coerce.number().int().positive(),
+    trainingDate: z.coerce.date().max(new Date(), { message: 'Date cannot be in the future' }),
+    traineeIds: z.array(uuid).default([]),
+  })
+  .superRefine((v, ctx) => {
+    // Module 6: an internal trainer can never also be a trainee on the same record.
+    if (v.trainerId && v.traineeIds.includes(v.trainerId)) {
+      ctx.addIssue({ code: 'custom', message: 'The trainer cannot be a trainee in the same training.', path: ['traineeIds'] });
+    }
+  });
 export type OfflineTrainingInput = z.infer<typeof offlineTrainingSchema>;
