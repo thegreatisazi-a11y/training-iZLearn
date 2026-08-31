@@ -36,6 +36,8 @@ interface MyTraining {
     currentVersion: number;
     status: string;
     trainingType: string;
+    /** D6: a course can carry several training types; show them all. */
+    trainingTypes?: string[];
     durationMinutes?: number | null;
   } | null;
   result: { isPassed: boolean; score: number | null; attempts: number } | null;
@@ -110,7 +112,15 @@ export default function MyTrainingsPage() {
   const columns: Column<MyTraining>[] = [
     { key: 'num', header: 'Course No.', render: (r) => <span className="font-mono text-xs">{r.topic?.topicNumber || r.topic?.topicCode}</span> },
     { key: 'title', header: 'Training', render: (r) => <span className="font-medium text-slate-800">{r.topic?.title}</span> },
-    { key: 'type', header: 'Type', render: (r) => (r.topic?.trainingType ?? '').replace(/_/g, ' ') },
+    {
+      key: 'type',
+      header: 'Type',
+      // Show every training type the course carries, not just the primary one.
+      render: (r) => {
+        const codes = r.topic?.trainingTypes?.length ? r.topic.trainingTypes : [r.topic?.trainingType];
+        return codes.filter(Boolean).map((c) => (c as string).replace(/_/g, ' ')).join(', ') || '—';
+      },
+    },
     { key: 'duration', header: 'Duration', render: (r) => (r.topic?.durationMinutes ? `${r.topic.durationMinutes} min` : '—') },
     { key: 'version', header: 'Version', render: (r) => `v${r.topicVersion ?? r.topic?.currentVersion ?? '—'}` },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status.replace(/_/g, ' ')}</Badge> },

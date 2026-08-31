@@ -155,6 +155,8 @@ export const svc = {
     saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
     /** Record that the trainee reached the last page of this material (gates the acknowledgement). */
     markLastPage: (id: string) => data(api.post(`/materials/${id}/view/last-page`, {})),
+    /** Record that the read-and-understood declaration became visible for this course. */
+    markAckAvailable: (topicId: string) => data(api.post('/materials/reading/ack-available', { topicId })),
     readingStatus: (topicId: string) => data(api.get('/materials/reading-status', { params: { topicId } })),
     // /** Report the page on screen; the server decides whether it has been dwelled on long enough. */
     // recordPage: (id: string, page: number) => data(api.post(`/materials/${id}/view/page`, { page })),

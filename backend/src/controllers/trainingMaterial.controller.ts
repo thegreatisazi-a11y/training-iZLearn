@@ -278,6 +278,13 @@ export const markLastPage = asyncHandler(async (req: Request, res: Response) => 
   sendSuccess(res, await viewSvc.markLastPageReached(req.user!.id, req.params.id), 'End of document reached');
 });
 
+// Record that the read-and-understood declaration became visible for this course (personal).
+export const ackAvailable = asyncHandler(async (req: Request, res: Response) => {
+  const topicId = typeof req.body?.topicId === 'string' ? req.body.topicId : '';
+  if (!topicId) throw AppError.badRequest('topicId is required.');
+  sendSuccess(res, await viewSvc.markAcknowledgementAvailable(req.user!.id, topicId));
+});
+
 export const readingStatus = asyncHandler(async (req: Request, res: Response) => {
   const topicId = typeof req.query.topicId === 'string' ? req.query.topicId : '';
   if (!topicId) throw AppError.badRequest('topicId is required.');

@@ -303,6 +303,11 @@ model MaterialViewLog {
   // it only gates when the "read and understood" declaration becomes available. Recorded
   // server-side so the client cannot skip the check.
   reachedLastPage Boolean   @default(false)
+  // Stamped when the trainee actually SAW the "I have read and understood" declaration become
+  // available (the client reports it). The un-acknowledged reset keys off this recorded fact
+  // rather than re-deriving it from time/pages, so the reset can never fire for a run where the
+  // declaration was never shown.
+  ackAvailableAt  DateTime?
   // // Page-coverage control: the distinct 1-based page numbers this user has actually dwelled
   // // on, and the page count that had to be covered. Persisted (like elapsedSeconds) so
   // // coverage survives a closed session, and enforced server-side in completeMaterialView.

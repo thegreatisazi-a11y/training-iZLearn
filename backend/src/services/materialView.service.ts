@@ -178,41 +178,53 @@ export function paginates(fileType: string): boolean {
  * must read again — otherwise the declaration could be dodged indefinitely by just closing the
  * tab. Called when the reading screen is (re)opened.
  *
- * Only ever clears an IN-PROGRESS, un-acknowledged run: if the course is already completed
- * (a passing attempt exists for this version) nothing is touched.
+ * Only ever clears an IN-PROGRESS, un-acknowledged run. It never touches reading that has
+ * already been acknowledged: an assessment attempt can only be STARTED after the declaration is
+ * ticked, and a reading-only course records a passed attempt when it is acknowledged — so the
+ * existence of ANY attempt for this course version is proof the declaration was given. (Checking
+ * only for a *passed* attempt was wrong: a user who acknowledged, started the assessment and
+ * then left or failed had their reading wiped and was forced to read it all again.)
  */
 export async function resetUnacknowledgedReading(userId: string, topicId: string): Promise<boolean> {
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   if (!topic) return false;
   const topicVersion = topic.currentVersion ?? 1;
 
-  // Already completed this version → keep the record; never reset a finished course.
-  const completed = await prisma.assessmentAttempt.findFirst({
-    where: { userId, topicId, topicVersion, isPassed: true, isDeleted: false },
+  // Any attempt at this version → the declaration was already given; never reset.
+  const acknowledged = await prisma.assessmentAttempt.findFirst({
+    where: { userId, topicId, topicVersion, isDeleted: false },
   });
-  if (completed) return false;
+  if (acknowledged) return false;
 
-  const materials = await prisma.trainingMaterial.findMany({
-    where: { topicId, isDeleted: false, isCurrentVersion: true, isObsolete: false },
-    select: { id: true, fileType: true },
+  // Reset ONLY when the declaration was actually shown to the trainee on a previous visit. This
+  // is a recorded fact (markAcknowledgementAvailable), not re-derived from time/pages here — any
+  // mismatch between what the client showed and what the server would infer could otherwise wipe
+  // a part-finished run that must simply resume.
+  const shown = await prisma.materialViewLog.findFirst({
+    where: { userId, topicId, topicVersion, ackAvailableAt: { not: null } },
+    select: { id: true },
   });
-  if (materials.length === 0) return false;
+  if (!shown) return false; // declaration never appeared → normal resume, nothing cleared
 
-  const logs = await prisma.materialViewLog.findMany({ where: { userId, topicId, topicVersion } });
-  const logByMat = new Map(logs.map((l) => [l.materialId, l]));
-
-  // Was the declaration reachable on the previous visit? (time met AND end reached, every file)
-  const allSatisfied = materials.every((m) => {
-    const log = logByMat.get(m.id);
-    if (!log) return false;
-    if (!log.isCompleted) return false; // required reading time not yet met
-    return paginates(m.fileType) ? log.reachedLastPage : true;
-  });
-  if (!allSatisfied) return false; // not reachable → normal resume, nothing cleared
-
-  // Reachable but never acknowledged → start the reading over.
+  // Shown but never acknowledged → start the reading over.
   await prisma.materialViewLog.deleteMany({ where: { userId, topicId, topicVersion } });
   return true;
+}
+
+/**
+ * Record that the read-and-understood declaration became visible to this trainee for this course
+ * version. Called by the reading screen the first time it shows the tick box; stamped on every
+ * current log so clearing the run (above) also clears the marker.
+ */
+export async function markAcknowledgementAvailable(userId: string, topicId: string) {
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
+  if (!topic) throw AppError.notFound('Training course not found');
+  const topicVersion = topic.currentVersion ?? 1;
+  await prisma.materialViewLog.updateMany({
+    where: { userId, topicId, topicVersion, ackAvailableAt: null },
+    data: { ackAvailableAt: new Date() },
+  });
+  return { ok: true };
 }
 
 /** Mark a material as read — only succeeds once the required wall-clock time has elapsed. */
@@ -275,10 +287,16 @@ export async function completeMaterialView(userId: string, materialId: string) {
   const requiredSeconds = requiredFor(material, topic);
   // const totalPages = await pageTargetFor(material, course);
 
-  const log = await prisma.materialViewLog.findUnique({
+  // Create the log if the "start" call has not landed yet instead of rejecting. A material with
+  // NO required reading time is completed ~1s after it opens, which can race the start request
+  // on a slow connection — and a rejection there silently lost the file's completion, so it
+  // showed as unread again on the next visit. Creating it here is safe: the elapsed-time check
+  // below still runs against this fresh startedAt, so a TIMED material cannot be completed early.
+  const log = await prisma.materialViewLog.upsert({
     where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
+    update: {},
+    create: { userId, materialId, topicId: material.topicId, topicVersion, requiredSeconds },
   });
-  if (!log) throw AppError.badRequest('Reading session was not started for this material.');
   if (log.isCompleted) return log;
 
   // Server-validated elapsed time (1s grace for network/UI latency).

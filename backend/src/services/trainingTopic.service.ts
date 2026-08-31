@@ -505,7 +505,8 @@ export async function updateTopicStatus(id: string, status: TopicStatus, req: Re
     where: { id },
     data: {
       status,
-      ...(status === 'PUBLISHED' && !topic.effectiveDate ? { effectiveDate: new Date() } : {}),
+      // The effective date is optional and author-controlled: publishing no longer stamps
+      // today's date when it was left blank. An unset effective date stays unset.
       // CR-26: Unpublish (→ DRAFT / UNDER_REVIEW) must NOT archive — it returns the
       // course to an editable, active state. Only an explicit Archive deactivates it.
       isActive: status !== 'ARCHIVED',
@@ -713,7 +714,9 @@ export async function reviseTopic(id: string, req: Request) {
       blockAfterMaxAttempts: old.blockAfterMaxAttempts,
       refresherIntervalMonths: old.refresherIntervalMonths,
       materialViewSeconds: old.materialViewSeconds,
-      effectiveDate: new Date(),
+      // Carry the previous version's effective date forward rather than inventing today's —
+      // the effective date is author-controlled and may legitimately be unset.
+      effectiveDate: old.effectiveDate,
       reviewDate: old.reviewDate,
       currentVersion: nextVersion,
       parentTopicId: old.id, // links this revision back to its immediate predecessor

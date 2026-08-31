@@ -403,6 +403,16 @@ export default function TakeAssessmentPage() {
   // met for every file AND the end of every document has been reached.
   const ackAvailable = allDone && allEndsReached;
 
+  // Tell the server the moment the declaration actually becomes visible. The reset-instead-of-
+  // resume rule keys off this recorded fact, so a run where the tick box never appeared is always
+  // resumed. Fired once per visit.
+  const ackShownRef = useRef(false);
+  useEffect(() => {
+    if (phase !== 'material' || !ackAvailable || ackShownRef.current || !topicId) return;
+    ackShownRef.current = true;
+    svc.materials.markAckAvailable(topicId).catch(() => undefined);
+  }, [phase, ackAvailable, topicId]);
+
   // Seed completed/required state once the reading status loads.
   // A4: resume — subtract any previously-saved elapsed time from the remaining countdown.
   useEffect(() => {
@@ -412,17 +422,12 @@ export default function TakeAssessmentPage() {
     const r = new Set<string>();
     // const cov: Record<string, Coverage> = {};
     for (const m of mats) {
-      if (m.isCompleted || m.requiredSeconds <= 0) d.add(m.materialId);
-      // cov[m.materialId] = {
-        // totalPages: m.totalPages ?? null,
-        // pagesViewed: m.pagesViewed ?? [],
-        // isCovered: m.isCovered ?? true,
-        // coverageUnit: m.coverageUnit ?? null,
-      // };
-      // // A material with no reading time is only auto-complete when it ALSO has no pages left
-      // // to cover — otherwise it stays pending until the trainee reaches the last page.
-      // const untimedAndCovered = m.requiredSeconds <= 0 && (m.totalPages == null || m.isCovered === true);
-      // if (m.isCompleted || untimedAndCovered) d.add(m.materialId);
+      // Only a material the SERVER has recorded as read counts as done. A file with no required
+      // reading time is NOT auto-completed: the trainee must still open it (and reach its end),
+      // at which point it is marked read immediately. Without this a zero-time file showed as
+      // already read without ever being opened — and, because no completion was recorded
+      // server-side, the un-acknowledged reset could never trigger either.
+      if (m.isCompleted) d.add(m.materialId);
       const prior = Math.max(0, Math.floor(m.elapsedSeconds ?? 0));
       savedElapsedRef.current[m.materialId] = prior;
       actualSpentRef.current[m.materialId] = prior; // BUG-05: continue accruing actual time

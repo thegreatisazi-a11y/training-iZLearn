@@ -25,6 +25,8 @@ router.get('/', requirePermission('materialManagement', 'read'), c.list);
 // lock are still enforced in the controllers.
 // NOTE: '/reading-status' must precede '/:id' so it isn't captured as an id param.
 router.get('/reading-status', c.readingStatus);
+// Records that the read-and-understood declaration became visible (drives the reset rule).
+router.post('/reading/ack-available', c.ackAvailable);
 // Global training instruction shown before reading on Start Training. GET is available
 // to any authenticated user (they must see it before training). These literal paths MUST
 // precede '/:id' and '/:id/replace' so they aren't captured as an id param.
