@@ -178,33 +178,41 @@ export function paginates(fileType: string): boolean {
  * must read again — otherwise the declaration could be dodged indefinitely by just closing the
  * tab. Called when the reading screen is (re)opened.
  *
- * Only ever clears an IN-PROGRESS, un-acknowledged run. It never touches reading that has
- * already been acknowledged: an assessment attempt can only be STARTED after the declaration is
- * ticked, and a reading-only course records a passed attempt when it is acknowledged — so the
- * existence of ANY attempt for this course version is proof the declaration was given. (Checking
- * only for a *passed* attempt was wrong: a user who acknowledged, started the assessment and
- * then left or failed had their reading wiped and was forced to read it all again.)
+ * The rule is exactly: reset if and only if the declaration was SHOWN during the run being
+ * resumed and was not acknowledged in that same run. Both halves are decided from recorded
+ * facts — the `ackAvailableAt` stamp, and an attempt started at/after it (an assessment attempt
+ * can only be started after ticking, and a reading-only course records an attempt when
+ * acknowledged). Anything else — including a part-finished run where the tick box never
+ * appeared — resumes untouched.
  */
 export async function resetUnacknowledgedReading(userId: string, topicId: string): Promise<boolean> {
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   if (!topic) return false;
   const topicVersion = topic.currentVersion ?? 1;
 
-  // Any attempt at this version → the declaration was already given; never reset.
-  const acknowledged = await prisma.assessmentAttempt.findFirst({
-    where: { userId, topicId, topicVersion, isDeleted: false },
+  // Reset ONLY when the declaration was actually shown to the trainee during the run being
+  // resumed. This is a recorded fact (markAcknowledgementAvailable), never re-derived from
+  // time/pages here — any mismatch between what the client showed and what the server would
+  // infer could otherwise wipe a part-finished run that must simply resume.
+  // NOTE (Prisma + MongoDB): a `{ ackAvailableAt: null }` / `{ not: null }` filter does NOT match
+  // documents where the field is ABSENT, which every log created before the field existed is. The
+  // stamp is therefore read (and written, below) by filtering in JS instead of in the query.
+  const logs = await prisma.materialViewLog.findMany({
+    where: { userId, topicId, topicVersion },
+    select: { ackAvailableAt: true },
   });
-  if (acknowledged) return false;
+  const stamps = logs.map((l) => l.ackAvailableAt).filter((d): d is Date => !!d).sort((a, b) => a.getTime() - b.getTime());
+  const shownAt = stamps[0];
+  if (!shownAt) return false; // declaration never appeared → resume, nothing cleared
 
-  // Reset ONLY when the declaration was actually shown to the trainee on a previous visit. This
-  // is a recorded fact (markAcknowledgementAvailable), not re-derived from time/pages here — any
-  // mismatch between what the client showed and what the server would infer could otherwise wipe
-  // a part-finished run that must simply resume.
-  const shown = await prisma.materialViewLog.findFirst({
-    where: { userId, topicId, topicVersion, ackAvailableAt: { not: null } },
+  // Was it acknowledged in THIS run? Only an attempt started at/after the moment the declaration
+  // appeared counts — an attempt from an EARLIER run (e.g. the course was completed once before
+  // during testing) must not disable the reset forever.
+  const acknowledged = await prisma.assessmentAttempt.findFirst({
+    where: { userId, topicId, topicVersion, isDeleted: false, startedAt: { gte: shownAt } },
     select: { id: true },
   });
-  if (!shown) return false; // declaration never appeared → normal resume, nothing cleared
+  if (acknowledged) return false;
 
   // Shown but never acknowledged → start the reading over.
   await prisma.materialViewLog.deleteMany({ where: { userId, topicId, topicVersion } });
@@ -220,11 +228,18 @@ export async function markAcknowledgementAvailable(userId: string, topicId: stri
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   if (!topic) throw AppError.notFound('Training course not found');
   const topicVersion = topic.currentVersion ?? 1;
-  await prisma.materialViewLog.updateMany({
-    where: { userId, topicId, topicVersion, ackAvailableAt: null },
-    data: { ackAvailableAt: new Date() },
+  // See the note in resetUnacknowledgedReading: an `ackAvailableAt: null` filter would silently
+  // match nothing for logs created before the field existed (absent ≠ null on MongoDB), so the
+  // stamp would never be written. Select the rows and pick the unstamped ones in JS.
+  const logs = await prisma.materialViewLog.findMany({
+    where: { userId, topicId, topicVersion },
+    select: { id: true, ackAvailableAt: true },
   });
-  return { ok: true };
+  const ids = logs.filter((l) => !l.ackAvailableAt).map((l) => l.id);
+  if (ids.length) {
+    await prisma.materialViewLog.updateMany({ where: { id: { in: ids } }, data: { ackAvailableAt: new Date() } });
+  }
+  return { ok: true, stamped: ids.length };
 }
 
 /** Mark a material as read — only succeeds once the required wall-clock time has elapsed. */

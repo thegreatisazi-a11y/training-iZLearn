@@ -375,7 +375,17 @@ export default function TakeAssessmentPage() {
   // });
 //
   const topicQ = useQuery({ queryKey: ['topic-meta', topicId], queryFn: () => svc.topics.get(topicId), enabled: !!topicId });
-  const readingQ = useQuery({ queryKey: ['reading-status', topicId], queryFn: () => svc.materials.readingStatus(topicId) as unknown as Promise<ReadingItem[]>, enabled: !!topicId });
+  // The reading status is the AUTHORITY for the read-and-understood gate, and fetching it is what
+  // applies the reset-if-unacknowledged rule server-side. It must therefore hit the server every
+  // time this screen opens: with the app-wide 30s staleTime, re-entering a course quickly served a
+  // cached snapshot, so the reset never ran (and stale progress was rendered).
+  const readingQ = useQuery({
+    queryKey: ['reading-status', topicId],
+    queryFn: () => svc.materials.readingStatus(topicId) as unknown as Promise<ReadingItem[]>,
+    enabled: !!topicId,
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
   // Global training instruction shown before reading (null when none is configured).
   const instructionQ = useQuery({
     queryKey: ['training-instruction'],
@@ -413,34 +423,41 @@ export default function TakeAssessmentPage() {
     svc.materials.markAckAvailable(topicId).catch(() => undefined);
   }, [phase, ackAvailable, topicId]);
 
-  // Seed completed/required state once the reading status loads.
+  // Seed completed/required state from the reading status. Keyed on `dataUpdatedAt` so it re-seeds
+  // whenever a NEW server snapshot arrives — React Query renders the previous (cached) snapshot
+  // first on re-entry, and without re-seeding the screen kept showing that stale state. The server
+  // is authoritative; anything this session has already achieved is unioned in so nothing in
+  // flight is lost. The query only fetches on mount, so this runs at most twice per visit.
   // A4: resume — subtract any previously-saved elapsed time from the remaining countdown.
   useEffect(() => {
     if (!readingQ.isSuccess) return;
     const d = new Set<string>();
     const s: Record<string, number> = {};
     const r = new Set<string>();
-    // const cov: Record<string, Coverage> = {};
     for (const m of mats) {
-      // Only a material the SERVER has recorded as read counts as done. A file with no required
-      // reading time is NOT auto-completed: the trainee must still open it (and reach its end),
-      // at which point it is marked read immediately. Without this a zero-time file showed as
-      // already read without ever being opened — and, because no completion was recorded
-      // server-side, the un-acknowledged reset could never trigger either.
-      if (m.isCompleted) d.add(m.materialId);
+      // Only a material the SERVER has recorded as read counts as done — plus anything completed
+      // in THIS session (the confirmation may still be in flight). A file with no required reading
+      // time is NOT auto-completed: the trainee must still open it (and reach its end).
+      const doneNow = m.isCompleted || completedRef.current.has(m.materialId);
+      if (doneNow) d.add(m.materialId);
       const prior = Math.max(0, Math.floor(m.elapsedSeconds ?? 0));
-      savedElapsedRef.current[m.materialId] = prior;
-      actualSpentRef.current[m.materialId] = prior; // BUG-05: continue accruing actual time
+      savedElapsedRef.current[m.materialId] = Math.max(savedElapsedRef.current[m.materialId] ?? 0, prior);
+      actualSpentRef.current[m.materialId] = Math.max(actualSpentRef.current[m.materialId] ?? 0, prior);
       const remaining = Math.max(0, m.requiredSeconds - prior);
-      s[m.materialId] = m.isCompleted ? 0 : remaining;
-      if (!m.isCompleted && prior > 0 && m.requiredSeconds > 0) r.add(m.materialId);
+      s[m.materialId] = doneNow ? 0 : remaining;
+      if (!doneNow && prior > 0 && m.requiredSeconds > 0) r.add(m.materialId);
     }
     setDone(d);
     setSecsLeft(s);
     setResumed(r);
-    // setCoverage(cov);
+    // End-of-document: adopt the server's record, keeping anything reached in this session.
+    setLastPageSeen((prev) => {
+      const next = new Set<string>();
+      for (const m of mats) if (m.reachedLastPage || prev.has(m.materialId)) next.add(m.materialId);
+      return next.size === prev.size && [...next].every((id) => prev.has(id)) ? prev : next;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readingQ.isSuccess, mats.length]);
+  }, [readingQ.dataUpdatedAt, readingQ.isSuccess]);
 
   // // Mirror coverage into a ref so the reporting timer and the countdown can read the latest
   // // value without re-subscribing on every credited page.
