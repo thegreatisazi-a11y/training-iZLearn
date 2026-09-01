@@ -112,8 +112,31 @@ export async function startMaterialView(userId: string, materialId: string) {
 }
 
 /**
+ * Upper bound on the reading seconds a client may bank: no more than the real time that has
+ * passed since the reading session for this material began, plus a small slack for latency.
+ *
+ * Reading time is only credible if it is backed by time that actually elapsed. Without this the
+ * stored figure was whatever the client claimed, so a single bad value poisoned the record — an
+ * observed case jumped a freshly-created log from 0 to 130 seconds within 3 seconds of its
+ * creation, which pushed the material past its required time and auto-completed it.
+ *
+ * Anchored on `startedAt`, which is written once and never rewritten. `updatedAt` must NOT be used
+ * here: Prisma maintains it, and the upsert that loads the log bumps it to now, which collapsed the
+ * bound to "stored + slack" on every call — so a save could only ever advance the stored value by
+ * the slack, no matter how much time had really passed. Whenever the client's flush was delayed
+ * (timer throttling in an inactive tab is enough), reading time was silently UNDER-credited and a
+ * resumed course showed more time remaining than the trainee had left to read.
+ */
+const PROGRESS_SLACK_SECONDS = 15;
+
+function plausibleCeiling(log: { elapsedSeconds: number | null; startedAt: Date }): number {
+  return Math.max(0, (Date.now() - log.startedAt.getTime()) / 1000) + PROGRESS_SLACK_SECONDS;
+}
+
+/**
  * A4: persist accumulated reading time for a material so a session closed before the
- * assessment can resume where it left off. Monotonic — never decreases the stored value.
+ * assessment can resume where it left off. Monotonic — never decreases the stored value, and
+ * never advances faster than real time (see `plausibleCeiling`).
  */
 export async function saveMaterialProgress(userId: string, materialId: string, elapsedSeconds: number) {
   const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
@@ -128,7 +151,8 @@ export async function saveMaterialProgress(userId: string, materialId: string, e
     update: {},
     create: { userId, materialId, topicId: material.topicId, topicVersion, requiredSeconds },
   });
-  const next = Math.max(log.elapsedSeconds ?? 0, Math.max(0, Math.floor(elapsedSeconds)));
+  const claim = Math.min(Math.max(0, Math.floor(elapsedSeconds)), Math.floor(plausibleCeiling(log)));
+  const next = Math.max(log.elapsedSeconds ?? 0, claim);
   if (next === (log.elapsedSeconds ?? 0)) return log;
   return prisma.materialViewLog.update({ where: { id: log.id }, data: { elapsedSeconds: next } });
 }
@@ -293,7 +317,7 @@ export async function markAcknowledgementAvailable(userId: string, topicId: stri
  // * Mark a material as read. Succeeds only once BOTH the required wall-clock time has elapsed
  // * and (where it applies) every page has been covered.
  // */
-export async function completeMaterialView(userId: string, materialId: string) {
+export async function completeMaterialView(userId: string, materialId: string, claimedElapsedSeconds?: number) {
   const material = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
   if (!material) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findUnique({ where: { id: material.topicId } });
@@ -306,7 +330,8 @@ export async function completeMaterialView(userId: string, materialId: string) {
   // NO required reading time is completed ~1s after it opens, which can race the start request
   // on a slow connection — and a rejection there silently lost the file's completion, so it
   // showed as unread again on the next visit. Creating it here is safe: the elapsed-time check
-  // below still runs against this fresh startedAt, so a TIMED material cannot be completed early.
+  // below runs against accumulated reading seconds, which a freshly-created log has none of, so
+  // a TIMED material still cannot be completed early.
   const log = await prisma.materialViewLog.upsert({
     where: { userId_materialId_topicVersion: { userId, materialId, topicVersion } },
     update: {},
@@ -314,10 +339,28 @@ export async function completeMaterialView(userId: string, materialId: string) {
   });
   if (log.isCompleted) return log;
 
-  // Server-validated elapsed time (1s grace for network/UI latency).
-  const elapsedSeconds = (Date.now() - log.startedAt.getTime()) / 1000;
-  if (elapsedSeconds + 1 < requiredSeconds) {
-    throw AppError.badRequest(`Minimum reading time not met (${Math.ceil(requiredSeconds - elapsedSeconds)}s remaining).`);
+  // Server-validated elapsed time, measured against the ACCUMULATED reading seconds for this
+  // material — never against wall-clock since `startedAt`. `startedAt` is deliberately not
+  // refreshed when a session resumes, so a wall-clock check turned into a free pass: once a log
+  // was older than the required time, any /complete call succeeded whether or not the trainee
+  // had read anything. That also let a spurious client-side completion (e.g. a countdown that
+  // ticked before the resumed progress had been seeded) silently mark a file as read with zero
+  // seconds spent. The accumulated value is monotonic and only ever advances while the document
+  // is open and visible, so it is the honest measure.
+  //
+  // The client reports the elapsed seconds it is completing on; it is persisted through the same
+  // monotonic max as the periodic auto-save, then validated. Trusting it is no weaker than
+  // before (the countdown has always been client-side) and it keeps the stored figure accurate.
+  const claimed = Number.isFinite(claimedElapsedSeconds)
+    ? Math.min(Math.max(0, Math.floor(claimedElapsedSeconds!)), Math.floor(plausibleCeiling(log)))
+    : 0;
+  const credited = Math.max(log.elapsedSeconds ?? 0, claimed);
+  // 1s grace for network/UI latency.
+  if (credited + 1 < requiredSeconds) {
+    throw AppError.badRequest(`Minimum reading time not met (${Math.ceil(requiredSeconds - credited)}s remaining).`);
+  }
+  if (credited > (log.elapsedSeconds ?? 0)) {
+    await prisma.materialViewLog.update({ where: { id: log.id }, data: { elapsedSeconds: credited } });
   }
 //
   // // Server-validated page coverage.
@@ -380,7 +423,14 @@ export async function hasCompletedRequiredReading(userId: string, topicId: strin
 export async function getReadingStatus(userId: string, topicId: string) {
   // Opening the reading screen is the point at which a previous, finished-but-unacknowledged run
   // is discarded (see resetUnacknowledgedReading) — so the status below reflects the fresh start.
-  await resetUnacknowledgedReading(userId, topicId).catch(() => undefined);
+  //
+  // Whether the reset actually fired is reported back on every row as `wasReset`. The client keeps
+  // its own in-session reading state and merges it with these figures (so a save still in flight is
+  // not lost), which meant a reset to zero was silently out-voted by the higher in-memory values —
+  // the course then carried on from the progress that had just been discarded. This is the only
+  // signal that distinguishes "the server discarded the run" from "the server has not caught up
+  // with us yet", so it has to be explicit rather than inferred from the zeros.
+  const wasReset = await resetUnacknowledgedReading(userId, topicId).catch(() => false);
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   // const course = (await prisma.trainingTopic.findUnique({ where: { id: topicId } })) as (TopicLike & { currentVersion?: number }) | null;
   const topicVersion = topic?.currentVersion ?? 1;
@@ -404,6 +454,9 @@ export async function getReadingStatus(userId: string, topicId: string) {
       // text) have no last page, so they are always considered satisfied.
       paginates: paginates(m.fileType),
       reachedLastPage: paginates(m.fileType) ? log?.reachedLastPage ?? false : true,
+      // True when this call discarded a finished-but-unacknowledged run: the client must drop the
+      // reading state it is holding rather than merging it over these zeros.
+      wasReset,
     };
   });
 //

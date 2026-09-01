@@ -150,7 +150,9 @@ export const svc = {
       data(api.post(`/materials/${id}/replace-from-library`, { sourceMaterialId, reasonForChange })),
     setViewTime: (id: string, requiredViewSeconds: number, applyToAll = false) => data(api.patch(`/materials/${id}`, { requiredViewSeconds, applyToAll })),
     startView: (id: string) => data(api.post(`/materials/${id}/view/start`, {})),
-    completeView: (id: string) => data(api.post(`/materials/${id}/view/complete`, {})),
+    // The elapsed seconds this completion is claimed on: the server validates the required
+    // reading time against accumulated seconds, not wall-clock since the file was first opened.
+    completeView: (id: string, elapsedSeconds?: number) => data(api.post(`/materials/${id}/view/complete`, { elapsedSeconds })),
     // A4: auto-save accumulated reading seconds so the session can resume.
     saveProgress: (id: string, elapsedSeconds: number) => data(api.post(`/materials/${id}/view/progress`, { elapsedSeconds })),
     /** Record that the trainee reached the last page of this material (gates the acknowledgement). */

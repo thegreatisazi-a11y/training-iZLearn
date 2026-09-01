@@ -254,7 +254,11 @@ export const startView = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const completeView = asyncHandler(async (req: Request, res: Response) => {
-  sendSuccess(res, await viewSvc.completeMaterialView(req.user!.id, req.params.id), 'Material marked as read');
+  // Optional: the elapsed reading seconds the client is completing on. Absent (older client) is
+  // treated as 0, which falls back to the accumulated value already stored by the auto-save.
+  const raw = Number((req.body as { elapsedSeconds?: unknown }).elapsedSeconds);
+  const elapsedSeconds = Number.isFinite(raw) && raw >= 0 ? raw : undefined;
+  sendSuccess(res, await viewSvc.completeMaterialView(req.user!.id, req.params.id, elapsedSeconds), 'Material marked as read');
 });
 
 // A4: auto-save reading progress (elapsed seconds) so the session can resume.

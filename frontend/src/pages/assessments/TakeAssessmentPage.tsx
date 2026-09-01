@@ -28,6 +28,11 @@ interface ReadingItem {
   paginates?: boolean;
   /** True once the last page has been reached — always true for non-paginating types. */
   reachedLastPage?: boolean;
+  /**
+   * True when THIS response discarded a finished-but-unacknowledged run. The in-session reading
+   * state must then be dropped instead of merged, or the run that was just discarded carries on.
+   */
+  wasReset?: boolean;
   // /** Coverage state. totalPages null = coverage doesn't apply to this material. */
   // totalPages?: number | null;
   // pagesViewed?: number[];
@@ -109,6 +114,18 @@ function fmtDuration(s?: number | null): string {
 }
 
 type Answer = string | string[] | Record<string, string>;
+
+/**
+ * Generation counter for the reading screen, shared by every mount of this page.
+ *
+ * A reading timer that outlives its own mount is catastrophic here: it keeps banking seconds
+ * (and POSTing them) for a document nobody is looking at, which inflates the stored reading
+ * time past the requirement — the file then auto-completes on its own, and the next visit shows
+ * "0s left · resumed" because there is no remaining time left to count down. Timers therefore
+ * capture the generation they were created in and stop themselves as soon as a newer mount
+ * exists, which holds even if their effect cleanup never ran.
+ */
+let readingGeneration = 0;
 
 /**
  * CR-40: single-tab guard. While an assessment is in progress, a newly-opened tab
@@ -281,8 +298,15 @@ export default function TakeAssessmentPage() {
   // BUG-05: actual wall-clock time the user keeps each material open (counts UP beyond
   // the required minimum), seeded from prior sessions and persisted as elapsedSeconds.
   const actualSpentRef = useRef<Record<string, number>>({});
-  // A4: latest secsLeft reachable from the tick cleanup (to persist on material switch).
-  const secsLeftRef = useRef<Record<string, number>>({});
+  // Incremented every time the server reports a reset. A reading clock started before the reset
+  // still holds the discarded seconds in its closure, and its cleanup would write them back — so it
+  // checks this first and stays silent if a reset has intervened.
+  const resetSeqRef = useRef(0);
+  // This mount's reading-timer generation; timers from an older mount must not keep running.
+  const genRef = useRef(0);
+  useEffect(() => {
+    genRef.current = ++readingGeneration;
+  }, []);
   // // Page-coverage control: server-confirmed coverage per material, plus the page currently
   // // on screen (reported by the viewer) so the reporting timer knows what to credit.
   // const [coverage, setCoverage] = useState<Record<string, Coverage>>({});
@@ -431,6 +455,19 @@ export default function TakeAssessmentPage() {
   // A4: resume — subtract any previously-saved elapsed time from the remaining countdown.
   useEffect(() => {
     if (!readingQ.isSuccess) return;
+    // A reset discards the whole run, so everything this session is holding has to go with it —
+    // seconds banked, files marked read, ends reached. Merging any of it back is what let a reset
+    // course carry straight on from the progress that had just been discarded.
+    const wasReset = mats.some((m) => m.wasReset);
+    if (wasReset) {
+      resetSeqRef.current += 1;
+      actualSpentRef.current = {};
+      savedElapsedRef.current = {};
+      completedRef.current = new Set();
+      startedRef.current = new Set();
+      ackShownRef.current = false;
+      setTcChecked(false);
+    }
     const d = new Set<string>();
     const s: Record<string, number> = {};
     const r = new Set<string>();
@@ -450,10 +487,11 @@ export default function TakeAssessmentPage() {
     setDone(d);
     setSecsLeft(s);
     setResumed(r);
-    // End-of-document: adopt the server's record, keeping anything reached in this session.
+    // End-of-document: adopt the server's record, keeping anything reached in this session — unless
+    // the run was just reset, in which case the server's record is the only truth.
     setLastPageSeen((prev) => {
       const next = new Set<string>();
-      for (const m of mats) if (m.reachedLastPage || prev.has(m.materialId)) next.add(m.materialId);
+      for (const m of mats) if (m.reachedLastPage || (!wasReset && prev.has(m.materialId))) next.add(m.materialId);
       return next.size === prev.size && [...next].every((id) => prev.has(id)) ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -506,78 +544,84 @@ export default function TakeAssessmentPage() {
     svc.materials.startView(active.materialId).catch(() => undefined);
   }, [phase, active, done, readyIds]);
 
-  // Tick the active material's countdown; on reaching zero, confirm completion server-side.
-  // A4: every few seconds, persist accumulated reading time so a closed session resumes.
-  // #7: do not start counting until the file has finished loading and is visible.
+  // The active material's reading clock: ONE wall-clock measure drives the countdown shown on
+  // screen, the value persisted for resume, and the completion call.
+  //
+  // This used to be two timers — a countdown that decremented once per interval tick, and a
+  // separate wall-clock accrual — and they disagreed whenever the browser throttled timers
+  // (background/inactive tabs get far fewer than one tick per second). The visible clock then ran
+  // slower than real time, so the number the trainee watched count down, the seconds banked for
+  // resume, and the figure sent to the server were three different quantities.
+  //
+  // #7: do not start counting until the file has finished loading and is visible, so load time is
+  // never counted as reading time. Time while the tab is hidden is not counted either.
   useEffect(() => {
     if (phase !== 'material' || !active || done.has(active.materialId) || !readyIds.has(active.materialId)) return;
     const id = active.materialId;
     const required = active.requiredSeconds;
+    const gen = genRef.current;
+    const seq = resetSeqRef.current;
+    // Seconds already banked for this material (server-seeded, so a resumed session continues
+    // from where it stopped) plus the visible time accrued since this clock started.
+    const base = actualSpentRef.current[id] ?? 0;
+    let visibleMs = 0;
+    let since: number | null = document.hidden ? null : Date.now();
+    const settle = () => {
+      if (since !== null) {
+        visibleMs += Date.now() - since;
+        since = document.hidden ? null : Date.now();
+      } else if (!document.hidden) {
+        since = Date.now();
+      }
+    };
+    // Derived from elapsed time, never accumulated by incrementing a counter: a duplicated or
+    // throttled timer recomputes the same value instead of drifting from real time.
+    const spent = () => {
+      settle();
+      return base + Math.floor(visibleMs / 1000);
+    };
+    const onVisibility = () => settle();
+    document.addEventListener('visibilitychange', onVisibility);
+    let lastFlushed = base;
+    const stop = () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    const save = (v: number) => {
+      lastFlushed = v;
+      savedElapsedRef.current[id] = v;
+      svc.materials.saveProgress(id, v).catch(() => undefined);
+    };
     const t = setInterval(() => {
-      if (document.hidden) return;
-      setSecsLeft((prev) => {
-        const cur = prev[id] ?? 0;
-        if (cur <= 1 && !completedRef.current.has(id)) {
-        // // Both controls must be satisfied before asking the server to mark this material
-        // // read. Checking coverage here (rather than letting /complete reject) avoids
-        // // hammering the endpoint once the timer has run out but pages remain unread.
-        // const cov = coverageRef.current[id];
-        // const covered = !cov || cov.totalPages == null || cov.isCovered;
-        // if (cur <= 1 && covered && !completedRef.current.has(id)) {
-          completedRef.current.add(id);
-          svc.materials
-            .completeView(id)
-            .then(() => setDone((p) => new Set(p).add(id)))
-            .catch(() => { completedRef.current.delete(id); });
-        }
-        const nextLeft = Math.max(0, cur - 1);
-        // A4: throttle progress saves to roughly every 10s of reading.
-        const elapsed = Math.max(0, required - nextLeft);
-        const lastSaved = savedElapsedRef.current[id] ?? 0;
-        if (required > 0 && elapsed - lastSaved >= 10) {
-          savedElapsedRef.current[id] = elapsed;
-          svc.materials.saveProgress(id, elapsed).catch(() => undefined);
-        }
-        return { ...prev, [id]: nextLeft };
-      });
+      // A clock left running by a superseded mount would keep banking time for a document that is
+      // no longer on screen, and march to zero unattended — completing the material on its own.
+      if (gen !== readingGeneration || seq !== resetSeqRef.current) return stop();
+      const v = spent();
+      actualSpentRef.current[id] = v;
+      setSecsLeft((prev) => (prev[id] === Math.max(0, required - v) ? prev : { ...prev, [id]: Math.max(0, required - v) }));
+      if (v + 1 >= required && !completedRef.current.has(id)) {
+        completedRef.current.add(id);
+        // The same measured value is what the server validates the requirement against, so the
+        // screen, the stored figure and the completion can no longer disagree.
+        svc.materials
+          .completeView(id, v)
+          .then(() => setDone((p) => new Set(p).add(id)))
+          .catch(() => { completedRef.current.delete(id); });
+      }
+      // Persist roughly every 5s of reading, so leaving early loses at most a few seconds even if
+      // the flush below never lands.
+      if (v - lastFlushed >= 5) save(v);
     }, 1000);
     return () => {
-      clearInterval(t);
-      // A4: persist the latest progress when leaving/switching the material.
-      const left = secsLeftRef.current[id];
-      if (required > 0 && left !== undefined && !completedRef.current.has(id)) {
-        const elapsed = Math.max(0, required - left);
-        if (elapsed > (savedElapsedRef.current[id] ?? 0)) {
-          savedElapsedRef.current[id] = elapsed;
-          svc.materials.saveProgress(id, elapsed).catch(() => undefined);
-        }
-      }
+      stop();
+      // Seconds measured before a reset belong to the discarded run and must not be written back.
+      if (seq !== resetSeqRef.current) return;
+      const v = spent();
+      actualSpentRef.current[id] = v;
+      if (v > lastFlushed) save(v);
     };
   }, [phase, active, done, readyIds]);
 
-  // A4: mirror secsLeft into a ref so the countdown cleanup can read the latest value.
-  useEffect(() => {
-    secsLeftRef.current = secsLeft;
-  }, [secsLeft]);
-
-  // BUG-05: capture the ACTUAL time spent on each material — keep counting while the
-  // material is open and the tab is visible, even after the required minimum is met,
-  // and persist it (stored as elapsedSeconds via a monotonic max on the server).
-  useEffect(() => {
-    // #7: only accrue actual reading time once the file is loaded and visible.
-    if (phase !== 'material' || !active || !readyIds.has(active.materialId)) return;
-    const id = active.materialId;
-    const flush = () => svc.materials.saveProgress(id, actualSpentRef.current[id] ?? 0).catch(() => undefined);
-    const t = setInterval(() => {
-      if (document.hidden) return;
-      actualSpentRef.current[id] = (actualSpentRef.current[id] ?? 0) + 1;
-      if (actualSpentRef.current[id] % 10 === 0) flush();
-    }, 1000);
-    return () => {
-      clearInterval(t);
-      flush();
-    };
-  }, [phase, active, readyIds]);
 
   const questions = useMemo(() => start.data?.questions ?? [], [start.data]);
 
@@ -1070,6 +1114,13 @@ export default function TakeAssessmentPage() {
               <span>Reading complete. {requiresAssessment ? 'You may start the assessment.' : 'Please confirm the acknowledgement to complete.'}</span>
             ) : active && done.has(active.materialId) ? (
               <span>This chapter is read. Open the remaining chapter(s) to finish.</span>
+            ) : active && !readyIds.has(active.materialId) ? (
+              // #7: the reading clock deliberately excludes load time, but nothing used to say so —
+              // time spent waiting for a large document looked like reading time, and then appeared
+              // to have been lost on the next visit.
+              <span>
+                Loading "{active.originalFileName}" — the reading time starts once the document is on screen.
+              </span>
             ) : (
               <span>
                 Keep this chapter open — <strong>{activeSecs}s</strong> remaining for "{active?.originalFileName}".
