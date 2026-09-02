@@ -15,25 +15,79 @@ export interface PdfOptions {
 
 let browserPromise: Promise<Browser> | null = null;
 
+/** True when this browser handle is still usable (puppeteer ≥22 exposes `connected`). */
+function isAlive(b: Browser): boolean {
+  const withConnected = b as unknown as { connected?: boolean; isConnected?: () => boolean };
+  if (typeof withConnected.connected === 'boolean') return withConnected.connected;
+  if (typeof withConnected.isConnected === 'function') return withConnected.isConnected();
+  return true;
+}
+
 async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = puppeteer.launch({
-      headless: true,
-      // Use a system Chromium when provided (Docker / Windows); otherwise the bundled one.
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    });
-    // Never cache a rejected launch — otherwise a single transient failure (e.g.
-    // a missing browser) would permanently break PDF generation until restart.
-    browserPromise.catch(() => {
-      browserPromise = null;
-    });
+  if (browserPromise) {
+    // A CRASHED browser must not be reused. The instance is cached for the process lifetime, and
+    // Chromium dies for reasons that have nothing to do with the next caller — an OOM kill while
+    // rendering a large table is the common one on a small container. The cached handle then stays
+    // resolved but disconnected, so every later render failed with "Target closed" and the API
+    // reported "PDF export is unavailable on this server" forever, until the process restarted.
+    try {
+      const existing = await browserPromise;
+      if (isAlive(existing)) return existing;
+    } catch {
+      /* fall through and relaunch */
+    }
+    browserPromise = null;
   }
+
+  browserPromise = puppeteer.launch({
+    headless: true,
+    // Use a system Chromium when provided (Docker / Windows); otherwise the bundled one.
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+  // Never cache a rejected launch — otherwise a single transient failure (e.g.
+  // a missing browser) would permanently break PDF generation until restart.
+  browserPromise.catch(() => {
+    browserPromise = null;
+  });
+  // Drop the handle as soon as the browser goes away, so the next call relaunches instead of
+  // waiting to discover the corpse.
+  browserPromise
+    .then((b) => {
+      b.once('disconnected', () => {
+        browserPromise = null;
+        logger.warn('Puppeteer browser disconnected — it will be relaunched on the next PDF render.');
+      });
+    })
+    .catch(() => undefined);
   return browserPromise;
 }
 
-/** Render an HTML string to a PDF Buffer (used by reports & certificates). */
+/** Errors that mean "the browser went away" rather than "this document is bad". */
+function isBrowserGone(e: unknown): boolean {
+  const m = (e as Error)?.message ?? '';
+  return /Target closed|Session closed|Protocol error|Connection closed|browser has disconnected|socket hang up/i.test(m);
+}
+
+/**
+ * Render an HTML string to a PDF Buffer (used by reports & certificates).
+ *
+ * Retried once when the browser dies: Chromium can be killed mid-render (memory pressure on a
+ * small container), and that is a transient condition — the second attempt gets a freshly launched
+ * browser. Anything else fails immediately, so a genuinely broken document is not retried.
+ */
 export async function renderPdfFromHtml(html: string, opts: PdfOptions = {}): Promise<Buffer> {
+  try {
+    return await renderOnce(html, opts);
+  } catch (e) {
+    if (!isBrowserGone(e)) throw e;
+    logger.warn(`PDF render lost the browser (${(e as Error).message}); relaunching and retrying once.`);
+    browserPromise = null;
+    return renderOnce(html, opts);
+  }
+}
+
+async function renderOnce(html: string, opts: PdfOptions): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -58,7 +112,8 @@ export async function renderPdfFromHtml(html: string, opts: PdfOptions = {}): Pr
     });
     return Buffer.from(pdf);
   } finally {
-    await page.close();
+    // Closing a page whose browser has already died throws; that must not mask the real error.
+    await page.close().catch(() => undefined);
   }
 }
 

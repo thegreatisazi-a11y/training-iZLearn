@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { logger } from '../config/logger';
 import { AppError } from '../utils/response';
 import { formatDate } from '../utils/dateUtils';
 import { exportToCsv } from '../utils/csvExporter';
@@ -789,7 +790,10 @@ export async function exportReport(
       footerHtml: buildFooterTemplate(cfg),
       landscape: true,
     });
-  } catch {
+  } catch (e) {
+    // See the same catch in the audit export: log the cause, or a crashed browser looks identical
+    // to Chromium being absent.
+    logger.error(`Report PDF export failed (${type}): ${(e as Error)?.message ?? e}`);
     throw new AppError(503, 'PDF_UNAVAILABLE', 'PDF export is unavailable on this server. Please export as Excel or CSV instead.');
   }
   return { contentType: 'application/pdf', filename: `${type}.pdf`, body: pdf, rowCount: data.rows.length };
