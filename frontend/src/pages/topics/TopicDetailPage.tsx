@@ -68,6 +68,8 @@ interface Question {
   explanation?: string;
   helpText?: string;
   isMandatory: boolean;
+  /** False pins the answer options in their authored order; absent means shuffle. */
+  shuffleOptions?: boolean;
   isStaged?: boolean;
   pendingRemoval?: boolean;
 }
@@ -87,6 +89,7 @@ interface QuestionForm {
   explanation: string;
   helpText: string;
   isMandatory: boolean;
+  shuffleOptions: boolean;
 }
 
 /** CR-35: a correct answer must be chosen before a question can be saved. */
@@ -125,6 +128,7 @@ function blankQuestionForm(): QuestionForm {
     explanation: '',
     helpText: '',
     isMandatory: false,
+    shuffleOptions: true,
   };
 }
 
@@ -163,6 +167,8 @@ function formFromQuestion(q: Question): QuestionForm {
     explanation: q.explanation ?? '',
     helpText: q.helpText ?? '',
     isMandatory: q.isMandatory,
+    // Absent on questions written before the field existed → shuffling, the previous behaviour.
+    shuffleOptions: q.shuffleOptions !== false,
   };
 }
 
@@ -181,6 +187,8 @@ function questionBody(f: QuestionForm, topicId: string) {
     case 'MULTIPLE_CHOICE_MULTI':
       base.options = f.options;
       base.correctAnswer = f.correctIds;
+      // Only multiple-choice questions have answer options to shuffle.
+      base.shuffleOptions = f.shuffleOptions;
       break;
     case 'TRUE_FALSE':
       base.correctAnswer = f.trueFalseAnswer;
@@ -499,7 +507,9 @@ export default function TopicDetailPage() {
         // Omitted when blank: Number('') is 0, which the schema rejects as below the minimum of 1.
         maxAttempts: editTopicForm.maxAttempts !== '' ? Number(editTopicForm.maxAttempts) : undefined,
         questionLimit: Number(editTopicForm.questionLimit) > 0 ? Number(editTopicForm.questionLimit) : undefined,
-        refresherIntervalMonths: Number(editTopicForm.refresherIntervalMonths) > 0 ? Number(editTopicForm.refresherIntervalMonths) : undefined,
+        // Sent as 0 (stored as null) when cleared, so a refresher can be REMOVED — `undefined`
+        // would mean "leave unchanged" and the interval could never be taken off a course.
+        refresherIntervalMonths: editTopicForm.refresherIntervalMonths !== '' ? Number(editTopicForm.refresherIntervalMonths) : 0,
         materialViewSeconds: editTopicForm.materialViewSeconds ? Number(editTopicForm.materialViewSeconds) : undefined,
         effectiveDate: editTopicForm.effectiveDate || undefined,
         reviewDate: editTopicForm.reviewDate || undefined,
@@ -1317,6 +1327,20 @@ export default function TopicDetailPage() {
           <input type="checkbox" checked={qForm.isMandatory} onChange={(e) => setQForm({ ...qForm, isMandatory: e.target.checked })} />
           Mandatory question (always included in assessments)
         </label>
+        {/* Options are only shuffled when the course itself randomizes, so this is offered for
+            multiple-choice questions where the authored order can matter. */}
+        {(qForm.questionType === 'MULTIPLE_CHOICE_SINGLE' || qForm.questionType === 'MULTIPLE_CHOICE_MULTI') && (
+          <>
+            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={qForm.shuffleOptions} onChange={(e) => setQForm({ ...qForm, shuffleOptions: e.target.checked })} />
+              Shuffle the answer options for this question
+            </label>
+            <p className="mt-1 text-xs text-slate-500">
+              Uncheck to keep the options in the order entered above — needed for options like “All of the above”, which
+              would otherwise be moved to (a).
+            </p>
+          </>
+        )}
       </Dialog>
 
       {/* 4.1: replace/update a specific file — choose the source (device or library) */}
@@ -1623,6 +1647,19 @@ export default function TopicDetailPage() {
               className={hasPastDueDate ? 'border-red-500' : undefined}
               value={editTopicForm.dueDate}
               onChange={(e) => setEditTopicForm((f) => ({ ...f, dueDate: e.target.value }))}
+            />
+          </Field>
+          {/* Drives the "Refresher Due" flow — see the create form. */}
+          <Field
+            label="Refresher interval (months)"
+            hint="Optional. Re-assigns this course automatically this many months after it is completed. Blank = no refresher."
+          >
+            <Input
+              type="number"
+              min={1}
+              value={editTopicForm.refresherIntervalMonths}
+              onChange={(e) => setEditTopicForm((f) => ({ ...f, refresherIntervalMonths: e.target.value }))}
+              placeholder="e.g. 12"
             />
           </Field>
         </div>

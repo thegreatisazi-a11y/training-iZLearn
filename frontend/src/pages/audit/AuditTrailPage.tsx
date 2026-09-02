@@ -60,6 +60,53 @@ const FIELD_LABELS: Record<string, string> = {
   userType: 'User Type',
 };
 
+/**
+ * Display labels for the stored `entityType` values.
+ *
+ * The stored strings are the internal model names and are deliberately never renamed — audit rows
+ * are immutable, and a course's history would split across two labels (see CLAUDE.md). So the
+ * VALUE stays `TrainingTopic` while what the user reads says "Course", the same override pattern
+ * used by REPORT_LABELS on the Reports page. Anything not listed falls back to the raw value with
+ * its camel case spaced out, so a newly-audited entity is still readable before it is added here.
+ */
+const ENTITY_LABELS: Record<string, string> = {
+  TrainingTopic: 'Course',
+  TopicBundle: 'Course Bundle',
+  TrainingMaterial: 'Training Material',
+  TrainingAssignment: 'Training Assignment',
+  TrainingSchedule: 'Training Schedule',
+  AssessmentAttempt: 'Assessment Attempt',
+  Question: 'Question',
+  RetakeRequest: 'Retake Request',
+  Certificate: 'Certificate',
+  CertificateTemplate: 'Certificate Template',
+  CurriculumVitae: 'CV',
+  JobDescription: 'Job Description',
+  PersonalDocument: 'Personal Document',
+  OfflineTrainingRecord: 'Offline Training Record',
+  OjtRecord: 'OJT Record',
+  Attendance: 'Attendance',
+  TNI: 'Training Needs (TNI)',
+  User: 'User',
+  UserRole: 'User Role',
+  UserSession: 'User Session',
+  UserCreationRequest: 'User Creation Request',
+  Role: 'Role',
+  Module: 'Permission Check',
+  Auth: 'Authentication',
+  Network: 'Network Restriction',
+  Report: 'Report',
+  Backup: 'Backup',
+  AuditTrail: 'Audit Trail',
+};
+
+const entityLabel = (v: string): string => ENTITY_LABELS[v] ?? v.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+/** Filter options, ordered by label so the list is scannable. */
+const ENTITY_TYPE_OPTIONS = Object.keys(ENTITY_LABELS)
+  .map((value) => ({ value, label: ENTITY_LABELS[value] }))
+  .sort((a, b) => a.label.localeCompare(b.label));
+
 function fieldLabel(k: string): string {
   return FIELD_LABELS[k] ?? k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()).replace(/\sId$/, '');
 }
@@ -318,7 +365,8 @@ export default function AuditTrailPage() {
     { key: 'timestamp', header: 'Timestamp', render: (r) => formatDateTime(r.timestamp) },
     { key: 'userFullName', header: 'User' },
     { key: 'action', header: 'Action', render: (r) => <Badge tone={r.action}>{r.action}</Badge> },
-    { key: 'entityType', header: 'Entity' },
+    // The stored value stays as-is; only what the user reads is mapped (see ENTITY_LABELS).
+    { key: 'entityType', header: 'Entity', render: (r) => entityLabel(r.entityType) },
     {
       key: 'record',
       header: 'Record',
@@ -383,8 +431,15 @@ export default function AuditTrailPage() {
               <Field label="User">
                 <Select options={userOpts} value={draft.userId} onChange={(e) => setDraft((d) => ({ ...d, userId: e.target.value }))} placeholder="All users" />
               </Field>
+              {/* A free-text box required typing the internal model name exactly — "Course"
+                  matched nothing, because the stored value is `TrainingTopic`. */}
               <Field label="Entity type">
-                <Input value={draft.entityType} onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))} placeholder="Optional" />
+                <Select
+                  options={ENTITY_TYPE_OPTIONS}
+                  value={draft.entityType}
+                  onChange={(e) => setDraft((d) => ({ ...d, entityType: e.target.value }))}
+                  placeholder="All entity types"
+                />
               </Field>
               <Field label="Search">
                 <Input

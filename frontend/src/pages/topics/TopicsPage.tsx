@@ -544,6 +544,20 @@ export default function TopicsPage() {
               onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
             />
           </Field>
+          {/* Drives the "Refresher Due" flow: on completion the assignment is stamped with
+              completion + this many months, and the nightly job then re-assigns the course. */}
+          <Field
+            label="Refresher interval (months)"
+            hint="Optional. Re-assigns this course automatically this many months after it is completed. Blank = no refresher."
+          >
+            <Input
+              type="number"
+              min={1}
+              value={form.refresherIntervalMonths}
+              onChange={(e) => setForm({ ...form, refresherIntervalMonths: e.target.value })}
+              placeholder="e.g. 12"
+            />
+          </Field>
         </div>
         <div className="mt-1 space-y-2 rounded border border-slate-200 p-3">
           <div className="text-xs font-medium uppercase text-slate-500">Assessment settings</div>

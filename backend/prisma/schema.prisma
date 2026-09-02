@@ -361,6 +361,11 @@ model Question {
   explanation   String? // Shown to user after incorrect answer
   helpText      String? // CR-37: per-question hint, e.g. "multiple options can be selected"
   isMandatory   Boolean      @default(false)
+  // Per-question opt-out from answer-option shuffling, for questions whose options are only
+  // correct in their authored order — "All of the above", "Both A and B", "None of these".
+  // Optional (not defaulted) so documents written before this field read cleanly; absent means
+  // "shuffle", i.e. the previous behaviour. Only meaningful when the course randomizes at all.
+  shuffleOptions Boolean?
   // G4: a question added/edited on a PUBLISHED topic is staged (draft) and is NOT used
   // in the live assessment until "Publish changes" promotes it.
   isStaged            Boolean @default(false)

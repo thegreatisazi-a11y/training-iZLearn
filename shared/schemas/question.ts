@@ -34,6 +34,12 @@ export const createQuestionSchema = z
     explanation: optionalString,
     helpText: optionalString,
     isMandatory: z.boolean().default(false),
+    /**
+     * Whether this question's answer options may be shuffled. Defaults to true (the previous
+     * behaviour); set false for options that are only correct in their authored order, such as
+     * "All of the above". Ignored entirely when the course does not randomize.
+     */
+    shuffleOptions: z.boolean().optional(),
   })
   .superRefine((q, ctx) => {
     if (
@@ -67,6 +73,8 @@ export const updateQuestionSchema = z
     explanation: optionalString,
     helpText: optionalString,
     isMandatory: z.boolean().optional(),
+    /** See createQuestionSchema — false pins the options in their authored order. */
+    shuffleOptions: z.boolean().optional(),
     isActive: z.boolean().optional(),
     // Question edits on a published course are STAGED; the reason (+ e-signature) is
     // collected once at "Publish changes", so it is optional here.

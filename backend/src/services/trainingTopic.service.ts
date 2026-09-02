@@ -302,8 +302,10 @@ export async function updateTopic(id: string, input: UpdateTopicInput) {
           : {}),
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex ?? null } : {}),
       ...(input.durationMinutes !== undefined ? { durationMinutes: input.durationMinutes } : {}),
+      // 0 means "no refresher" and is stored as null, so clearing the field in the UI actually
+      // removes the refresher rather than leaving a falsy 0 behind.
       ...(input.refresherIntervalMonths !== undefined
-        ? { refresherIntervalMonths: input.refresherIntervalMonths }
+        ? { refresherIntervalMonths: input.refresherIntervalMonths || null }
         : {}),
       ...(input.maxAttempts !== undefined ? { maxAttempts: input.maxAttempts } : {}),
       ...(input.questionLimit !== undefined ? { questionLimit: input.questionLimit ?? null } : {}),

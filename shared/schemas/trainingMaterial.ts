@@ -5,7 +5,10 @@ import { uuid, reasonForChange } from './common';
 export const ALLOWED_MATERIAL_EXTENSIONS = [
   'pdf',
   'docx',
-  'doc',
+  // .doc and .xls (the pre-2007 binary formats) are deliberately NOT accepted: they cannot be
+  // rendered in the locked in-app viewer (mammoth reads .docx only, exceljs .xlsx only) and the
+  // server-side LibreOffice conversion is not available on the deployed API, so a trainee would be
+  // credited with the reading time for a document that was never displayed. Save as .docx/.xlsx.
   'pptx',
   'ppt',
   // .avi and .mov are deliberately NOT accepted: no browser can play .avi at all, and neither
@@ -14,7 +17,6 @@ export const ALLOWED_MATERIAL_EXTENSIONS = [
   // (Both remain in MATERIAL_VIDEO_EXTENSIONS below — see the note there — so any file uploaded
   // before this restriction still behaves correctly.)
   'mp4',
-  'xls',
   'xlsx',
   'png',
   'jpg',

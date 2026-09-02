@@ -70,6 +70,7 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       explanation: input.explanation ?? null,
       helpText: input.helpText ?? null,
       isMandatory: input.isMandatory,
+      shuffleOptions: input.shuffleOptions ?? true,
       isStaged: staged,
       createdBy,
     },
@@ -131,6 +132,7 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput, cha
       ...(input.explanation !== undefined ? { explanation: input.explanation } : {}),
       ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
       ...(input.isMandatory !== undefined ? { isMandatory: input.isMandatory } : {}),
+      ...(input.shuffleOptions !== undefined ? { shuffleOptions: input.shuffleOptions } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
   };
 
@@ -156,6 +158,7 @@ export async function updateQuestion(id: string, input: UpdateQuestionInput, cha
       explanation: existing.explanation,
       helpText: existing.helpText,
       isMandatory: existing.isMandatory,
+      shuffleOptions: existing.shuffleOptions,
       isActive: existing.isActive,
     };
     return prisma.question.create({

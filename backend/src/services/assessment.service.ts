@@ -253,7 +253,11 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const ordered = rnd ? shuffle(selected) : selected;
   const snapshot: SnapshotQuestion[] = ordered.map((q) => {
     let options = q.options as unknown;
-    if (rnd && Array.isArray(options) && (q.questionType === 'MULTIPLE_CHOICE_SINGLE' || q.questionType === 'MULTIPLE_CHOICE_MULTI')) {
+    // A question can opt out of option shuffling: "All of the above" / "Both A and B" only make
+    // sense in their authored position, and shuffling could move such an option to (a). Absent on
+    // questions written before the field existed, which means shuffle — the previous behaviour.
+    const mayShuffleOptions = (q as { shuffleOptions?: boolean | null }).shuffleOptions !== false;
+    if (rnd && mayShuffleOptions && Array.isArray(options) && (q.questionType === 'MULTIPLE_CHOICE_SINGLE' || q.questionType === 'MULTIPLE_CHOICE_MULTI')) {
       options = shuffle(options as unknown[]);
     }
     return {

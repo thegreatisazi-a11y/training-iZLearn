@@ -45,8 +45,16 @@ const IMAGE_EXTS: readonly string[] = MATERIAL_IMAGE_EXTENSIONS;
 const VIDEO_EXTS: readonly string[] = BROWSER_PLAYABLE_VIDEO_EXTENSIONS;
 const AUDIO_EXTS: readonly string[] = MATERIAL_AUDIO_EXTENSIONS;
 const TEXT_EXTS: readonly string[] = MATERIAL_TEXT_EXTENSIONS;
-/** Rendered via the server LibreOffice→PDF endpoint (presentations + legacy binaries). */
-const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls'];
+/**
+ * Rendered via the server LibreOffice→PDF endpoint.
+ *
+ * Presentations only. The legacy binaries .doc/.xls were dropped from this list AND from
+ * ALLOWED_MATERIAL_EXTENSIONS: server-side conversion is the heavy path (it needs LibreOffice on
+ * the API host, which the deployed service does not have — the endpoint answers 503), and neither
+ * format can be rendered in the browser either, since mammoth reads .docx only and exceljs .xlsx
+ * only. Modern .docx/.xlsx render in-browser with no server involvement.
+ */
+const SERVER_PDF_EXTS = ['ppt', 'pptx'];
 // /** Rendered via the server LibreOffice→PDF endpoint. .xlsx is deliberately absent — it
  // *  renders natively (see above). Legacy .xls stays here: it can't be parsed in-browser. */
 // const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls', 'docx'];
@@ -295,6 +303,65 @@ function PreviewUnavailable({ message, heightClass }: { message?: string; height
   );
 }
 
+/**
+ * Render an .xlsx workbook as HTML — EVERY worksheet, in tab order.
+ *
+ * Parsed with exceljs rather than read-excel-file. The previous implementation called
+ * `readXlsxFile(blob)`, which returns only the FIRST worksheet, and threw on workbooks it could not
+ * interpret — and since the caller swallowed the exception, any such workbook silently became
+ * "Inline preview isn't available for this file. Use the Download option", which is what made
+ * Excel look like it had no preview at all. exceljs reads the whole workbook and exposes typed cell
+ * values, so dates, formulas and rich text render as their displayed value instead of "[object
+ * Object]".
+ */
+async function xlsxToHtml(blob: Blob): Promise<string> {
+  const ExcelJS = await import('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await blob.arrayBuffer());
+
+  const sheets = wb.worksheets.filter((ws) => ws.state !== 'hidden' && ws.state !== 'veryHidden');
+  if (!sheets.length) return '';
+
+  const parts = sheets.map((ws, i) => {
+    const rows: unknown[][] = [];
+    // rowCount/columnCount cover the used range; getCell fills gaps so ragged rows stay aligned.
+    for (let r = 1; r <= ws.rowCount; r += 1) {
+      const row = ws.getRow(r);
+      const cells: unknown[] = [];
+      for (let c = 1; c <= ws.columnCount; c += 1) cells.push(cellText(row.getCell(c).value));
+      // Trim fully blank trailing rows rather than rendering hundreds of empty ones.
+      if (cells.some((v) => String(v ?? '') !== '')) rows.push(cells);
+    }
+    const table = rows.length ? rowsToTableHtml(rows) : '<p style="font-size:12px;color:#94a3b8">(Empty sheet)</p>';
+    // A workbook's sheets are all part of the same training document, so they are shown one after
+    // another with headings rather than behind tabs — the trainee scrolls through the whole thing,
+    // which is also what the end-of-document reading gate measures.
+    const heading =
+      sheets.length > 1
+        ? `<h3 style="margin:${i === 0 ? '0' : '18px'} 0 6px;font-size:13px;font-weight:600;color:#334155">Sheet ${i + 1} of ${sheets.length} · ${escapeForHtml(ws.name)}</h3>`
+        : '';
+    return heading + table;
+  });
+  return parts.join('');
+}
+
+/** A cell's displayed text: exceljs yields objects for dates, formulas, rich text and links. */
+function cellText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) return v.toLocaleDateString();
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (Array.isArray(o.richText)) return (o.richText as { text?: string }[]).map((t) => t.text ?? '').join('');
+    if ('text' in o) return String(o.text ?? ''); // hyperlink cell
+    if ('result' in o) return String(o.result ?? ''); // formula → cached result
+    if ('error' in o) return String(o.error ?? '');
+    return '';
+  }
+  return String(v);
+}
+
+const escapeForHtml = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** Convert a sheet's rows to a simple bordered HTML table. */
 function rowsToTableHtml(rows: unknown[][]): string {
   if (!rows.length) return '';
@@ -316,6 +383,76 @@ function rowsToTableHtml(rows: unknown[][]): string {
  * for continuously-scrolling documents (docx/xlsx). Content that fits without scrolling counts as
  * already at the end. `ready` re-arms it when a new document finishes rendering.
  */
+/**
+ * Toolbar chrome shared by the PDF viewer and the Word/Excel viewer, so both bars are the same
+ * control rather than two that merely look alike.
+ */
+function ToolbarBtn({ onClick, title, children, active, disabled }: { onClick: () => void; title: string; children: ReactNode; active?: boolean; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium disabled:opacity-40 ${active ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+const ToolbarDivider = () => <span className="mx-1 h-4 w-px bg-slate-200" />;
+
+/** The toolbar's own row — identical padding, border and background in both viewers. */
+const ToolbarRow = ({ children }: { children: ReactNode }) => (
+  <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1">{children}</div>
+);
+
+/**
+ * "Page [n] / N" where the number is typeable. Kept as its own component so the PDF viewer and the
+ * Word/Excel viewer present page navigation identically.
+ *
+ * The box holds its own draft text while being edited so a half-typed number ("1" on the way to
+ * "12") never triggers a jump; it commits on Enter or blur and snaps back to the real page if the
+ * entry is out of range or not a number.
+ */
+function PageJump({ page, numPages, onGo }: { page: number; numPages: number; onGo: (n: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const n = parseInt(draft ?? '', 10);
+    setDraft(null);
+    if (Number.isFinite(n) && n >= 1 && n <= Math.max(1, numPages)) onGo(n);
+  };
+  return (
+    <span className="flex items-center gap-1 text-xs text-slate-600">
+      <span>Page</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label="Page number"
+        title="Type a page number and press Enter"
+        value={draft ?? String(page)}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ''))}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === 'Escape') {
+            setDraft(null);
+            e.currentTarget.blur();
+          }
+          // The viewer binds arrows/PageUp/Home to navigation; while typing they belong to the box.
+          e.stopPropagation();
+        }}
+        className="h-6 w-10 rounded border border-slate-300 bg-white px-1 text-center tabular-nums outline-none focus:border-primary"
+      />
+      {numPages ? <span className="tabular-nums">/ {numPages}</span> : null}
+    </span>
+  );
+}
+
 function useReachedEnd(onEnd: (() => void) | undefined, ready: unknown) {
   const ref = useRef<HTMLDivElement>(null);
   const onEndRef = useRef(onEnd);
@@ -364,8 +501,53 @@ function OfficeHtmlViewer({
 }) {
   const [html, setHtml] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [zoomPct, setZoomPct] = useState(100);
+  // Page navigation for a continuously-scrolling document: a "page" is one viewport-full of the
+  // rendered content (see the note by the toolbar).
+  const [pageNo, setPageNo] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
   // End-of-document gate: reaching the bottom of this scroller is this format's "last page".
   const endScrollRef = useReachedEnd(onLastPage, html);
+
+  const goToPage = useCallback(
+    (n: number) => {
+      const el = endScrollRef.current;
+      if (!el || !el.clientHeight) return;
+      const target = Math.min(Math.max(1, n), Math.max(1, Math.ceil(el.scrollHeight / el.clientHeight)));
+      el.scrollTo({ top: (target - 1) * el.clientHeight, behavior: 'auto' });
+      setPageNo(target);
+    },
+    [endScrollRef],
+  );
+
+  // Keep the page count and the current page in step with the rendered content, the zoom level and
+  // the size of the surface (a resized pane changes how much fits on a "page").
+  useEffect(() => {
+    const el = endScrollRef.current;
+    if (!el || html === null) return;
+    const measure = () => {
+      if (!el.clientHeight) return;
+      setPageCount(Math.max(1, Math.ceil(el.scrollHeight / el.clientHeight)));
+      setPageNo(Math.min(Math.max(1, Math.floor(el.scrollTop / el.clientHeight) + 1), Math.max(1, Math.ceil(el.scrollHeight / el.clientHeight))));
+    };
+    measure();
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        measure();
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [html, zoomPct, endScrollRef]);
   // // Set when the workbook is too big to render as a DOM table — see XLSX_INLINE_MAX_*.
   // const [tooLarge, setTooLarge] = useState<string>('');
   // const scrollRef = useRef<HTMLDivElement>(null);
@@ -387,16 +569,17 @@ function OfficeHtmlViewer({
           const arrayBuffer = await blob.arrayBuffer();
           out = (await mammoth.convertToHtml({ arrayBuffer })).value;
         } else {
-          const readXlsxFile = (await import('read-excel-file/browser')).default;
-          const rows = (await readXlsxFile(blob)) as unknown[][];
-          out = rowsToTableHtml(rows);
+          out = await xlsxToHtml(blob);
           // // Parsed, ordered and rendered to markup on a WORKER thread — see xlsxWorker.ts for
           // // why (read-excel-file only offloads the unzip; the sheet-XML parse would otherwise
           // // run here and freeze the UI). Sanitising stays on this thread: it needs a document.
           // out = (await renderXlsxInWorker(blob, ac.signal)).html;
         }
         if (!cancelled) setHtml(out || '<p>(Empty document)</p>');
-      } catch {
+      } catch (e) {
+        // Log the reason: this failure surfaces to the trainee only as "download it to view", so a
+        // swallowed exception left the cause invisible and the problem undiagnosable.
+        console.error(`[InlineFileViewer] ${kind} preview failed`, e);
         if (!cancelled) setFailed(true);
       // } catch (e) {
         // if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
@@ -456,14 +639,37 @@ function OfficeHtmlViewer({
   // if (tooLarge) return <PreviewUnavailable heightClass={heightClass} message={`${tooLarge} Download it to view the full workbook.`} />;
   if (failed) return <PreviewUnavailable heightClass={heightClass} message="This document couldn’t be rendered. Download it to view." />;
   if (html === null) return <div className="flex h-40 items-center justify-center text-sm text-slate-500">Rendering preview…</div>;
+
+  const zoomIn = () => { setZoomPct((p) => Math.min(400, p + 25)); };
+  const zoomOut = () => { setZoomPct((p) => Math.max(40, p - 25)); };
+
   return (
-    <div
-      ref={endScrollRef}
-      className={`${heightClass} ${lockClass} overflow-auto rounded border border-slate-200 bg-white`}
-      style={lockStyle}
-      onContextMenu={onCtx}
-    >
-      <div className="prose prose-sm max-w-none p-4 text-slate-800" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+    <div className={`flex flex-col ${heightClass} ${lockClass} rounded border border-slate-200 bg-white`} style={lockStyle} onContextMenu={onCtx}>
+      {/* Built from the same ToolbarRow / ToolbarBtn / PageJump pieces as the PDF viewer, so the
+          two bars are identical rather than lookalikes.
+          NOTE on pages: .docx is rendered as continuous HTML, which carries no Word page breaks,
+          and a worksheet has none either — so a "page" here is one viewport-full of the rendered
+          document. Stable and navigable, but not necessarily the page numbers Word would print. */}
+      <ToolbarRow>
+        <ToolbarBtn onClick={zoomOut} title="Zoom out"><ZoomOut className="h-4 w-4" /></ToolbarBtn>
+        <span className="w-12 text-center text-xs tabular-nums text-slate-600">{zoomPct}%</span>
+        <ToolbarBtn onClick={zoomIn} title="Zoom in"><ZoomIn className="h-4 w-4" /></ToolbarBtn>
+        <ToolbarDivider />
+        {/* Fit width is this format's natural state — HTML reflows to the pane — so the button
+            returns to 100% and shows as active there. */}
+        <ToolbarBtn onClick={() => setZoomPct(100)} title="Fit width" active={zoomPct === 100}><MoveHorizontal className="h-4 w-4" /> Width</ToolbarBtn>
+        <ToolbarDivider />
+        <ToolbarBtn onClick={() => goToPage(pageNo - 1)} title="Previous page" disabled={pageNo <= 1}><ChevronLeft className="h-4 w-4" /></ToolbarBtn>
+        <PageJump page={pageNo} numPages={pageCount} onGo={goToPage} />
+        <ToolbarBtn onClick={() => goToPage(pageNo + 1)} title="Next page" disabled={pageNo >= pageCount}><ChevronRight className="h-4 w-4" /></ToolbarBtn>
+      </ToolbarRow>
+      <div ref={endScrollRef} className="min-h-0 flex-1 overflow-auto">
+        <div
+          className="prose prose-sm max-w-none p-4 text-slate-800"
+          style={{ zoom: zoomPct === 100 ? undefined : `${zoomPct}%` }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
+        />
+      </div>
     </div>
   );
 }
@@ -781,18 +987,6 @@ function PdfDocViewer({
     setZoomPct((p) => Math.max(40, (zoomMode === 'custom' ? p : Math.round(scale * 100)) - 25));
   };
 
-  const ToolbarBtn = ({ onClick, title, children, active, disabled }: { onClick: () => void; title: string; children: ReactNode; active?: boolean; disabled?: boolean }) => (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex h-7 items-center gap-1 rounded px-2 text-xs font-medium disabled:opacity-40 ${active ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-    >
-      {children}
-    </button>
-  );
-
   // Presentation mode: a single slide fills a dark stage, with prev/next (buttons +
   // arrow keys), a slide counter and fullscreen. Still fully locked (canvas render, no
   // text layer, no context menu → nothing selectable/downloadable).
@@ -848,20 +1042,23 @@ function PdfDocViewer({
 
   return (
     <div className={`flex flex-col ${heightClass} ${lockClass} rounded border border-slate-200`} style={lockStyle} onContextMenu={onCtx}>
-      <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50 px-2 py-1">
+      <ToolbarRow>
         <ToolbarBtn onClick={zoomOut} title="Zoom out"><ZoomOut className="h-4 w-4" /></ToolbarBtn>
         <span className="w-12 text-center text-xs tabular-nums text-slate-600">{Math.round(scale * 100)}%</span>
         <ToolbarBtn onClick={zoomIn} title="Zoom in"><ZoomIn className="h-4 w-4" /></ToolbarBtn>
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <ToolbarDivider />
         <ToolbarBtn onClick={() => setZoomMode('fit-width')} title="Fit width" active={zoomMode === 'fit-width'}><MoveHorizontal className="h-4 w-4" /> Width</ToolbarBtn>
         <ToolbarBtn onClick={() => setZoomMode('fit-page')} title="Fit page" active={zoomMode === 'fit-page'}><Maximize2 className="h-4 w-4" /> Page</ToolbarBtn>
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <ToolbarDivider />
         <ToolbarBtn onClick={() => goToPage(page - 1)} title="Previous page" disabled={page <= 1}><ChevronLeft className="h-4 w-4" /></ToolbarBtn>
-        <span className="text-xs tabular-nums text-slate-600">Page {page}{numPages ? ` / ${numPages}` : ''}</span>
+        {/* Typing a page number jumps straight to it — paging through a long document one click at
+            a time is unusable. Commits on Enter or blur, and reverts to the current page if the
+            entry is out of range or not a number. */}
+        <PageJump page={page} numPages={numPages} onGo={goToPage} />
         <ToolbarBtn onClick={() => goToPage(page + 1)} title="Next page" disabled={numPages > 0 && page >= numPages}><ChevronRight className="h-4 w-4" /></ToolbarBtn>
-        <span className="mx-1 h-4 w-px bg-slate-200" />
+        <ToolbarDivider />
         <ToolbarBtn onClick={() => setSlideshow(true)} title="Slideshow (present one slide at a time)"><Presentation className="h-4 w-4" /> Slideshow</ToolbarBtn>
-      </div>
+      </ToolbarRow>
       <div ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown} className="min-h-0 flex-1 overflow-auto bg-slate-100 outline-none">
         {error ? (
           <div className="p-4 text-sm text-red-600">{error}</div>
