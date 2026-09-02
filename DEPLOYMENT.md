@@ -104,6 +104,42 @@ service (built from `backend/Dockerfile`) and a Redis instance.
 > Free Render web services sleep when idle and cold-start on the next request (a few
 > seconds). Fine for testing; use a paid plan for always-on.
 
+### If the service runs Render's **Node** runtime instead of Docker
+
+A service created manually (rather than from the Blueprint) runs the native Node runtime, which
+has neither of the two binaries the Docker image installs. Render cannot change a service's runtime
+after creation, so either recreate it from `render.yaml` or apply the following.
+
+**Headless Chrome — needed for PDF export (audit trail, reports), certificate generation and the
+certificate-template preview.** Puppeteer caches Chrome in the home directory by default
+(`/opt/render/.cache/puppeteer`), which is discarded after the build, so at runtime every render
+fails with `Could not find Chrome (ver. …)`. Keep the browser inside the project directory, which
+persists:
+
+| Setting | Value |
+|---|---|
+| Env var `PUPPETEER_CACHE_DIR` | `/opt/render/project/src/.cache/puppeteer` |
+| Build Command | `npm install && npm run build:backend && npx puppeteer browsers install chrome` |
+
+Leave `PUPPETEER_EXECUTABLE_PATH` unset (it selects a *system* Chromium and is meant for the Docker
+image). `.puppeteerrc.cjs` in the repo root pins the same path for the build; the env var is what
+makes the running process agree. After changing either, deploy with **Clear build cache & deploy**.
+
+**Memory.** Chromium plus Node does not fit comfortably in a 512 MB instance, and an OOM kill
+restarts the whole service (Render reports `Ran out of memory (used over 512MB)`). Two knobs keep it
+inside the budget, both with safe defaults in code:
+
+| Env var | Default | Effect |
+|---|---|---|
+| `PDF_MAX_ROWS` | `1000` | Rows rendered into a report/audit PDF. Truncation is stated **in** the document; CSV/Excel remain uncapped, so the complete record is always available. Raise on a bigger instance. |
+| `PDF_BROWSER_IDLE_MS` | `60000` | Chromium is shut down after this much idle time instead of staying resident for the process lifetime. Set `0` to keep it warm (faster exports, permanently higher memory). |
+
+**LibreOffice — needed only to preview PowerPoint materials in the locked viewer.** It requires
+`apt`, so it CANNOT be installed on the Node runtime; `/api/materials/:id/view-pdf` answers 503 for
+`.ppt`/`.pptx` there. Either run the Docker image or replace those materials with PDFs. Nothing else
+depends on LibreOffice: `.docx`/`.xlsx` render in the browser, and `.doc`/`.xls` are not accepted
+for upload.
+
 ---
 
 ## 4. Frontend on Vercel

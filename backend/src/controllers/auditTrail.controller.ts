@@ -234,7 +234,11 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
 
   // PDF — headless Chrome can't render a 100k-row table, so cap it and SAY SO in the
   // document (never a silent truncation). CSV/Excel above are unbounded for the full record.
-  const PDF_CAP = 5000;
+  // A PDF is the human-readable format, not the archive — CSV and Excel above carry the complete
+  // record. 5,000 rows was enough to OOM-kill a 512 MB instance (Node holds the rows and the HTML
+  // string, then Chromium builds a DOM and a layout for the whole table on top of that), and a
+  // 5,000-row PDF is not something anyone reads anyway. Raise PDF_MAX_ROWS on a larger instance.
+  const PDF_CAP = parseInt(process.env.PDF_MAX_ROWS || '1000', 10);
   const r = await queryAuditTrail({ ...filters, page: 1, pageSize: PDF_CAP + 1 });
   const truncated = r.data.length > PDF_CAP;
   const rows = r.data.slice(0, PDF_CAP).map(mapRow);

@@ -39,3 +39,6 @@ desktop.ini
 
 # Test coverage
 coverage/
+
+# Puppeteer's downloaded Chrome (see .puppeteerrc.cjs) — hundreds of MB, never committed
+.cache/

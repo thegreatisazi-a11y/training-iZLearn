@@ -724,14 +724,29 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
   }
 }
 
+/**
+ * Maximum rows rendered into a report PDF.
+ *
+ * The PDF is the readable format; CSV and Excel above are the complete record and are not capped.
+ * Rendering an unbounded table was enough to OOM-kill a 512 MB instance — Node holds the rows and
+ * the HTML string, then Chromium builds a DOM and a full-page layout on top. Truncation is always
+ * stated in the document, never silent. Raise PDF_MAX_ROWS on a larger instance.
+ */
+const PDF_MAX_ROWS = parseInt(process.env.PDF_MAX_ROWS || '1000', 10);
+
 function tableHtml(title: string, columns: ReportData['columns'], rows: ReportData['rows']): string {
+  const shown = rows.slice(0, PDF_MAX_ROWS);
+  const note =
+    rows.length > shown.length
+      ? `<p style="color:#b00020;font-weight:bold;margin:0">Showing the first ${shown.length.toLocaleString()} of ${rows.length.toLocaleString()} rows. Export as CSV or Excel for the complete report.</p>`
+      : '';
   return `<html><head><style>
     body{font-family:Arial;font-size:10px;} h2{font-size:14px;}
     table{width:100%;border-collapse:collapse;margin-top:8px;}
     th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;} th{background:#eef2f1;}
-  </style></head><body><h2>${escapeHtml(title)}</h2>
+  </style></head><body><h2>${escapeHtml(title)}</h2>${note}
   <table><thead><tr>${columns.map((c) => `<th>${escapeHtml(c.header)}</th>`).join('')}</tr></thead>
-  <tbody>${rows
+  <tbody>${shown
     .map((r) => `<tr>${columns.map((c) => `<td>${escapeHtml(String(r[c.key] ?? ''))}</td>`).join('')}</tr>`)
     .join('')}</tbody></table></body></html>`;
 }

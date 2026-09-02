@@ -43,7 +43,23 @@ async function getBrowser(): Promise<Browser> {
     headless: true,
     // Use a system Chromium when provided (Docker / Windows); otherwise the bundled one.
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    // Trimmed for a small container: the API runs on a 512 MB instance, where Chromium's default
+    // extras (GPU/rasteriser, background networking, sync, default apps) are pure overhead and the
+    // difference between rendering a report and being OOM-killed.
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--disable-extensions',
+      '--disable-default-apps',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-first-run',
+    ],
   });
   // Never cache a rejected launch — otherwise a single transient failure (e.g.
   // a missing browser) would permanently break PDF generation until restart.
@@ -87,7 +103,49 @@ export async function renderPdfFromHtml(html: string, opts: PdfOptions = {}): Pr
   }
 }
 
+/**
+ * Shut the browser down once it has been idle for a while.
+ *
+ * A resident Chromium costs on the order of a hundred megabytes even with no page open. On a
+ * 512 MB instance that is memory the API needs, and PDFs are generated rarely (an export, a
+ * certificate) rather than continuously — so the browser is kept warm only long enough to serve a
+ * burst, then released. Renders in progress hold it open via `activeRenders`.
+ */
+const IDLE_SHUTDOWN_MS = parseInt(process.env.PDF_BROWSER_IDLE_MS || '60000', 10);
+let activeRenders = 0;
+let idleTimer: NodeJS.Timeout | null = null;
+
+function cancelIdleShutdown() {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+}
+
+function scheduleIdleShutdown() {
+  cancelIdleShutdown();
+  if (IDLE_SHUTDOWN_MS <= 0) return; // opt out with PDF_BROWSER_IDLE_MS=0 (keeps it warm)
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    if (activeRenders > 0) return;
+    void closeBrowser();
+  }, IDLE_SHUTDOWN_MS);
+  // Never hold the process open just for this timer.
+  idleTimer.unref?.();
+}
+
 async function renderOnce(html: string, opts: PdfOptions): Promise<Buffer> {
+  activeRenders += 1;
+  cancelIdleShutdown();
+  try {
+    return await renderPage(html, opts);
+  } finally {
+    activeRenders -= 1;
+    if (activeRenders === 0) scheduleIdleShutdown();
+  }
+}
+
+async function renderPage(html: string, opts: PdfOptions): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
@@ -123,12 +181,16 @@ export async function htmlToPdfFile(html: string, filePath: string, opts: PdfOpt
 }
 
 export async function closeBrowser(): Promise<void> {
+  cancelIdleShutdown();
   if (browserPromise) {
+    const pending = browserPromise;
+    // Cleared FIRST: the close is awaited below, and a caller arriving meanwhile must launch a new
+    // browser rather than receive the one being torn down.
+    browserPromise = null;
     try {
-      (await browserPromise).close();
+      await (await pending).close();
     } catch (e) {
       logger.warn('Failed to close puppeteer browser', { e: (e as Error).message });
     }
-    browserPromise = null;
   }
 }

@@ -8,3 +8,4 @@
 **/*.log
 .git
 .claude
+**/.cache
