@@ -26,7 +26,13 @@
  *   npx tsx backend/scripts/reset-reading-progress.ts --user <username|email|id> --course <code|id>
  *   npx tsx backend/scripts/reset-reading-progress.ts --user d --course RT-01 --apply
  */
+import path from 'path';
+import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
+
+// Same lookup as src/config/env.ts: backend/.env first, then the repo-root .env.
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');

@@ -33,6 +33,8 @@ interface ReadingItem {
    * state must then be dropped instead of merged, or the run that was just discarded carries on.
    */
   wasReset?: boolean;
+  /** Course version these figures belong to — progress is recorded per version. */
+  topicVersion?: number;
   // /** Coverage state. totalPages null = coverage doesn't apply to this material. */
   // totalPages?: number | null;
   // pagesViewed?: number[];
@@ -298,6 +300,8 @@ export default function TakeAssessmentPage() {
   // BUG-05: actual wall-clock time the user keeps each material open (counts UP beyond
   // the required minimum), seeded from prior sessions and persisted as elapsedSeconds.
   const actualSpentRef = useRef<Record<string, number>>({});
+  // Course version the reading state in this session belongs to (see the seeding effect).
+  const seenVersionRef = useRef<number | null>(null);
   // Incremented every time the server reports a reset. A reading clock started before the reset
   // still holds the discarded seconds in its closure, and its cleanup would write them back — so it
   // checks this first and stays silent if a reset has intervened.
@@ -458,7 +462,18 @@ export default function TakeAssessmentPage() {
     // A reset discards the whole run, so everything this session is holding has to go with it —
     // seconds banked, files marked read, ends reached. Merging any of it back is what let a reset
     // course carry straight on from the progress that had just been discarded.
-    const wasReset = mats.some((m) => m.wasReset);
+    //
+    // Republishing the course has the same effect for the same reason: progress is recorded per
+    // course version, so a new version legitimately starts the reading again — and the state held
+    // for the old version must not be merged over it. Unlike a reset this can happen while the
+    // trainee is mid-read, so it is called out rather than left looking like lost progress.
+    const serverVersion = mats.find((m) => m.topicVersion != null)?.topicVersion;
+    const versionChanged = serverVersion != null && seenVersionRef.current != null && serverVersion !== seenVersionRef.current;
+    if (serverVersion != null) seenVersionRef.current = serverVersion;
+    if (versionChanged) {
+      toast.info(`This course has been updated to version ${serverVersion}. The reading starts again so you cover the new content.`);
+    }
+    const wasReset = mats.some((m) => m.wasReset) || versionChanged;
     if (wasReset) {
       resetSeqRef.current += 1;
       actualSpentRef.current = {};

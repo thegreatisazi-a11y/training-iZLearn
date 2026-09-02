@@ -1,3 +1,4 @@
+import { NON_PAGINATED_MATERIAL_EXTENSIONS } from '@izlearn/shared';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 // import { coverageUnitFor, hasCoverageUnits, resolveMaterialPageCount, type CoverageUnit } from './documentPages.service';
@@ -179,18 +180,13 @@ export async function markLastPageReached(userId: string, materialId: string) {
 }
 
 /**
- * File types with no "last page" to reach, so the end-of-document gate does not apply:
- *  - media (image/video/audio) — shown whole in a native player, nothing to page through;
- *  - plain-text types — rendered as a short read-only block (these must match the frontend's
- *    TEXT_EXTS, otherwise the gate could never be satisfied for them).
- * Everything else (pdf, doc/docx, ppt/pptx, xls/xlsx) is scrollable and IS gated.
+ * File types with no "last page" to reach, so the end-of-document gate does not apply.
+ *
+ * The list lives in @izlearn/shared so this and the frontend's viewer cannot drift: a type gated
+ * here but rendered natively there could never satisfy the gate, which would make the course
+ * impossible to complete.
  */
-const NON_PAGINATED = new Set([
-  'mp4', 'webm', 'mov', 'avi', 'mkv',
-  'mp3', 'wav', 'ogg', 'm4a',
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
-  'txt', 'csv', 'log', 'md', 'json',
-]);
+const NON_PAGINATED = new Set(NON_PAGINATED_MATERIAL_EXTENSIONS);
 export function paginates(fileType: string): boolean {
   return !NON_PAGINATED.has((fileType || '').toLowerCase());
 }
@@ -457,6 +453,12 @@ export async function getReadingStatus(userId: string, topicId: string) {
       // True when this call discarded a finished-but-unacknowledged run: the client must drop the
       // reading state it is holding rather than merging it over these zeros.
       wasReset,
+      // Reading progress is recorded per course version, so republishing the course legitimately
+      // starts the reading again — the trainee must read the NEW content. The version is reported
+      // so a session that is open when the course is republished can notice the change: without it
+      // the figures simply drop to zero mid-read, which is indistinguishable from a fault, and the
+      // stale in-session state would be merged straight back over them.
+      topicVersion,
     };
   });
 //

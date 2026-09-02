@@ -15,6 +15,10 @@ const MIME_BY_EXT: Record<string, string[]> = {
   xls: ['application/vnd.ms-excel'],
   xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   mp4: ['video/mp4'],
+  // Kept although .avi/.mov are no longer accepted for upload (they are absent from
+  // ALLOWED_MATERIAL_EXTENSIONS, which validateUpload checks first, so these can never admit a new
+  // file). contentTypeForExt still needs them to stream a material stored before the restriction
+  // with the right Content-Type.
   avi: ['video/x-msvideo', 'video/avi'],
   mov: ['video/quicktime'],
   png: ['image/png'],

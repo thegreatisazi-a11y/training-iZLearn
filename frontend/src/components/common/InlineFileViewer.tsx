@@ -4,6 +4,12 @@ import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MoveHorizontal, Maximize2, 
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import DOMPurify from 'dompurify';
+import {
+  BROWSER_PLAYABLE_VIDEO_EXTENSIONS,
+  MATERIAL_AUDIO_EXTENSIONS,
+  MATERIAL_IMAGE_EXTENSIONS,
+  MATERIAL_TEXT_EXTENSIONS,
+} from '@izlearn/shared';
 import { api, apiError } from '@/lib/axios';
 // import { renderXlsxInWorker, XlsxTooLargeError } from '@/lib/renderXlsx';
 
@@ -29,10 +35,16 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mi
  // *     mid-column), so the WORKSHEET is the reading unit instead of the page.
  *   - images / video / audio / text → native locked players.
  */
-const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
-const VIDEO_EXTS = ['mp4', 'webm', 'ogg'];
-const AUDIO_EXTS = ['mp3', 'wav', 'm4a', 'aac', 'oga', 'opus'];
-const TEXT_EXTS = ['txt', 'csv', 'log', 'md', 'json'];
+// Shared with the backend's reading gate (see NON_PAGINATED_MATERIAL_EXTENSIONS): a type the
+// server gates but this viewer renders natively can never satisfy the end-of-document gate, and a
+// type the server treats as media but this viewer has no branch for lands on the
+// "preview unavailable" panel while the trainee is still credited for the time.
+const IMAGE_EXTS: readonly string[] = MATERIAL_IMAGE_EXTENSIONS;
+// Only containers a browser can really play go to the <video> element; .avi/.mkv fall through to
+// the "preview unavailable — use Download" panel rather than a player that fails silently.
+const VIDEO_EXTS: readonly string[] = BROWSER_PLAYABLE_VIDEO_EXTENSIONS;
+const AUDIO_EXTS: readonly string[] = MATERIAL_AUDIO_EXTENSIONS;
+const TEXT_EXTS: readonly string[] = MATERIAL_TEXT_EXTENSIONS;
 /** Rendered via the server LibreOffice→PDF endpoint (presentations + legacy binaries). */
 const SERVER_PDF_EXTS = ['ppt', 'pptx', 'doc', 'xls'];
 // /** Rendered via the server LibreOffice→PDF endpoint. .xlsx is deliberately absent — it
