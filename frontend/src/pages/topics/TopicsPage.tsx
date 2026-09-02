@@ -33,6 +33,8 @@ interface Topic {
   durationMinutes: number;
   passingScorePercent: number;
   maxAttempts: number;
+  /** False for a reading course — its pass mark and attempt limit are unused placeholders. */
+  requiresAssessment?: boolean;
   currentVersion: number;
   isActive: boolean;
 }
@@ -152,11 +154,11 @@ export default function TopicsPage() {
         departmentId: form.departmentId || undefined,
         designationIds: form.designationIds,
         durationMinutes: form.durationMinutes ? Number(form.durationMinutes) : undefined,
-        passingScorePercent: Number(form.passingScorePercent),
-        // Omitted entirely when blank (a reading-only course): Number('') is 0, which the schema
-        // rejects as below the minimum of 1.
+        // Omitted entirely when blank (a reading course): Number('') is 0, which the schema either
+        // rejects as below the minimum or would store as a real "0% to pass".
+        passingScorePercent: form.requiresAssessment && form.passingScorePercent ? Number(form.passingScorePercent) : undefined,
         maxAttempts: form.requiresAssessment && form.maxAttempts ? Number(form.maxAttempts) : undefined,
-        questionLimit: form.questionLimit ? Number(form.questionLimit) : undefined,
+        questionLimit: form.requiresAssessment && form.questionLimit ? Number(form.questionLimit) : undefined,
         randomizeQuestions: form.randomizeQuestions,
         showExplanations: form.showExplanations,
         blockAfterMaxAttempts: form.blockAfterMaxAttempts,
@@ -255,8 +257,9 @@ export default function TopicsPage() {
           [
             ['Type', typeLabels(r)],
             ['Duration (min)', r.durationMinutes],
-            ['Pass %', `${r.passingScorePercent}%`],
-            ['Max Attempts', r.maxAttempts],
+            // Same as the table: unused placeholders on a reading course.
+            ['Pass %', r.requiresAssessment === false ? '—' : `${r.passingScorePercent}%`],
+            ['Max Attempts', r.requiresAssessment === false ? '—' : r.maxAttempts],
           ],
         ),
     );
@@ -275,8 +278,10 @@ export default function TopicsPage() {
     },
     { key: 'trainingType', header: 'Type', render: (r) => typeLabels(r) },
     { key: 'durationMinutes', header: 'Duration (min)' },
-    { key: 'passingScorePercent', header: 'Pass %', render: (r) => `${r.passingScorePercent}%` },
-    { key: 'maxAttempts', header: 'Max Attempts' },
+    // A reading course has no assessment, so its stored pass mark and attempt limit are unused
+    // placeholders — showing them as "0%" and "1" would read as real settings.
+    { key: 'passingScorePercent', header: 'Pass %', render: (r) => (r.requiresAssessment === false ? '—' : `${r.passingScorePercent}%`) },
+    { key: 'maxAttempts', header: 'Max Attempts', render: (r) => (r.requiresAssessment === false ? '—' : r.maxAttempts) },
     { key: 'currentVersion', header: 'Version', render: (r) => `v${r.currentVersion}` },
     { key: 'topicStatus', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{(r.status || 'DRAFT').charAt(0) + (r.status || 'DRAFT').slice(1).toLowerCase()}</Badge> },
     {
@@ -407,10 +412,9 @@ export default function TopicsPage() {
                 createMut.isPending ||
                 !form.title ||
                 form.trainingTypes.length === 0 ||
-                !form.passingScorePercent ||
-                // Max attempts applies only to an assessment; a reading-only course has nothing
-                // to attempt, so it is not required there.
-                (form.requiresAssessment && !form.maxAttempts) ||
+                // The pass mark and attempt limit apply only to an assessment; a reading course has
+                // nothing to score or attempt, so neither is required there.
+                (form.requiresAssessment && (!form.passingScorePercent || !form.maxAttempts)) ||
                 hasFutureSignatoryDate ||
                 hasPastDueDate
               }
@@ -445,34 +449,47 @@ export default function TopicsPage() {
             <MultiSelect options={desigOptions} value={form.designationIds} onChange={(designationIds) => setForm({ ...form, designationIds })} placeholder="Search functional roles…" heightClass="h-32" />
           </Field>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Passing Score %" required>
-            <Input type="number" min={0} max={100} value={form.passingScorePercent} onChange={(e) => setForm({ ...form, passingScorePercent: e.target.value })} />
+        {/* This checkbox governs whether the three assessment fields below are required at all, so
+            it is asked FIRST — the fields then visibly enable/disable in response to it. */}
+        <div className="grid grid-cols-2 items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={form.requiresAssessment} onChange={(e) => setForm({ ...form, requiresAssessment: e.target.checked })} /> Requires assessment (uncheck for reading courses)
+          </label>
+          <Field label="Assessment time limit (min)" hint="Blank = no timer.">
+            <Input type="number" min={1} value={form.assessmentTimeMinutes} disabled={!form.requiresAssessment} onChange={(e) => setForm({ ...form, assessmentTimeMinutes: e.target.value })} />
           </Field>
-          <Field
-            label="Max Attempts"
-            required={form.requiresAssessment}
-            hint={form.requiresAssessment ? undefined : 'Not applicable — this course completes by reading and acknowledgement.'}
-          >
+        </div>
+        {/* A reading course has no assessment, so a pass mark, an attempt limit and a question
+            count have nothing to apply to — they are disabled and not required. */}
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Passing Score %" required={form.requiresAssessment}>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={form.passingScorePercent}
+              disabled={!form.requiresAssessment}
+              onChange={(e) => setForm({ ...form, passingScorePercent: e.target.value })}
+            />
+          </Field>
+          <Field label="Max Attempts" required={form.requiresAssessment}>
             <Input
               type="number"
               min={1}
               value={form.maxAttempts}
               disabled={!form.requiresAssessment}
-              placeholder={form.requiresAssessment ? '' : 'Not applicable'}
               onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })}
             />
           </Field>
           <Field label="Question Limit">
-            <Input type="number" min={1} value={form.questionLimit} onChange={(e) => setForm({ ...form, questionLimit: e.target.value })} placeholder="default" />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={form.requiresAssessment} onChange={(e) => setForm({ ...form, requiresAssessment: e.target.checked })} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)
-          </label>
-          <Field label="Assessment time limit (min)" hint="Blank = no timer.">
-            <Input type="number" min={1} value={form.assessmentTimeMinutes} disabled={!form.requiresAssessment} onChange={(e) => setForm({ ...form, assessmentTimeMinutes: e.target.value })} />
+            <Input
+              type="number"
+              min={1}
+              value={form.questionLimit}
+              disabled={!form.requiresAssessment}
+              onChange={(e) => setForm({ ...form, questionLimit: e.target.value })}
+              placeholder="default"
+            />
           </Field>
         </div>
         {/* CR-T9: structured signatories (User · Prepared/Reviewed/Approved · Date) — auto-completed on publish, they don't take the course. */}

@@ -93,8 +93,10 @@ export async function exportTopicsCsv(
     t.title,
     t.trainingType,
     t.durationMinutes,
-    t.passingScorePercent,
-    t.maxAttempts,
+    // A reading course stores an unused pass mark / attempt limit; export them as blank so the
+    // file matches the on-screen table instead of implying "0% to pass, 1 attempt".
+    t.requiresAssessment === false ? '' : t.passingScorePercent,
+    t.requiresAssessment === false ? '' : t.maxAttempts,
     `v${t.currentVersion}`,
     t.status,
     t.effectiveDate ? t.effectiveDate.toISOString().slice(0, 10) : '',
@@ -203,14 +205,19 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
         : 'A new reading-only course has no document yet — save it as a draft, attach the training document, then publish.',
     );
   }
-  // Max attempts only means something when there IS an assessment to attempt: a reading-only
-  // course completes by reading and acknowledging, so the field is not asked for and defaults to
-  // the stored minimum (it is never read on that path). An assessment course still requires it.
+  // A pass mark and an attempt limit only mean something when there IS an assessment: a reading
+  // course completes by reading and acknowledging, so neither field is asked for and both fall
+  // back to stored placeholders that are never read on that path. An assessment course still
+  // requires both.
   const requiresAssessment = input.requiresAssessment ?? true;
   if (requiresAssessment && input.maxAttempts == null) {
     throw AppError.badRequest('Max attempts is required for a course with an assessment.');
   }
+  if (requiresAssessment && input.passingScorePercent == null) {
+    throw AppError.badRequest('Passing score is required for a course with an assessment.');
+  }
   const maxAttempts = input.maxAttempts ?? 1;
+  const passingScorePercent = input.passingScorePercent ?? 0;
 
   const sequence = (await prisma.trainingTopic.count()) + 1;
   const topicCode = generateTopicCode(sequence);
@@ -235,7 +242,7 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       signatories: (input.signatories ?? []) as Prisma.InputJsonValue,
       sequenceIndex: input.sequenceIndex ?? null,
       durationMinutes: input.durationMinutes ?? 0, // Page 8: optional; defaults to 0 when omitted
-      passingScorePercent: input.passingScorePercent,
+      passingScorePercent,
       maxAttempts,
       questionLimit: input.questionLimit ?? null,
       ...(input.randomizeQuestions !== undefined ? { randomizeQuestions: input.randomizeQuestions } : {}),

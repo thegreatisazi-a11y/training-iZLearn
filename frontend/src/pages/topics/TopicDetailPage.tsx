@@ -496,7 +496,8 @@ export default function TopicDetailPage() {
         signatories: editTopicForm.signatories.filter((s) => s.userId),
         assessmentTimeMinutes: Number(editTopicForm.assessmentTimeMinutes) > 0 ? Number(editTopicForm.assessmentTimeMinutes) : null,
         durationMinutes: editTopicForm.durationMinutes !== '' ? Number(editTopicForm.durationMinutes) : undefined,
-        maxAttempts: Number(editTopicForm.maxAttempts),
+        // Omitted when blank: Number('') is 0, which the schema rejects as below the minimum of 1.
+        maxAttempts: editTopicForm.maxAttempts !== '' ? Number(editTopicForm.maxAttempts) : undefined,
         questionLimit: Number(editTopicForm.questionLimit) > 0 ? Number(editTopicForm.questionLimit) : undefined,
         refresherIntervalMonths: Number(editTopicForm.refresherIntervalMonths) > 0 ? Number(editTopicForm.refresherIntervalMonths) : undefined,
         materialViewSeconds: editTopicForm.materialViewSeconds ? Number(editTopicForm.materialViewSeconds) : undefined,
@@ -878,13 +879,14 @@ export default function TopicDetailPage() {
         <Card>
           <CardContent>
             <div className="text-xs text-slate-500">Passing Score</div>
-            <div className="text-lg font-semibold text-slate-800">{String(t.passingScorePercent)}%</div>
+            {/* A reading course stores an unused pass mark; showing "0%" would read as a real setting. */}
+            <div className="text-lg font-semibold text-slate-800">{t.requiresAssessment === false ? '—' : `${String(t.passingScorePercent)}%`}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent>
             <div className="text-xs text-slate-500">Max Attempts</div>
-            <div className="text-lg font-semibold text-slate-800">{String(t.maxAttempts)}</div>
+            <div className="text-lg font-semibold text-slate-800">{t.requiresAssessment === false ? '—' : String(t.maxAttempts)}</div>
           </CardContent>
         </Card>
       </div>
@@ -1514,7 +1516,9 @@ export default function TopicDetailPage() {
             <Button
               disabled={
                 !editTopicForm.title ||
-                !editTopicForm.maxAttempts ||
+                // The pass mark and attempt limit apply only to an assessment; a reading course
+                // has nothing to score or attempt, so neither is required there.
+                (editTopicForm.requiresAssessment && (!editTopicForm.passingScorePercent || !editTopicForm.maxAttempts)) ||
                 editTopicForm.trainingTypes.length === 0 ||
                 hasFutureSignatoryDate ||
                 hasPastDueDate ||
@@ -1548,16 +1552,20 @@ export default function TopicDetailPage() {
             <MultiSelect options={editDesigOpts} value={editTopicForm.designationIds} onChange={(designationIds) => setEditTopicForm((f) => ({ ...f, designationIds }))} placeholder="Search functional roles…" heightClass="h-32" />
           </Field>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Passing Score %" required>
-            <Input type="number" min={0} max={100} value={editTopicForm.passingScorePercent} onChange={(e) => setEditTopicForm((f) => ({ ...f, passingScorePercent: e.target.value }))} />
-          </Field>
-          <Field label="Max Attempts" required><Input type="number" min={1} value={editTopicForm.maxAttempts} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
-          <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck = SOP completes via read &amp; T&amp;C)</label>
+        {/* Asked FIRST, as on the create form: this checkbox governs whether the three assessment
+            fields below are required at all, and they enable/disable in response to it. */}
+        <div className="grid grid-cols-2 items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, requiresAssessment: e.target.checked }))} /> Requires assessment (uncheck for reading courses)</label>
           <Field label="Assessment time limit (min)" hint="Blank = no timer."><Input type="number" min={1} value={editTopicForm.assessmentTimeMinutes} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, assessmentTimeMinutes: e.target.value }))} /></Field>
+        </div>
+        {/* A reading course has no assessment, so a pass mark, an attempt limit and a question
+            count have nothing to apply to — they are disabled and not required. */}
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Passing Score %" required={editTopicForm.requiresAssessment}>
+            <Input type="number" min={0} max={100} value={editTopicForm.passingScorePercent} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, passingScorePercent: e.target.value }))} />
+          </Field>
+          <Field label="Max Attempts" required={editTopicForm.requiresAssessment}><Input type="number" min={1} value={editTopicForm.maxAttempts} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, maxAttempts: e.target.value }))} /></Field>
+          <Field label="Question Limit"><Input type="number" min={1} value={editTopicForm.questionLimit} disabled={!editTopicForm.requiresAssessment} onChange={(e) => setEditTopicForm((f) => ({ ...f, questionLimit: e.target.value }))} placeholder="default" /></Field>
         </div>
         {/* CR-T9: structured signatories (User · Prepared/Reviewed/Approved · Date) — auto-completed on publish, they don't take the course. */}
         <div className="mt-2">
