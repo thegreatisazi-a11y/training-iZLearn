@@ -26,7 +26,10 @@ export const createTopicSchema = z.object({
   requiresAssessment: z.coerce.boolean().optional(), // CR-41: false = SOP, completes via T&C
   assessmentTimeMinutes: z.coerce.number().int().positive().optional(), // CR-38: countdown limit
   passingScorePercent: z.coerce.number().int().min(0).max(100),
-  maxAttempts: z.coerce.number().int().min(1),
+  // Optional: a reading-only course (requiresAssessment false) has no assessment to attempt, so
+  // there is nothing for a limit to apply to. It stays required for a course that DOES have an
+  // assessment — see the check in createTopic, which is where the two fields can be compared.
+  maxAttempts: z.coerce.number().int().min(1).optional(),
   questionLimit: z.coerce.number().int().min(1).optional(), // per-course # of questions per assessment
   randomizeQuestions: z.coerce.boolean().optional(),
   showExplanations: z.coerce.boolean().optional(),

@@ -25,9 +25,19 @@ export async function runDueReminderCheck() {
 
   // Overdue: past due and still open → mark OVERDUE, require supervisor sign-off,
   // notify once (overdueNotifiedAt dedups repeat notifications). CR-56.
-  const overdue = await prisma.trainingAssignment.findMany({
-    where: { isDeleted: false, dueDate: { lt: startOfDay(now) }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+  //
+  // A due date is OPTIONAL — a course created without one, and the new-joiner auto-assign flow,
+  // both leave it unset. Such an assignment can never be overdue and must be left alone.
+  //
+  // MongoDB makes that easy to get wrong: in BSON sort order null (and a MISSING field) ranks
+  // BELOW every Date, so `dueDate: { lt: <date> }` MATCHES the rows with no due date at all —
+  // which silently marked every no-deadline assignment OVERDUE on the nightly sweep. The `not:
+  // null` filter narrows the query, and the guard in the loop is what actually guarantees it,
+  // since (per CLAUDE.md) Prisma's null filters do not match documents where the field is absent.
+  const candidates = await prisma.trainingAssignment.findMany({
+    where: { isDeleted: false, dueDate: { not: null, lt: startOfDay(now) }, status: { in: ['PENDING', 'IN_PROGRESS'] } },
   });
+  const overdue = candidates.filter((a) => a.dueDate != null && a.dueDate < startOfDay(now));
   for (const a of overdue) {
     await prisma.trainingAssignment.update({
       where: { id: a.id },

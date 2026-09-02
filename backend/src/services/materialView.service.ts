@@ -240,6 +240,43 @@ export async function resetUnacknowledgedReading(userId: string, topicId: string
 }
 
 /**
+ * A FAILED assessment sends the trainee back through the training content: re-opening the course
+ * after a failure starts the reading again from the beginning rather than resuming, so the
+ * material is genuinely re-read before the next attempt. Attempts remain limited as before — once
+ * the maximum is reached the course is blocked (see startAssessment) and no further reading or
+ * attempt is possible without a supervisor-approved retake.
+ *
+ * Only reading that belongs to the FAILED run is discarded: logs created after that attempt
+ * finished are the trainee's re-read and must be left alone, which also makes this idempotent —
+ * it clears once per failure, not on every visit.
+ *
+ * A PASSED attempt never triggers this: the course is complete and is never reset.
+ */
+export async function resetReadingAfterFailedAttempt(userId: string, topicId: string): Promise<boolean> {
+  const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
+  if (!topic) return false;
+  const topicVersion = topic.currentVersion ?? 1;
+
+  const lastAttempt = await prisma.assessmentAttempt.findFirst({
+    where: { userId, topicId, topicVersion, isDeleted: false, completedAt: { not: null } },
+    orderBy: { completedAt: 'desc' },
+    select: { completedAt: true, isPassed: true },
+  });
+  if (!lastAttempt?.completedAt || lastAttempt.isPassed) return false;
+
+  const logs = await prisma.materialViewLog.findMany({
+    where: { userId, topicId, topicVersion },
+    select: { id: true, createdAt: true },
+  });
+  // Anything recorded before the failed attempt finished belongs to that run.
+  const stale = logs.filter((l) => l.createdAt < lastAttempt.completedAt!).map((l) => l.id);
+  if (!stale.length) return false;
+
+  await prisma.materialViewLog.deleteMany({ where: { userId, topicId, topicVersion } });
+  return true;
+}
+
+/**
  * Record that the read-and-understood declaration became visible to this trainee for this course
  * version. Called by the reading screen the first time it shows the tick box; stamped on every
  * current log so clearing the run (above) also clears the marker.
@@ -426,7 +463,11 @@ export async function getReadingStatus(userId: string, topicId: string) {
   // the course then carried on from the progress that had just been discarded. This is the only
   // signal that distinguishes "the server discarded the run" from "the server has not caught up
   // with us yet", so it has to be explicit rather than inferred from the zeros.
-  const wasReset = await resetUnacknowledgedReading(userId, topicId).catch(() => false);
+  // Two independent rules can discard a run: the declaration was shown but never acknowledged,
+  // and the last assessment attempt failed. Both are evaluated — either one resets the reading.
+  const clearedUnacknowledged = await resetUnacknowledgedReading(userId, topicId).catch(() => false);
+  const clearedAfterFailure = await resetReadingAfterFailedAttempt(userId, topicId).catch(() => false);
+  const wasReset = clearedUnacknowledged || clearedAfterFailure;
   const topic = await prisma.trainingTopic.findUnique({ where: { id: topicId } });
   // const course = (await prisma.trainingTopic.findUnique({ where: { id: topicId } })) as (TopicLike & { currentVersion?: number }) | null;
   const topicVersion = topic?.currentVersion ?? 1;

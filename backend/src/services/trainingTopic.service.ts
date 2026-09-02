@@ -203,6 +203,15 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
         : 'A new reading-only course has no document yet — save it as a draft, attach the training document, then publish.',
     );
   }
+  // Max attempts only means something when there IS an assessment to attempt: a reading-only
+  // course completes by reading and acknowledging, so the field is not asked for and defaults to
+  // the stored minimum (it is never read on that path). An assessment course still requires it.
+  const requiresAssessment = input.requiresAssessment ?? true;
+  if (requiresAssessment && input.maxAttempts == null) {
+    throw AppError.badRequest('Max attempts is required for a course with an assessment.');
+  }
+  const maxAttempts = input.maxAttempts ?? 1;
+
   const sequence = (await prisma.trainingTopic.count()) + 1;
   const topicCode = generateTopicCode(sequence);
   const created = await prisma.trainingTopic.create({
@@ -220,14 +229,14 @@ export async function createTopic(input: CreateTopicInput, createdBy: string) {
       designationIds: (input.designationIds ?? (input.designationId ? [input.designationId] : [])) as Prisma.InputJsonValue,
       roleId: input.roleId ?? null,
       roleIds: (input.roleIds ?? []) as Prisma.InputJsonValue,
-      requiresAssessment: input.requiresAssessment ?? true,
+      requiresAssessment,
       assessmentTimeMinutes: input.assessmentTimeMinutes ?? null,
       signatoryUserIds: (input.signatories?.length ? input.signatories.map((s) => s.userId) : input.signatoryUserIds ?? []) as Prisma.InputJsonValue,
       signatories: (input.signatories ?? []) as Prisma.InputJsonValue,
       sequenceIndex: input.sequenceIndex ?? null,
       durationMinutes: input.durationMinutes ?? 0, // Page 8: optional; defaults to 0 when omitted
       passingScorePercent: input.passingScorePercent,
-      maxAttempts: input.maxAttempts,
+      maxAttempts,
       questionLimit: input.questionLimit ?? null,
       ...(input.randomizeQuestions !== undefined ? { randomizeQuestions: input.randomizeQuestions } : {}),
       ...(input.showExplanations !== undefined ? { showExplanations: input.showExplanations } : {}),

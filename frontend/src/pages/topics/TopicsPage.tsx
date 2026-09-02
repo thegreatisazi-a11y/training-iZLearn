@@ -153,7 +153,9 @@ export default function TopicsPage() {
         designationIds: form.designationIds,
         durationMinutes: form.durationMinutes ? Number(form.durationMinutes) : undefined,
         passingScorePercent: Number(form.passingScorePercent),
-        maxAttempts: Number(form.maxAttempts),
+        // Omitted entirely when blank (a reading-only course): Number('') is 0, which the schema
+        // rejects as below the minimum of 1.
+        maxAttempts: form.requiresAssessment && form.maxAttempts ? Number(form.maxAttempts) : undefined,
         questionLimit: form.questionLimit ? Number(form.questionLimit) : undefined,
         randomizeQuestions: form.randomizeQuestions,
         showExplanations: form.showExplanations,
@@ -406,7 +408,9 @@ export default function TopicsPage() {
                 !form.title ||
                 form.trainingTypes.length === 0 ||
                 !form.passingScorePercent ||
-                !form.maxAttempts ||
+                // Max attempts applies only to an assessment; a reading-only course has nothing
+                // to attempt, so it is not required there.
+                (form.requiresAssessment && !form.maxAttempts) ||
                 hasFutureSignatoryDate ||
                 hasPastDueDate
               }
@@ -445,8 +449,19 @@ export default function TopicsPage() {
           <Field label="Passing Score %" required>
             <Input type="number" min={0} max={100} value={form.passingScorePercent} onChange={(e) => setForm({ ...form, passingScorePercent: e.target.value })} />
           </Field>
-          <Field label="Max Attempts" required>
-            <Input type="number" min={1} value={form.maxAttempts} onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })} />
+          <Field
+            label="Max Attempts"
+            required={form.requiresAssessment}
+            hint={form.requiresAssessment ? undefined : 'Not applicable — this course completes by reading and acknowledgement.'}
+          >
+            <Input
+              type="number"
+              min={1}
+              value={form.maxAttempts}
+              disabled={!form.requiresAssessment}
+              placeholder={form.requiresAssessment ? '' : 'Not applicable'}
+              onChange={(e) => setForm({ ...form, maxAttempts: e.target.value })}
+            />
           </Field>
           <Field label="Question Limit">
             <Input type="number" min={1} value={form.questionLimit} onChange={(e) => setForm({ ...form, questionLimit: e.target.value })} placeholder="default" />
