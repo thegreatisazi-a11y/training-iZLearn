@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { APP_TIMEZONE } from '../utils/dateUtils';
 import { DEFAULT_SYSTEM_CONFIG } from '@izlearn/shared';
 
 /** In-memory cache of config values (invalidated on every write). */
@@ -84,6 +85,6 @@ export async function getOrgInfo() {
     logoPath: await getConfig('org.logo_path'),
     signatoryName: await getConfig('org.signatory_name'),
     signatoryTitle: await getConfig('org.signatory_title'),
-    timezone: (await getConfig('system.timezone')) || 'UTC',
+    timezone: (await getConfig('system.timezone')) || APP_TIMEZONE,
   };
 }

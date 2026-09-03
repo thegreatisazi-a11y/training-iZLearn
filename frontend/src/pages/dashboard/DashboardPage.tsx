@@ -250,10 +250,10 @@ export default function DashboardPage() {
     },
     {
       id: 'my-team',
-      title: 'My Team (Reporting Manager)',
+      title: 'My Team',
       available: showTeam,
       node: section(
-        'My Team (Reporting Manager)',
+        'My Team',
         <>
           <Stat icon={Users} label="Team Members" value={team?.teamSize ?? 0} tone="bg-slate-100 text-slate-700" to="/team" />
           <Stat icon={Clock} label="Team Pending" value={team?.pending ?? 0} tone="bg-amber-100 text-amber-700" to="/team" />

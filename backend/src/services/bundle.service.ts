@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { formatDateIso } from '../utils/dateUtils';
 import { AppError } from '../utils/response';
 import type { Request } from 'express';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
@@ -317,7 +318,7 @@ export async function exportBundlesCsv(q: PaginationQuery): Promise<string> {
     ((b.designationIds as string[]) ?? []).length,
     ((b.roleIds as string[]) ?? []).length,
     ((b.userIds as string[]) ?? []).length,
-    b.dueDate ? new Date(b.dueDate as unknown as string).toISOString().slice(0, 10) : '',
+    formatDateIso(b.dueDate as unknown as string | null),
     b.isActive ? 'Active' : 'Inactive',
   ]);
   return toCsv(headers, rows);

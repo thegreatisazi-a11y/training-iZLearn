@@ -6,6 +6,8 @@ import * as storage from './storage.service';
 import { generateCertificateNumber } from '../utils/certificateNumber';
 import { formatDate } from '../utils/dateUtils';
 import { escapeHtml } from '../utils/reportHeader';
+import { hasOrgWideScope } from '../utils/accessScope';
+import type { PermissionMatrix } from '@izlearn/shared';
 import { getOrgInfo } from './systemConfig.service';
 import { getDefaultTemplate } from './certificateTemplate.service';
 import { recordEvent } from './auditTrail.service';
@@ -175,22 +177,28 @@ export async function listCertificates(filters: { userId?: string }) {
 
 /**
  * R3: who may view WHOSE certificates in the "Other Certificates" view.
- *   - SUPER_ADMIN, admin, training coordinator (i.e. anyone with the permission who is
- *     NOT a plain supervisor) → everyone's.
- *   - a supervisor → only their direct reports'.
+ *   - certificates:view_all (or org-wide team scope) → everyone's.
+ *   - otherwise → only their direct reports'.
  * (Access to the view itself is gated by certificates:view_others on the route.)
+ *
+ * Was keyed on the role NAMES 'SUPER_ADMIN' / 'supervisor' — a string match that both
+ * hid the rule from Roles & Access Control and broke for any renamed or custom role.
  */
-export async function certificateViewerScope(requester: { id: string; roleNames: string[] }): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
-  const isSuperAdmin = requester.roleNames.includes('SUPER_ADMIN');
-  const isSupervisor = !isSuperAdmin && requester.roleNames.some((n) => n.trim().toLowerCase() === 'supervisor');
-  if (!isSupervisor) return { canSeeAll: true, teamUserIds: [] };
+export async function certificateViewerScope(
+  // permissions is REQUIRED: an optional one silently defaulted to undefined at a call
+  // site and scoped EVERY viewer to their direct reports, admins included.
+  requester: { id: string; roleNames: string[]; permissions: PermissionMatrix },
+): Promise<{ canSeeAll: boolean; teamUserIds: string[] }> {
+  const canSeeAll =
+    hasOrgWideScope(requester.permissions, 'certificates') || hasOrgWideScope(requester.permissions, 'team');
+  if (canSeeAll) return { canSeeAll: true, teamUserIds: [] };
   const reports = await prisma.user.findMany({ where: { supervisorId: requester.id, isDeleted: false }, select: { id: true } });
   return { canSeeAll: false, teamUserIds: reports.map((r) => r.id) };
 }
 
 /** R3: certificates of OTHER users the requester may view (team for a supervisor, all
  *  for admin / training coordinator). Own certificates live under "My Certificates". */
-export async function listOtherCertificates(requester: { id: string; roleNames: string[] }) {
+export async function listOtherCertificates(requester: { id: string; roleNames: string[]; permissions: PermissionMatrix }) {
   const scope = await certificateViewerScope(requester);
   const where: Prisma.CertificateWhereInput = { isDeleted: false, userId: { not: requester.id } };
   if (!scope.canSeeAll) where.userId = { in: scope.teamUserIds.length ? scope.teamUserIds.filter((u) => u !== requester.id) : ['__no_match__'] };

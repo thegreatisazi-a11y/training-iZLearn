@@ -80,7 +80,9 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
       // team:* permissions instead.
       userManagement: ['view', 'print', 'export'],
       userRequests: ['view', 'approve'],
-      team: 'all',
+      // NOT 'all': team:view_all is the org-wide override (see the permission catalog) and
+      // must stay OFF for a supervisor, who is scoped to their own direct reports.
+      team: ['view', 'create', 'edit', 'deactivate', 'approve', 'print', 'export'],
       roleManagement: ['view'],
       masterSetup: ['view'],
       courseManagement: ['view'],
@@ -355,12 +357,54 @@ async function main() {
         p.certificateTemplates = { ...ct, ...deriveLegacyFlags(ct) };
         changed = true;
       }
+
       if (changed) {
         await prisma.role.update({ where: { id: role.id }, data: { permissions: p as Prisma.InputJsonValue } });
         migrated += 1;
       }
     }
     if (migrated) console.log(`   ✓ back-filled split permissions for ${migrated} role(s)`);
+  }
+
+  // 2a-3. `view_all` one-off: the org-wide override that replaced the hard-coded
+  // `roleNames.includes('SUPER_ADMIN')` checks in the user / certificate / CV / retake
+  // services.
+  //
+  // MUST be granted here or the super-admin role silently LOSES org-wide access the moment
+  // the new code deploys — an absent OR explicitly-false permission both read as denied,
+  // and saving the role in Roles & Access Control before this migration writes `false` for
+  // the new actions. Restores exactly the access the old role-name check gave: the
+  // super-admin role only, never widened to anyone else.
+  //
+  // Matched on the NORMALISED name (as everywhere else in this seed) because the role is
+  // routinely renamed 'SUPER_ADMIN' -> 'Super Admin' via the UI. Marker-guarded so it runs
+  // exactly once and never re-clobbers a later deliberate choice.
+  {
+    const markerKey = 'migration.view_all_super_admin_v1';
+    const done = await prisma.systemConfig.findUnique({ where: { key: markerKey } });
+    if (!done) {
+      const admins = (await prisma.role.findMany({ where: { isDeleted: false } })).filter(
+        (r) => normRole(r.roleName) === normRole('SUPER_ADMIN'),
+      );
+      for (const r of admins) {
+        const perms = (r.permissions ?? {}) as Record<string, Record<string, boolean>>;
+        for (const mod of ['userManagement', 'team', 'cv', 'certificates']) {
+          perms[mod] = perms[mod] ?? {};
+          perms[mod].view_all = true;
+          Object.assign(perms[mod], deriveLegacyFlags(perms[mod]));
+        }
+        await prisma.role.update({ where: { id: r.id }, data: { permissions: perms as Prisma.InputJsonValue } });
+      }
+      await prisma.systemConfig.create({
+        data: {
+          key: markerKey,
+          value: 'done',
+          description: 'Granted view_all (org-wide scope) to the super-admin role, replacing hard-coded SUPER_ADMIN checks',
+          updatedBy: SYSTEM,
+        },
+      });
+      if (admins.length) console.log(`   ✓ granted org-wide view_all to ${admins.length} super-admin role(s)`);
+    }
   }
 
   // 2a-2. S4 one-off: make the EXISTING Supervisor role VIEW-ONLY in the Users module

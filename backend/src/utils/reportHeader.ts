@@ -1,4 +1,4 @@
-import { formatDateTime } from './dateUtils';
+import { formatDateTime, APP_TIMEZONE } from './dateUtils';
 
 export interface ReportHeaderConfig {
   orgName: string;
@@ -33,7 +33,7 @@ export function buildHeaderTemplate(cfg: ReportHeaderConfig): string {
 }
 
 export function buildFooterTemplate(cfg: ReportHeaderConfig): string {
-  const tz = cfg.timezone || 'UTC';
+  const tz = cfg.timezone || APP_TIMEZONE;
   const generated = formatDateTime(cfg.generatedAt, tz);
   const printedLine = cfg.printedByName
     ? `<span>Printed By: ${escapeHtml(cfg.printedByName)} &nbsp;|&nbsp; Printed: ${generated}</span>`

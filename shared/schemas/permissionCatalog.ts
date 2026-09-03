@@ -71,6 +71,11 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'userAccess',
     actions: [
       A('view', 'View Users', "Open the Users list and view any user's profile details (all users, org-wide)."),
+      A(
+        'view_all',
+        "View All Users' Details",
+        "Open the FULL detail of any user — profile, training history, assessments and certificates — for everyone in the organisation. Without this, a user's full detail is limited to their own direct reportees.",
+      ),
       A('create', 'Create / New User Request', 'Raise a new-user request, which goes to the User Requests queue for approval.'),
       A('edit', 'Edit User', "Edit any user's details (name, email, department, manager, functional role) org-wide."),
       A('approve', 'Activate / Deactivate / Change Roles', 'Activate or deactivate a user and change their assigned roles (e-signed).'),
@@ -92,10 +97,15 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
   },
   {
     module: 'team',
-    label: 'Team (Reporting Manager)',
+    label: 'My Team',
     category: 'userAccess',
     actions: [
       A('view', 'View Assigned Team', 'See your assigned team / direct reports in My Team.'),
+      A(
+        'view_all',
+        'View / Act Organisation-Wide',
+        'See and act on EVERY employee, not only your own direct reports — covers My Team, team training history and retake-request approvals. Leave OFF for a supervisor.',
+      ),
       A('create', 'Add Team Member', 'Add a new team member (raises a user request for your team).'),
       A('edit', 'Edit Team Member', 'Edit a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
       A('deactivate', 'Deactivate Team Member', 'Deactivate a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
@@ -259,6 +269,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'tniJdCv',
     actions: [
       A('view', 'View Own CV', 'View your own CV.'),
+      A('view_all', "View All Users' CVs", "View and review ANY user's CV org-wide, not only your own direct reportees'."),
       A('edit', 'Create / Edit Own CV', 'Create or edit your own CV.'),
       A('print', 'Print CV', 'Print your CV.'),
       A('export', 'Export CV', 'Export your CV.'),
@@ -289,6 +300,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     actions: [
       A('view', 'View Certificates', 'View your own certificates.'),
       A('view_others', "View Others' Certificates", "View other users' certificates — your team's (supervisor) or everyone's (org-wide user managers)."),
+      A('view_all', "View All Users' Certificates", "See EVERY user's certificates, not only your own direct reportees'."),
       A('create', 'Generate Certificate', 'Generate a certificate.'),
       A('print', 'Print Certificate', 'Print a certificate.'),
       A('export', 'Export Certificate', 'Export certificates.'),

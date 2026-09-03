@@ -16,7 +16,7 @@ export const list = asyncHandler(async (req, res) =>
 // R3: certificates of OTHER users the requester may view (team for a supervisor, all for
 // admin / training coordinator). Route-gated on certificates:view_others; scope enforced here.
 export const listOthers = asyncHandler(async (req: Request, res: Response) =>
-  sendSuccess(res, await svc.listOtherCertificates({ id: req.user!.id, roleNames: req.user!.roleNames })),
+  sendSuccess(res, await svc.listOtherCertificates({ id: req.user!.id, roleNames: req.user!.roleNames, permissions: req.user!.permissions })),
 );
 
 export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.getCertificate(req.params.id)));

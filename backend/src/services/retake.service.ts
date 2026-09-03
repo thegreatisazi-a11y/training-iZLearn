@@ -6,6 +6,8 @@ import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { notifyRetakeRequested, notifyRetakeDecision } from './notification.service';
+import { hasOrgWideScope } from '../utils/accessScope';
+import type { PermissionMatrix } from '@izlearn/shared';
 import type { CreateRetakeRequestInput, RetakeDecisionInput, PaginationQuery } from '@izlearn/shared';
 
 /**
@@ -82,11 +84,12 @@ export async function listMyRetakeRequests(userId: string) {
 
 /**
  * Retake requests routed to the signed-in supervisor (their direct reports).
- * SUPER_ADMIN sees all. Scoped server-side.
+ * team:view_all sees all. Scoped server-side.
  */
 export async function listForSupervisor(req: Request, q: PaginationQuery & { status?: string }) {
   const requester = req.user!;
-  const seeAll = requester.roleNames.includes('SUPER_ADMIN');
+  // Permission-driven (team:view_all in Roles & Access Control), not a role-name match.
+  const seeAll = hasOrgWideScope(requester.permissions as PermissionMatrix, 'team');
   const where: Prisma.RetakeRequestWhereInput = {
     isDeleted: false,
     ...(seeAll ? {} : { supervisorId: requester.id }),
@@ -107,7 +110,7 @@ const OVERDUE_ACCESS_GRACE_DAYS = 7;
 
 /**
  * Supervisor decision on a retake request (e-signed). Only the trainee's direct
- * supervisor (or a SUPER_ADMIN) may decide. APPROVE unblocks the assignment and
+ * supervisor (or someone with org-wide team scope, team:view_all) may decide. APPROVE unblocks the assignment and
  * grants a fresh maxAttempts by setting extraAttempts to the attempts used so far.
  */
 export async function decideRetakeRequest(id: string, input: RetakeDecisionInput, req: Request) {
@@ -116,8 +119,8 @@ export async function decideRetakeRequest(id: string, input: RetakeDecisionInput
   if (request.status !== 'PENDING_APPROVAL') throw AppError.conflict('This retake request has already been decided.');
 
   const isSupervisor = request.supervisorId && request.supervisorId === req.user!.id;
-  const isSuperAdmin = req.user!.roleNames.includes('SUPER_ADMIN');
-  if (!isSupervisor && !isSuperAdmin) {
+  const canActOrgWide = hasOrgWideScope(req.user!.permissions as PermissionMatrix, 'team');
+  if (!isSupervisor && !canActOrgWide) {
     throw AppError.forbidden('Only the trainee’s direct supervisor may decide this retake request.');
   }
 

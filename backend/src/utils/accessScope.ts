@@ -26,6 +26,24 @@ export function isOrgWideUserManager(perms?: PermissionMatrix): boolean {
   );
 }
 
+/**
+ * True when the requester may act ORG-WIDE on a module rather than only on their own
+ * direct reports — i.e. the module's `view_all` permission is granted in Roles & Access
+ * Control.
+ *
+ * This replaces the hard-coded `roleNames.includes('SUPER_ADMIN')` checks that used to be
+ * scattered through the services. Those were invisible in R&AC (so an admin role other
+ * than SUPER_ADMIN silently got the direct-reportee treatment) and could not be granted
+ * to a custom role without a code change. `view_all` is a real toggle, and because the
+ * key starts with "view" it derives the legacy `read` flag automatically.
+ *
+ * Read EXACTLY: an absent key is false (`view_all` has no legacy fallback), so a role
+ * that has never been granted it never gets org-wide scope by accident.
+ */
+export function hasOrgWideScope(perms: PermissionMatrix | undefined, module: string): boolean {
+  return hasPermission(perms, module, 'view_all' as PermissionAction);
+}
+
 /** The ids of a user's direct reports (active, non-deleted). */
 export async function directReportIds(supervisorId: string): Promise<string[]> {
   const reports = await prisma.user.findMany({

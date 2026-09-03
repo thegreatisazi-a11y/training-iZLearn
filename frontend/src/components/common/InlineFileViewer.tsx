@@ -4,6 +4,7 @@ import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight, MoveHorizontal, Maximize2, 
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import DOMPurify from 'dompurify';
+import { formatDate } from '@/lib/format';
 import {
   BROWSER_PLAYABLE_VIDEO_EXTENSIONS,
   MATERIAL_AUDIO_EXTENSIONS,
@@ -348,7 +349,7 @@ async function xlsxToHtml(blob: Blob): Promise<string> {
 /** A cell's displayed text: exceljs yields objects for dates, formulas, rich text and links. */
 function cellText(v: unknown): string {
   if (v === null || v === undefined) return '';
-  if (v instanceof Date) return v.toLocaleDateString();
+  if (v instanceof Date) return formatDate(v); // IST, like every other date in the app
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
     if (Array.isArray(o.richText)) return (o.richText as { text?: string }[]).map((t) => t.text ?? '').join('');

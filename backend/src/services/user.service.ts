@@ -15,7 +15,7 @@ import {
 import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
 import { hasPermission, mergePermissions } from '../utils/permissions';
-import { isOrgWideUserManager } from '../utils/accessScope';
+import { isOrgWideUserManager, hasOrgWideScope } from '../utils/accessScope';
 import { createUserSchema, PERMISSION_CATALOG } from '@izlearn/shared';
 import type {
   CreateUserInput,
@@ -918,7 +918,11 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
  */
 export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   const requester = req.user!;
-  const seeAll = requester.roleNames.includes('SUPER_ADMIN');
+  // Org-wide access is a PERMISSION (userManagement:view_all / team:view_all in Roles &
+  // Access Control), not a hard-coded role name — so any admin role can be granted it.
+  const seeAll =
+    hasOrgWideScope(requester.permissions as PermissionMatrix, 'userManagement') ||
+    hasOrgWideScope(requester.permissions as PermissionMatrix, 'team');
   const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false } });
   if (!target) throw AppError.notFound('User not found');
   if (!seeAll && target.supervisorId !== requester.id) {

@@ -457,10 +457,12 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
     }
 
     case 'audit-trail': {
+      // No row cap here: the export layer applies the platform-wide limits (CSV
+      // unbounded, Excel capped and SAID SO, PDF capped and said so), matching the
+      // Audit Trail page's own export. The old take: 5000 truncated silently.
       const logs = await prisma.auditTrail.findMany({
         where: { ...dateRange('timestamp', f) },
         orderBy: { timestamp: 'desc' },
-        take: 5000,
       });
       const rows = logs.map((l) => ({
         timestamp: formatDate(l.timestamp),
@@ -734,6 +736,13 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
  */
 const PDF_MAX_ROWS = parseInt(process.env.PDF_MAX_ROWS || '1000', 10);
 
+/**
+ * Excel row cap — matches the Audit Trail page's export. Excel itself stops at ~1,048,576
+ * rows, so this is the practical ceiling either way; it exists to keep the buffered
+ * workbook inside a 512 MB instance. Stated in the sheet when it bites, never silent.
+ */
+const XLSX_MAX_ROWS = parseInt(process.env.XLSX_MAX_ROWS || '100000', 10);
+
 function tableHtml(title: string, columns: ReportData['columns'], rows: ReportData['rows']): string {
   const shown = rows.slice(0, PDF_MAX_ROWS);
   const note =
@@ -767,24 +776,36 @@ export async function exportReport(
 ): Promise<ExportResult> {
   const data = await buildReport(type, filters);
   const fmt = format.toLowerCase();
+  // Every format stamps "Generated on …" in the configured display timezone (IST).
+  const org = await getOrgInfo();
 
   if (fmt === 'csv') {
-    return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows, { generatedBy: user.fullName }), rowCount: data.rows.length };
+    return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows, { generatedBy: user.fullName, timezone: org.timezone }), rowCount: data.rows.length };
   }
   if (fmt === 'xls' || fmt === 'xlsx') {
     // Tab name is capped at 31 chars by the .xlsx format (sanitised); the FULL title is
     // preserved as a title row inside the sheet.
-    const buf = await exportToExcel(data.columns, data.rows, data.title, data.title, { generatedBy: user.fullName });
+    //
+    // Excel must be BUFFERED to produce a valid workbook (streaming produced files Excel
+    // rejected as corrupt), so the sheet has to be bounded or a large report OOM-kills a
+    // 512 MB instance. XLSX_MAX_ROWS is the same cap the Audit Trail page's export uses,
+    // and like it, truncation is stated IN the sheet title and points at CSV — never
+    // silent. CSV above stays uncapped and is the complete record.
+    const shown = data.rows.slice(0, XLSX_MAX_ROWS);
+    const truncated = data.rows.length > shown.length;
+    const title = truncated
+      ? `${data.title} — first ${XLSX_MAX_ROWS.toLocaleString()} of ${data.rows.length.toLocaleString()} rows (export as CSV for the complete report)`
+      : data.title;
+    const buf = await exportToExcel(data.columns, shown, data.title, title, { generatedBy: user.fullName, timezone: org.timezone });
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `${type}.xlsx`,
       body: buf,
-      rowCount: data.rows.length,
+      rowCount: shown.length,
     };
   }
 
   // PDF (also the "print" path)
-  const org = await getOrgInfo();
   const cfg = {
     orgName: org.name,
     orgLogoPath: /^(https?:|data:)/.test(org.logoPath) ? org.logoPath : undefined,

@@ -2,18 +2,24 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import type { AuthUser } from '../types';
+import { hasOrgWideScope } from '../utils/accessScope';
 import type { UpsertCvInput, ReviewCvInput, PaginationQuery } from '@izlearn/shared';
 import { notifyCvSubmitted, notifyCvReviewed } from './notification.service';
 
 /**
  * CV module (CR-52 / D-CV1) — ONE live CV per user; history is preserved through
  * the audit trail (the CurriculumVitae model is audited). Visibility is enforced
- * server-side: a CV is readable by its owner, the owner's supervisor, or a
- * SUPER_ADMIN — never by anyone else.
+ * server-side: a CV is readable by its owner, the owner's supervisor, or anyone granted
+ * org-wide CV access — never by anyone else.
  */
 
+/**
+ * Org-wide CV access — the cv:view_all permission (or org-wide team scope), configurable
+ * in Roles & Access Control. Was `roleNames.includes('SUPER_ADMIN')`, which no admin
+ * could see or grant to another role.
+ */
 function isAdmin(user: AuthUser): boolean {
-  return user.roleNames.includes('SUPER_ADMIN');
+  return hasOrgWideScope(user.permissions, 'cv') || hasOrgWideScope(user.permissions, 'team');
 }
 
 /** Read-only header pulled from the user record (name / code / functional role / dept). */

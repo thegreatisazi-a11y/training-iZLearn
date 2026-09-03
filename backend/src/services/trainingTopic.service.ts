@@ -5,7 +5,7 @@ import { AppError } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
 import { generateTopicCode } from '../utils/certificateNumber';
 import { generateStoredName } from '../utils/fileUtils';
-import { startOfDay } from '../utils/dateUtils';
+import { startOfDay, formatDateIso } from '../utils/dateUtils';
 import { toCsv } from '../utils/csv';
 import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
@@ -99,8 +99,8 @@ export async function exportTopicsCsv(
     t.requiresAssessment === false ? '' : t.maxAttempts,
     `v${t.currentVersion}`,
     t.status,
-    t.effectiveDate ? t.effectiveDate.toISOString().slice(0, 10) : '',
-    t.reviewDate ? t.reviewDate.toISOString().slice(0, 10) : '',
+    formatDateIso(t.effectiveDate),
+    formatDateIso(t.reviewDate),
   ]);
   return toCsv(headers, rows);
 }

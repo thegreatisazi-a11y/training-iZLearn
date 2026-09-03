@@ -6,7 +6,7 @@ import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
-import { startOfDay } from '../utils/dateUtils';
+import { startOfDay, formatDateIso } from '../utils/dateUtils';
 import { toCsv } from '../utils/csv';
 import type {
   CreateTNIInput,
@@ -60,8 +60,8 @@ export async function exportTniCsv(q: PaginationQuery & { userId?: string; statu
     t.topicTitle ?? '',
     t.justification ?? '',
     t.status,
-    t.createdAt ? new Date(t.createdAt as unknown as string).toISOString().slice(0, 10) : '',
-    t.approvedAt ? new Date(t.approvedAt as unknown as string).toISOString().slice(0, 10) : '',
+    formatDateIso(t.createdAt as unknown as string | null),
+    formatDateIso(t.approvedAt as unknown as string | null),
   ]);
   return toCsv(headers, rows);
 }
