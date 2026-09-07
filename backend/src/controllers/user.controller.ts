@@ -4,7 +4,7 @@ import { paginationQuery, userRequestDecisionSchema } from '@izlearn/shared';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
 import { recordEvent } from '../services/auditTrail.service';
-import { isOrgWideUserManager } from '../utils/accessScope';
+import { isOrgWideUserManager, hasOrgWideScope } from '../utils/accessScope';
 import type { PermissionMatrix } from '@izlearn/shared';
 import * as svc from '../services/user.service';
 
@@ -131,12 +131,16 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, await svc.resetPassword(req.params.id, req), 'Password reset; user must set a new password at next login');
 });
 
-// Team overview: org-wide user managers (permission-driven — SUPER_ADMIN and anyone
-// granted org-wide user management in R&AC) see the whole organisation; everyone else
-// sees ONLY their own IMMEDIATE direct reports (no indirect subordinates). (L-J4)
+// Team overview: only a role granted team:view_all sees the whole organisation; everyone
+// else sees ONLY their own IMMEDIATE direct reports (no indirect subordinates). (L-J4)
+//
+// Was isOrgWideUserManager(), which INFERRED org-wide scope from holding
+// userManagement edit/approve/reset_password. That silently gave any admin-ish role
+// (e.g. IT Admin) the whole organisation in My Team. Org-wide team scope is now an
+// explicit toggle in Roles & Access Control, so it is granted deliberately or not at all.
 export const team = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  const seeAll = isOrgWideUserManager(req.user!.permissions as PermissionMatrix);
+  const seeAll = hasOrgWideScope(req.user!.permissions as PermissionMatrix, 'team');
   const r = await svc.listMyTeam(req.user!.id, seeAll, q);
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });

@@ -59,6 +59,20 @@ async function assertRolesActive(roleIds: string[]): Promise<void> {
 const CATALOG_MODULES = new Set(PERMISSION_CATALOG.map((m) => m.module));
 
 /**
+ * Action keys the CURRENT catalog defines, per module, plus the five derived legacy keys.
+ * Anything else on a stored matrix is a RETIRED action and must be ignored when comparing
+ * two roles — see assertCanGrantRoles.
+ *
+ * The legacy keys are kept in the comparison on purpose: a role saved under the old
+ * 5-flag model may carry only read/write/approve/print/export, and skipping those would
+ * make such a role grantable by anyone.
+ */
+const LEGACY_KEYS = ['read', 'write', 'approve', 'print', 'export'];
+const CATALOG_ACTIONS = new Map(
+  PERMISSION_CATALOG.map((m) => [m.module, new Set([...m.actions.map((a) => a.key), ...LEGACY_KEYS])]),
+);
+
+/**
  * SECURITY (RBAC-2): no privilege escalation — a granter can only assign roles whose
  * combined permissions are a subset of their own. This is fully permission-driven (no
  * role names), so it holds for any custom role: e.g. a holder of the lesser
@@ -78,7 +92,16 @@ async function assertCanGrantRoles(granterPerms: PermissionMatrix | undefined, r
     // ungrantable: even SUPER_ADMIN, whose matrix matches the catalog exactly, "lacked" them,
     // and no one could clear them because the Roles screen never renders a retired module.
     if (!CATALOG_MODULES.has(module)) continue;
+    const known = CATALOG_ACTIONS.get(module);
     for (const [action, on] of Object.entries(actions)) {
+      // Skip RETIRED ACTIONS for the same reason retired modules are skipped above. A key
+      // the catalog no longer defines (e.g. dashboard.configure_widgets) grants nothing —
+      // nothing checks it and the Roles screen never renders it — but comparing it made
+      // the role permanently ungrantable: roles created while the action existed carry
+      // `true`, roles created before it never had the key at all, so even the built-in
+      // administrator "lacked" it and no admin could clear it from the UI. That is exactly
+      // what made IT Admin and Training Coordinator ungrantable by anyone.
+      if (known && !known.has(action)) continue;
       if (on && !hasPermission(granterPerms, module, action as PermissionAction)) {
         throw AppError.forbidden('You cannot grant a role that carries permissions beyond your own.');
       }
@@ -485,10 +508,11 @@ export async function assertTeamManageAccess(
   requester: { id: string; permissions?: Record<string, Record<string, boolean>> },
   targetUserId: string,
 ) {
-  // Permission-driven (no role names): an org-wide user manager may act on anyone; everyone
-  // else reaching the team routes (gated on team:edit / team:deactivate) is limited to their
-  // DIRECT reports. A new custom role scopes correctly purely from its granted permissions.
-  if (isOrgWideUserManager(requester.permissions as PermissionMatrix | undefined)) return;
+  // team:view_all may act on anyone; everyone else reaching the team routes (gated on
+  // team:edit / team:deactivate) is limited to their DIRECT reports. Must use the SAME
+  // scope rule as the My Team list, or a role would see 5 people yet be able to edit
+  // anyone in the organisation.
+  if (hasOrgWideScope(requester.permissions as PermissionMatrix | undefined, 'team')) return;
   const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false }, select: { supervisorId: true } });
   if (!target || target.supervisorId !== requester.id) {
     throw AppError.forbidden('You may only edit or deactivate your direct reportees.');
@@ -974,9 +998,8 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   const requester = req.user!;
   // Org-wide access is a PERMISSION (userManagement:view_all / team:view_all in Roles &
   // Access Control), not a hard-coded role name — so any admin role can be granted it.
-  const seeAll =
-    hasOrgWideScope(requester.permissions as PermissionMatrix, 'userManagement') ||
-    hasOrgWideScope(requester.permissions as PermissionMatrix, 'team');
+  // Same rule as the My Team list and its edit guard: team:view_all, nothing inferred.
+  const seeAll = hasOrgWideScope(requester.permissions as PermissionMatrix, 'team');
   const target = await prisma.user.findFirst({ where: { id: targetUserId, isDeleted: false } });
   if (!target) throw AppError.notFound('User not found');
   if (!seeAll && target.supervisorId !== requester.id) {

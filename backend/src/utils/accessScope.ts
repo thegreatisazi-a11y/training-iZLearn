@@ -18,6 +18,11 @@ import { hasPermission } from './permissions';
  * reset_password — which supervisors do not hold (they get view/print/export for the
  * read-only list and manage their people through the Team module instead).
  */
+// LEGACY HEURISTIC — prefer hasOrgWideScope(perms, module) in new code. This INFERS
+// org-wide scope from holding strong user-management verbs, which silently granted an
+// admin-ish role (e.g. IT Admin) the whole organisation. The My Team surfaces now use the
+// explicit team:view_all toggle instead; this remains only for the assessments and job
+// description scopes, which have not been converted yet.
 export function isOrgWideUserManager(perms?: PermissionMatrix): boolean {
   return (
     hasPermission(perms, 'userManagement', 'edit') ||

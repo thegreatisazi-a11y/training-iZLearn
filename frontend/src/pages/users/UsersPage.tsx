@@ -306,11 +306,12 @@ export default function UsersPage() {
 
   const updateUserMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.users.update(id, body),
+    // No success toast or dialog-close here: saving a user can be TWO requests (details,
+    // then RBAC roles). Reporting success after the first one announced "updated", closed
+    // the dialog, and only then surfaced the role-change error — so a failed role change
+    // looked like a successful save. Success is reported once both have landed, below.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('User details updated.');
-      setEditEsignOpen(false);
-      setEditUser(null);
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -712,11 +713,15 @@ export default function UsersPage() {
             (editForm.roleIds.length !== editOrigRoleIds.length ||
               editForm.roleIds.some((id) => !editOrigRoleIds.includes(id)));
           if (rolesChanged) {
+            // Throws on failure, which leaves the e-signature dialog open with the error
+            // shown, so the save can be corrected instead of silently half-applying.
             await changeRolesMutation.mutateAsync({
               id: editUser.id,
               body: { roleIds: editForm.roleIds, reasonForChange: reason, signature: sig },
             });
           }
+          toast.success(rolesChanged ? 'User details and roles updated.' : 'User details updated.');
+          setEditUser(null);
         }}
         title={`Edit User — ${editUser?.fullName ?? ''}`}
         defaultMeaning="Approved"
