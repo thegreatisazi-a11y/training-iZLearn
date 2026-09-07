@@ -30,6 +30,42 @@ label — see `REPORT_LABELS`.
 The frontend route is `/courses`; `/topics` and `/topics/:id` are kept only as
 redirects in `AppRoutes.tsx` so old bookmarks and emailed links still resolve.
 
+## Authorization: permissions are the contract, role NAMES are just labels
+
+**Never branch on a role name.** No `roleNames.includes('SUPER_ADMIN')`, no
+`requireRole('...')` — that middleware was deleted on purpose. A role is free-text data
+created in Roles & Access Control: an organisation can rename it, delete it, or build all
+its roles from scratch under names nobody wrote code for. Every guard that matched a name
+broke silently when `SUPER_ADMIN` was renamed to `Super Admin` — manual backup/restore
+became unreachable by anyone, and the password-reset privilege guard stopped firing
+(a hole, not just an outage).
+
+The two legitimate mechanisms:
+
+| Need | Mechanism |
+|---|---|
+| Can this user do X? | `requirePermission(module, action)` on the route, or `hasPermission()` / `hasOrgWideScope()` in a service, against `PERMISSION_CATALOG` |
+| Org-wide vs own-direct-reports scope | the module's `view_all` action (`hasOrgWideScope(perms, module)`) |
+| "Is this the built-in administrator?" (privilege escalation only) | `Role.isSystem` via `holdsSystemRole(userId)` — a flag, so renaming is harmless |
+
+`Role.isSystem` marks the built-in administrator role, stamped by the seed. It may be
+renamed and its permissions edited, but `deactivateRole` refuses to delete or deactivate
+it, and `assertNotLastSystemRoleHolder` refuses a role change or user deactivation that
+would leave nobody holding it. So production always has an administrator, whatever it is
+called, even if every other role is rebuilt from scratch.
+
+**What must stay stable** are the permission *keys* — module names (`courseManagement`,
+`backup`, `integrations`, and the legacy `topicVersionHistory`) and action names
+(`view`, `view_all`, `view_others`, `reset_password`, …). They are stored inside every
+role's permission matrix, so renaming one silently revokes access. Adding a new action is
+safe but needs a marker-guarded back-fill in `seed.ts` for existing roles, because an
+absent **or explicitly `false`** flag both read as denied.
+
+Role names are Title Case (`Super Admin`, `Supervisor`, `Trainer`, `Trainee`) because they
+are user-visible. That is a display convention only — nothing depends on it. Note that
+re-running the seed after an admin deletes a baseline role will recreate it, since roles
+are matched by normalised name.
+
 ## Other conventions
 
 - **Comments count.** Commented-out code is kept deliberately in this repo (features

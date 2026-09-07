@@ -1,14 +1,18 @@
 import { Router } from 'express';
 import * as c from '../controllers/admin.controller';
 import { authenticate } from '../middlewares/auth.middleware';
-import { requirePermission, requireRole } from '../middlewares/rbac.middleware';
+import { requirePermission } from '../middlewares/rbac.middleware';
 
 const router = Router();
 router.use(authenticate);
 
-router.post('/backup/trigger', requireRole('SUPER_ADMIN'), c.triggerBackup);
+// Permission-driven, not role-name-driven: the catalog already defines backup:create /
+// backup:approve, and the sibling routes below already use them. The previous
+// requireRole('SUPER_ADMIN') stopped matching once the role was renamed in the UI, which
+// left manual backup and restore unreachable by anyone.
+router.post('/backup/trigger', requirePermission('backup', 'create'), c.triggerBackup);
 router.get('/backups', requirePermission('backup', 'read'), c.backups);
 router.post('/backup/verify', requirePermission('backup', 'read'), c.verify);
-router.post('/backup/restore', requireRole('SUPER_ADMIN'), c.restore);
+router.post('/backup/restore', requirePermission('backup', 'approve'), c.restore);
 
 export default router;

@@ -44,6 +44,24 @@ export function hasOrgWideScope(perms: PermissionMatrix | undefined, module: str
   return hasPermission(perms, module, 'view_all' as PermissionAction);
 }
 
+/**
+ * True when the user holds the protected system role (`Role.isSystem`) — the built-in
+ * administrator role the seed stamps.
+ *
+ * Keyed on the FLAG, never on a role name: the role may be renamed to anything in
+ * production, and every other role may be deleted and rebuilt from scratch, without
+ * affecting this. It cannot be deleted (see role.service.deactivateRole), so it is a
+ * dependable anchor for the privilege-escalation guards.
+ */
+export async function holdsSystemRole(userId: string): Promise<boolean> {
+  const links = await prisma.userRole.findMany({ where: { userId, isActive: true }, select: { roleId: true } });
+  if (!links.length) return false;
+  const count = await prisma.role.count({
+    where: { id: { in: links.map((l) => l.roleId) }, isSystem: true, isDeleted: false },
+  });
+  return count > 0;
+}
+
 /** The ids of a user's direct reports (active, non-deleted). */
 export async function directReportIds(supervisorId: string): Promise<string[]> {
   const reports = await prisma.user.findMany({

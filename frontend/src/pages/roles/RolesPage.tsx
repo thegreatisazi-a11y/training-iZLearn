@@ -26,6 +26,8 @@ interface RoleRow {
   roleName: string;
   description?: string;
   isActive: boolean;
+  /** The built-in administrator role: renameable and editable, but never deletable. */
+  isSystem?: boolean;
   permissions?: PermMatrix;
 }
 
@@ -362,7 +364,20 @@ export default function RolesPage() {
   }
 
   const columns: Column<RoleRow>[] = [
-    { key: 'roleName', header: 'Role' },
+    {
+      key: 'roleName',
+      header: 'Role',
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          {r.roleName}
+          {r.isSystem && (
+            <Badge tone="PENDING" title="Built-in administrator role — cannot be deleted">
+              Built-in
+            </Badge>
+          )}
+        </span>
+      ),
+    },
     { key: 'description', header: 'Description' },
     { key: 'status', header: 'Status', render: (r) => <Badge tone={r.isActive ? 'APPROVED' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
     {
@@ -376,9 +391,13 @@ export default function RolesPage() {
           {canWrite && (
             <>
               <Button size="sm" variant="outline" onClick={() => openEdit(r)}>Edit</Button>
-              <Button size="sm" variant={r.isActive ? 'outline' : 'primary'} onClick={() => { setToggleTarget(r); setToggleReason(''); }}>
-                {r.isActive ? 'Set Inactive' : 'Set Active'}
-              </Button>
+              {/* The built-in administrator role cannot be deactivated (the server refuses
+                  it): don't offer an action that is guaranteed to fail. */}
+              {!r.isSystem && (
+                <Button size="sm" variant={r.isActive ? 'outline' : 'primary'} onClick={() => { setToggleTarget(r); setToggleReason(''); }}>
+                  {r.isActive ? 'Set Inactive' : 'Set Active'}
+                </Button>
+              )}
             </>
           )}
         </div>

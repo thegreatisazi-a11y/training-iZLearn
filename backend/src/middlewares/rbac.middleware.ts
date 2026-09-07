@@ -48,13 +48,17 @@ export function requireExactPermission(module: string, action: string) {
   });
 }
 
-/** Require at least one of the named roles (used for SUPER_ADMIN-only operations). */
-export function requireRole(...roleNames: string[]) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    if (!req.user) return next(AppError.unauthorized());
-    if (!req.user.roleNames.some((r) => roleNames.includes(r))) {
-      return next(AppError.forbidden(`This action requires one of the roles: ${roleNames.join(', ')}.`));
-    }
-    next();
-  };
-}
+/**
+ * DELIBERATELY REMOVED — `requireRole(...names)`.
+ *
+ * It matched role NAMES with an exact string compare, so every guard using it broke
+ * silently the moment a role was renamed in Roles & Access Control ('SUPER_ADMIN' ->
+ * 'Super Admin'), and it could never work for a role an organisation created from
+ * scratch under its own name. Manual backup/restore was unreachable for exactly this
+ * reason.
+ *
+ * Authorization is permission-driven: gate routes on `requirePermission` /
+ * `requireExactPermission` against a module in PERMISSION_CATALOG. Where a guard must
+ * identify the built-in administrator (privilege escalation), key on the `Role.isSystem`
+ * flag via `holdsSystemRole()` — never on a name.
+ */

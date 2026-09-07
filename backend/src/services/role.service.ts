@@ -113,7 +113,16 @@ export async function updateRole(id: string, input: UpdateRoleInput, req: Reques
 
 /** Soft-delete (deactivate) — the only kind of delete for roles. CR-6: e-signed. */
 export async function deactivateRole(id: string, req: Request) {
-  await getRole(id);
+  const role = await getRole(id);
+  // The built-in administrator role is permanent. Without it there would be no role the
+  // privilege-escalation guards could anchor on, and an organisation that rebuilt its
+  // roles from scratch could lock itself out of its own administration. It may still be
+  // renamed and its permissions edited — only removal is refused.
+  if (role.isSystem) {
+    throw AppError.badRequest(
+      'The built-in administrator role cannot be deleted or deactivated. You may rename it or edit its permissions instead.',
+    );
+  }
   await signFromRequest(req, 'Role', id, 'Approved');
   return prisma.role.update({ where: { id }, data: { isActive: false, isDeleted: true } });
 }

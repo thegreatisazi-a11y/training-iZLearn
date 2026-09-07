@@ -72,6 +72,13 @@ model Role {
   roleName    String   @unique
   description String?
   permissions Json // { moduleName: { read, write, approve, print, export } }
+  /// The built-in administrator role, stamped by the seed. It may be RENAMED and its
+  /// permissions edited, but it can never be deleted or deactivated, and it is what the
+  /// privilege-escalation guards key on (a user holding a system role can only have their
+  /// password reset by another system-role holder). Identity lives in this flag, NOT in
+  /// roleName — so production may rebuild every other role from scratch, under any name,
+  /// without breaking authorization. Nothing in the code matches on a role NAME.
+  isSystem    Boolean  @default(false)
   isActive    Boolean  @default(true)
   isDeleted   Boolean  @default(false)
   createdAt   DateTime @default(now())

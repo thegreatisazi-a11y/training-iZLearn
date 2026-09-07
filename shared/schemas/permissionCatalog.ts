@@ -376,6 +376,15 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     ],
   },
   {
+    module: 'integrations',
+    label: 'External Integrations',
+    category: 'system',
+    actions: [
+      A('view', 'View Integrations', 'View the external integration endpoints (DMS, HR user-sync, instrument qualification).'),
+      A('edit', 'Run Integration Sync', 'Trigger an external integration sync — DMS, HR user-sync, or an instrument qualification training trigger.'),
+    ],
+  },
+  {
     module: 'backup',
     label: 'Backup & Restore',
     category: 'system',

@@ -64,14 +64,20 @@ function allFull(): Record<string, Flags> {
  * JD/TNI assignment & approval, reports), Trainer (course/question/material
  * authoring), Trainee (takes training, acknowledges JD, owns CV).
  */
-const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Record<string, Flags> }[] = [
+const ROLE_DEFINITIONS: { roleName: string; description: string; isSystem?: boolean; permissions: Record<string, Flags> }[] = [
   {
-    roleName: 'SUPER_ADMIN',
+    // Role names are user-visible (Topbar, Users list, Profile), so they are Title Case.
+    // Nothing in the code matches on them — see isSystem below and the permission catalog.
+    roleName: 'Super Admin',
     description: 'Full, unrestricted access to every module.',
+    // The built-in administrator role: renameable, but never deletable, and the anchor the
+    // privilege-escalation guards key on. Guarantees production always has a top-tier role
+    // even if every other role is rebuilt from scratch.
+    isSystem: true,
     permissions: allFull(),
   },
   {
-    roleName: 'SUPERVISOR',
+    roleName: 'Supervisor',
     description: 'User & team management, JD/TNI assignment & approval, training oversight and reports.',
     permissions: buildMatrix({
       dashboard: ['view'],
@@ -103,7 +109,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
     }),
   },
   {
-    roleName: 'TRAINER',
+    roleName: 'Trainer',
     description: 'Creates courses, question banks and materials; handles TNI/course authoring.',
     permissions: buildMatrix({
       dashboard: ['view'],
@@ -126,7 +132,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; permissions: Re
     }),
   },
   {
-    roleName: 'TRAINEE',
+    roleName: 'Trainee',
     description: 'Takes assigned training & assessments, acknowledges JD, owns CV.',
     permissions: buildMatrix({
       dashboard: ['view'],
@@ -227,6 +233,7 @@ async function main() {
         data: {
           roleName: def.roleName,
           description: def.description,
+          isSystem: def.isSystem ?? false,
           permissions: def.permissions as Prisma.InputJsonValue,
           createdBy: SYSTEM,
         },
@@ -242,6 +249,14 @@ async function main() {
     ranked.sort((a, b) => Number(!b.r.isDeleted) - Number(!a.r.isDeleted) || b.links - a.links);
     const canonical = ranked[0].r;
     roleIdByName.set(def.roleName, canonical.id);
+
+    // Stamp isSystem on the EXISTING role (it may have been renamed via the UI — matching
+    // is by normalised name, and the flag then becomes the durable identity). Metadata
+    // only: the role's own name and permissions are never clobbered here.
+    if ((def.isSystem ?? false) && !canonical.isSystem) {
+      await prisma.role.update({ where: { id: canonical.id }, data: { isSystem: true } });
+      console.log(`   ✓ marked '${canonical.roleName}' as the protected system role`);
+    }
 
     // Merge & retire duplicate case-variants: reassign their users to the canonical
     // role (skipping any the user already has), then soft-delete the duplicate. No
@@ -352,6 +367,17 @@ async function main() {
       // The old "Certificate Templates" menu required certificates:write, so only roles
       // that could MANAGE templates should get the new module (view-only cert roles never
       // saw it). Preserves prior access exactly without over-granting.
+      // `integrations` is a NEW module: the integration routes used to be gated on
+      // requireRole('SUPER_ADMIN', 'IT_ADMIN') — role NAMES, which broke on rename.
+      // Preserve exactly the prior access by granting it to the roles that already hold
+      // the equivalent system-level rights (system config / restore), which is precisely
+      // the administrator + IT-admin set. Only fills when the module is absent.
+      if (!p.integrations && (p.systemConfig?.edit || p.backup?.approve)) {
+        const ig = { view: true, edit: true };
+        p.integrations = { ...ig, ...deriveLegacyFlags(ig) };
+        changed = true;
+      }
+
       if (!p.certificateTemplates && p.certificates && (p.certificates.edit || p.certificates.write)) {
         const ct = { view: true, create: true, edit: true };
         p.certificateTemplates = { ...ct, ...deriveLegacyFlags(ct) };

@@ -15,7 +15,7 @@ import {
 import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
 import { hasPermission, mergePermissions } from '../utils/permissions';
-import { isOrgWideUserManager, hasOrgWideScope } from '../utils/accessScope';
+import { isOrgWideUserManager, hasOrgWideScope, holdsSystemRole } from '../utils/accessScope';
 import { createUserSchema, PERMISSION_CATALOG } from '@izlearn/shared';
 import type {
   CreateUserInput,
@@ -580,9 +580,53 @@ async function provisionJdFromTemplate(userId: string, departmentId: string, cre
   }
 }
 
+/**
+ * Refuse a change that would leave the organisation with NO holder of the protected
+ * system role. Applies to a role change that drops it, and to deactivating the holder.
+ *
+ * Without this an admin could remove their own administrator role (or deactivate the last
+ * administrator) and lock the organisation out of its own administration — the role itself
+ * is undeletable, but a role with nobody in it is just as inert.
+ */
+async function assertNotLastSystemRoleHolder(userId: string, nextRoleIds?: string[]): Promise<void> {
+  const systemRoles = await prisma.role.findMany({ where: { isSystem: true, isDeleted: false }, select: { id: true } });
+  if (!systemRoles.length) return;
+  const systemRoleIds = new Set(systemRoles.map((r) => r.id));
+
+  // Would this user still hold a system role afterwards? (undefined nextRoleIds = being deactivated)
+  const keeps = nextRoleIds ? nextRoleIds.some((rid) => systemRoleIds.has(rid)) : false;
+  if (keeps) return;
+
+  // Do they hold one right now? If not, the change cannot reduce the count.
+  const links = await prisma.userRole.findMany({ where: { userId, isActive: true }, select: { roleId: true } });
+  if (!links.some((l) => systemRoleIds.has(l.roleId))) return;
+
+  // Any OTHER active, non-deleted user still holding it?
+  const otherHolders = await prisma.userRole.findMany({
+    where: { roleId: { in: [...systemRoleIds] }, isActive: true, userId: { not: userId } },
+    select: { userId: true },
+  });
+  const stillCovered = otherHolders.length
+    ? await prisma.user.count({
+        where: { id: { in: otherHolders.map((o) => o.userId) }, isActive: true, isDeleted: false },
+      })
+    : 0;
+  if (stillCovered === 0) {
+    throw AppError.badRequest(
+      'This is the last account holding the built-in administrator role. Assign that role to another active user first, or the organisation would be left with no administrator.',
+    );
+  }
+}
+
 export async function changeRoles(id: string, roleIds: string[], req: Request) {
   const user = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
+
+  // Lockout guard: the organisation must always retain at least one holder of the
+  // protected system role, or nobody can administer it (and no one can reset an
+  // administrator's password). Refused BEFORE the e-signature so the signer isn't
+  // prompted for a change that cannot be applied.
+  await assertNotLastSystemRoleHolder(id, roleIds);
 
   // CR-1(c): role-change requests may only reference active, non-deleted roles.
   await assertRolesActive(roleIds);
@@ -619,6 +663,9 @@ export async function activateUser(id: string, req: Request) {
 }
 
 export async function deactivateUser(id: string, req: Request) {
+  // Same lockout guard as changeRoles: deactivating the last administrator would leave
+  // the organisation with no one able to administer it.
+  await assertNotLastSystemRoleHolder(id);
   const user = await prisma.user.findFirst({ where: { id, isDeleted: false } });
   if (!user) throw AppError.notFound('User not found');
   await signFromRequest(req, 'User', id, 'Approved');
@@ -640,14 +687,21 @@ export async function resetPassword(id: string, req: Request) {
   if (!isAdminReset && !isDirectSupervisor) {
     throw AppError.forbidden('You can only reset the password of your direct team members.');
   }
-  // Never let a non-SUPER_ADMIN reset a SUPER_ADMIN's credentials (privilege-escalation guard).
-  if (!req.user!.roleNames.includes('SUPER_ADMIN')) {
-    const targetRoleLinks = await prisma.userRole.findMany({ where: { userId: id, isActive: true }, select: { roleId: true } });
-    if (targetRoleLinks.length) {
-      const targetRoles = await prisma.role.findMany({ where: { id: { in: targetRoleLinks.map((r) => r.roleId) } }, select: { roleName: true } });
-      if (targetRoles.some((r) => r.roleName === 'SUPER_ADMIN')) {
-        throw AppError.forbidden('You cannot reset the password of a Super Administrator account.');
-      }
+  // Privilege-escalation guard: only a holder of the protected system role may reset the
+  // password of another system-role holder.
+  //
+  // Keyed on Role.isSystem, NOT a role name. The previous check compared against the
+  // literal 'SUPER_ADMIN' and so never fired once the role had been renamed to
+  // 'Super Admin' in the UI — leaving the guard silently open. A flag survives renaming,
+  // and the role itself cannot be deleted, so the guard cannot be dismantled.
+  //
+  // Deliberately NOT a grantable permission: anyone able to grant it to themselves is
+  // exactly who it exists to stop.
+  if (await holdsSystemRole(id)) {
+    if (!(await holdsSystemRole(req.user!.id))) {
+      throw AppError.forbidden(
+        'Only a holder of the built-in administrator role may reset the password of another administrator.',
+      );
     }
   }
   await signFromRequest(req, 'User', id, 'Approved');
