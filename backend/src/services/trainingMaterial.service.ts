@@ -47,12 +47,15 @@ function isPublished(status: string): boolean {
  */
 async function assertNoDuplicateName(
   originalName: string,
-  scope: { topicId: string; skipLibraryCheck?: boolean } | { library: true },
+  scope: { topicId: string; skipLibraryCheck?: boolean; exceptMaterialId?: string } | { library: true },
 ) {
   const base: Prisma.TrainingMaterialWhereInput = {
     isDeleted: false,
     isObsolete: false,
     originalFileName: { equals: originalName, mode: 'insensitive' },
+    // Replace/Update legitimately re-uses the SAME name for the next version of a file, so
+    // the material being superseded must not count as a duplicate of itself.
+    ...('library' in scope || !scope.exceptMaterialId ? {} : { id: { not: scope.exceptMaterialId } }),
   };
   // Library-level material is stored with an empty topicId. Skipped when attaching an existing
   // library file to a course (it is in the library by definition).
@@ -99,11 +102,13 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
   // BUG-02: authoring never bumps the course version — that only advances when published
   // changes go live (publishDraftChanges).
 
-  // Use the highest existing version (not the count): materials are copied across
-  // course revisions carrying their version numbers, so a raw count can fall BELOW an
-  // existing version and make the next file go backwards (e.g. v5 → v4).
-  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
-
+  // `version` is the version of THIS FILE, not a running counter for the course. A newly
+  // uploaded file is a new lineage, so it starts at v1 — and it stays v1 until Replace/Update
+  // supersedes it (replaceMaterial sets old.version + 1).
+  //
+  // It previously used MAX(version) across the whole course, so adding 10 different files
+  // produced v1…v10 for 10 unrelated documents and implied a version history none of them
+  // had. Course-level versioning is TrainingTopic.currentVersion; this field is per-file.
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId,
@@ -112,7 +117,7 @@ export async function uploadMaterial(topicId: string, file: Express.Multer.File,
       filePath: key,
       fileType: getExtension(file.originalname),
       fileSize: file.size,
-      version: lastVersion + 1,
+      version: 1,
       // Published → staged (pending, inert until revise). Draft → current now.
       isStaged: staged,
       isCurrentVersion: !staged,
@@ -210,8 +215,8 @@ export async function bulkUploadMaterials(
  *  - PUBLISHED course: the new file is STAGED against the selected material
  *    (replacesMaterialId) and supersedes it only when the course is revised. The
  *    live version is untouched.
- *  - DRAFT course: the selected file (and any other current files) are superseded
- *    immediately and the new file becomes current; a version-history snapshot is
+ *  - DRAFT course: the selected file ONLY is superseded immediately and the new file
+ *    becomes current; sibling materials are untouched. A version-history snapshot is
  *    written. Reason-for-change is captured by the route middleware.
  */
 export async function replaceMaterial(materialId: string, file: Express.Multer.File, createdBy: string) {
@@ -219,6 +224,11 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   if (!old) throw AppError.notFound('Training material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training course not found');
+
+  // Replacing with the same name is normal (that IS the next version), but the new name
+  // must not collide with a DIFFERENT live file in the course — otherwise Replace was a
+  // way around the duplicate guard that upload and attach both enforce.
+  await assertNoDuplicateName(file.originalname, { topicId: old.topicId, skipLibraryCheck: true, exceptMaterialId: old.id });
 
   const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
@@ -233,15 +243,21 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
   // course the old file is superseded immediately and the new one becomes current.
   const staged = isPublished(topic.status);
   if (!staged) {
+    // Supersede ONLY the file being replaced. This used to match every current material in
+    // the course (no `id` filter), so replacing the PDF in a course that also held a video
+    // and a slide deck silently archived all three and left the course with one file.
+    // Upload and attach deliberately never touch sibling files; Replace must not either.
     await prisma.trainingMaterial.updateMany({
-      where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
+      where: { id: old.id, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
     });
     // BUG-02: a draft replacement supersedes the old file but does NOT bump the course
     // version (no version churn during authoring); publishing changes bumps it instead.
   }
 
-  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
+  // Per-lineage: the next version OF THE FILE BEING REPLACED, not of the course. Was
+  // MAX(version) course-wide, so replacing a v1 file in a course whose newest file was v9
+  // produced v10 — a version number with no relation to this file's own history.
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId: old.topicId,
@@ -250,7 +266,7 @@ export async function replaceMaterial(materialId: string, file: Express.Multer.F
       filePath: key,
       fileType: getExtension(file.originalname),
       fileSize: file.size,
-      version: lastVersion + 1,
+      version: old.version + 1,
       isStaged: staged,
       isCurrentVersion: !staged,
       replacesMaterialId: old.id,
@@ -306,10 +322,8 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
   // current material — prior current files are left untouched.
   // BUG-02: authoring never bumps the course version; publishing changes bumps it instead.
 
-  // Use the highest existing version (not the count): materials are copied across
-  // course revisions carrying their version numbers, so a raw count can fall BELOW an
-  // existing version and make the next file go backwards (e.g. v5 → v4).
-  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId }, _max: { version: true } }))._max.version ?? 0;
+  // A new lineage in this course (see uploadMaterial): starts at v1, regardless of the
+  // library copy's own version or what other files in the course are at.
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId,
@@ -318,7 +332,7 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
       filePath: destKey,
       fileType: source.fileType,
       fileSize: source.fileSize,
-      version: lastVersion + 1,
+      version: 1,
       isStaged: staged,
       isCurrentVersion: !staged,
       createdBy,
@@ -345,8 +359,9 @@ export async function attachLibraryMaterial(sourceMaterialId: string, topicId: s
  * copied into independent storage, and a version-history snapshot is written — but the
  * new file's content comes from an existing library material.
  *  - PUBLISHED course: STAGED against the target (inert until the course is published).
- *  - DRAFT course: superseded immediately, the copied file becomes current, course
- *    version bumped. Reason-for-change is captured by the route middleware.
+ *  - DRAFT course: the targeted file only is superseded immediately and the copied file
+ *    becomes current; sibling materials are untouched. Reason-for-change is captured by
+ *    the route middleware.
  */
 export async function replaceMaterialFromLibrary(materialId: string, sourceMaterialId: string, createdBy: string) {
   const old = await prisma.trainingMaterial.findFirst({ where: { id: materialId, isDeleted: false } });
@@ -355,6 +370,10 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
   if (!source) throw AppError.notFound('Source library material not found');
   const topic = await prisma.trainingTopic.findFirst({ where: { id: old.topicId, isDeleted: false } });
   if (!topic) throw AppError.notFound('Training course not found');
+
+  // Same duplicate rule as replaceMaterial: the incoming name may match the file being
+  // replaced, but not a different live file in the course.
+  await assertNoDuplicateName(source.originalFileName, { topicId: old.topicId, skipLibraryCheck: true, exceptMaterialId: old.id });
 
   // Copy the source file to an independent stored object (own lineage), as attach does.
   const storedFileName = generateStoredName(source.originalFileName);
@@ -365,14 +384,15 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
   const reason = auditContext.getStore()?.reasonForChange ?? null;
   const staged = isPublished(topic.status);
   if (!staged) {
+    // Only the targeted file — same fix as replaceMaterial above.
     await prisma.trainingMaterial.updateMany({
-      where: { topicId: old.topicId, isDeleted: false, isCurrentVersion: true },
+      where: { id: old.id, isDeleted: false, isCurrentVersion: true },
       data: { isCurrentVersion: false, isObsolete: true, archivedAt: new Date(), archivedBy: createdBy, changeReason: reason },
     });
     // BUG-02: draft library-replace supersedes the old file without bumping the version.
   }
 
-  const lastVersion = (await prisma.trainingMaterial.aggregate({ where: { topicId: old.topicId }, _max: { version: true } }))._max.version ?? 0;
+  // Per-lineage (see replaceMaterial): the next version of the file being replaced.
   const material = await prisma.trainingMaterial.create({
     data: {
       topicId: old.topicId,
@@ -381,7 +401,7 @@ export async function replaceMaterialFromLibrary(materialId: string, sourceMater
       filePath: destKey,
       fileType: source.fileType,
       fileSize: source.fileSize,
-      version: lastVersion + 1,
+      version: old.version + 1,
       isStaged: staged,
       isCurrentVersion: !staged,
       replacesMaterialId: old.id,
