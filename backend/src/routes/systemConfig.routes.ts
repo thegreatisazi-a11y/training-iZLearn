@@ -15,6 +15,8 @@ import { bulkUpdateConfigSchema, updateNotificationSettingSchema } from '@izlear
 const router = Router();
 router.use(authenticate);
 
+// Any authenticated user may read branding (needed to print); the rest is gated.
+router.get('/branding', c.branding);
 router.get('/', requirePermission('systemConfig', 'read'), c.list);
 router.patch(
   '/',

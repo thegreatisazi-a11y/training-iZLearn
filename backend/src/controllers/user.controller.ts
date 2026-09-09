@@ -7,6 +7,7 @@ import { recordEvent } from '../services/auditTrail.service';
 import { isOrgWideUserManager, hasOrgWideScope } from '../utils/accessScope';
 import type { PermissionMatrix } from '@izlearn/shared';
 import * as svc from '../services/user.service';
+import { exportFilename } from '@izlearn/shared';
 
 /**
  * Users-list scope: full admins (userManagement:approve) see everyone org-wide; every
@@ -61,12 +62,15 @@ export const exportUsers = asyncHandler(async (req: Request, res: Response) => {
   const generatedBy = req.user?.fullName;
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
+    res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('users', 'csv')}"`);
     return res.send(exportToCsv(EXPORT_COLUMNS, rows, { generatedBy }));
   }
-  const buf = await exportToExcel(EXPORT_COLUMNS, rows, 'Users', undefined, { generatedBy });
+  const buf = await exportToExcel(EXPORT_COLUMNS, rows, 'Users', 'Users', {
+    generatedBy,
+    generatedByEmployeeId: req.user!.employeeId,
+  });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="users.xlsx"');
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('users', 'xlsx')}"`);
   return res.send(buf);
 });
 

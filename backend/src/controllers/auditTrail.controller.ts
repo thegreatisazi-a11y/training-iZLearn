@@ -8,6 +8,7 @@ import { buildHeaderTemplate, buildFooterTemplate, escapeHtml } from '../utils/r
 import { generateReportReference } from '../utils/certificateNumber';
 import { getOrgInfo } from '../services/systemConfig.service';
 import { formatDateTime, toEndBound, formatStamp } from '../utils/dateUtils';
+import { exportFilename } from '@izlearn/shared';
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
 
@@ -179,7 +180,7 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
 
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.csv"');
+    res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('audit-trail', 'csv')}"`);
     res.write('﻿'); // UTF-8 BOM so Excel reads accents correctly
     res.write(COLUMNS.map((c) => escapeCsv(c.header)).join(',') + '\r\n');
     let count = 0;
@@ -224,10 +225,10 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
       rows,
       'Audit Trail',
       title,
-      { generatedBy, timezone: org.timezone },
+      { generatedBy, generatedByEmployeeId: req.user!.employeeId, timezone: org.timezone, orgName: org.name, referenceNumber: generateReportReference('AUD') },
     );
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.xlsx"');
+    res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('audit-trail', 'xlsx')}"`);
     res.setHeader('Content-Length', String(buffer.length));
     res.end(buffer);
     await recordEvent({ action: 'EXPORT', entityType: 'AuditTrail', newValue: { format, count: rows.length, truncated } });
@@ -256,7 +257,6 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
     generatedByEmployeeId: req.user!.employeeId,
     generatedAt: new Date(),
     timezone: org.timezone,
-    printedByName: req.user!.fullName,
   };
   // Item 6: render landscape with a fixed table layout + explicit column widths and
   // word-wrapping so the table never overflows the page and the (often long) Changes
@@ -290,6 +290,6 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
     throw new AppError(503, 'PDF_UNAVAILABLE', 'PDF export is unavailable on this server. Please export as Excel or CSV instead.');
   }
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'attachment; filename="audit-trail.pdf"');
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('audit-trail', 'pdf')}"`);
   return res.send(pdf);
 });

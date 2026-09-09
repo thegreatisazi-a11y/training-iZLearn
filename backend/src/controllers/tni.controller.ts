@@ -3,6 +3,7 @@ import { asyncHandler, sendSuccess, sendCreated, sendPaginated } from '../utils/
 import { paginationQuery } from '@izlearn/shared';
 import * as svc from '../services/tni.service';
 import { recordEvent } from '../services/auditTrail.service';
+import { exportFilename } from '@izlearn/shared';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = { ...paginationQuery.parse(req.query), userId: req.query.userId as string | undefined, status: req.query.status as string | undefined };
@@ -16,7 +17,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const csv = await svc.exportTniCsv(q);
   await recordEvent({ action: 'EXPORT', entityType: 'TNI', entityId: 'list', newValue: { search: q.search, status: q.status } });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="tni.csv"');
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('tni', 'csv')}"`);
   res.send(csv);
 });
 

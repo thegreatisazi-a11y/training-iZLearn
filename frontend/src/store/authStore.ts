@@ -3,6 +3,7 @@ import { AxiosError } from 'axios';
 import type { PermissionMatrix, PermissionAction, PermissionVerb } from '@izlearn/shared';
 import { LEGACY_FALLBACK } from '@izlearn/shared';
 import { api, tokenStore } from '../lib/axios';
+import { loadBranding, clearBranding } from '@/lib/docMeta';
 
 export interface AuthUser {
   id: string;
@@ -47,6 +48,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { accessToken, refreshToken, user, mustChangePassword } = res.data.data;
       tokenStore.set(accessToken, refreshToken);
       set({ user, mustChangePassword });
+      void loadBranding(); // see loadMe: primes the print header/footer org details
     } catch (e) {
       const err = e as AxiosError<{ error?: { code?: string; details?: { deviceInfo?: string } } }>;
       if (err.response?.status === 409) {
@@ -57,6 +59,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async logout() {
+    clearBranding();
     try {
       await api.post('/auth/logout');
     } catch {
@@ -74,6 +77,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.get('/auth/me');
       set({ user: res.data.data, initializing: false });
+      // Prime the org branding cache so printHtml (which is synchronous) can stamp the
+      // org name/logo on printed documents. Fire-and-forget: printing still works without it.
+      void loadBranding();
     } catch {
       tokenStore.clear();
       set({ user: null, initializing: false });

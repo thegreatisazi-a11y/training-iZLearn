@@ -20,6 +20,7 @@ import { printHtml, printTable, escapeHtml } from '@/lib/print';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
 import { BundleForm, EMPTY_BUNDLE_FORM, bundlePayload, type BundleFormValue } from './BundleForm';
+import { exportFilename } from '@izlearn/shared';
 
 interface BundleTopic {
   id: string;
@@ -136,7 +137,7 @@ export default function BundleDetailPage() {
 
   function exportCsv() {
     downloadCsv(
-      `bundle-${b.name}.csv`,
+      exportFilename(`bundle-${b.name}`, 'csv'),
       ['Course No.', 'Course', 'Type', 'Version', 'Status'],
       b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status]),
     );

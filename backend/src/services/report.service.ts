@@ -4,6 +4,7 @@ import { AppError } from '../utils/response';
 import { formatDate } from '../utils/dateUtils';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
+import { exportFilename, reportReference } from '@izlearn/shared';
 import { renderPdfFromHtml } from '../utils/pdfGenerator';
 import { buildHeaderTemplate, buildFooterTemplate, escapeHtml } from '../utils/reportHeader';
 import { generateReportReference } from '../utils/certificateNumber';
@@ -778,9 +779,11 @@ export async function exportReport(
   const fmt = format.toLowerCase();
   // Every format stamps "Generated on …" in the configured display timezone (IST).
   const org = await getOrgInfo();
+  // One reference for whichever format is produced, matching the PDF header.
+  const ref = reportReference();
 
   if (fmt === 'csv') {
-    return { contentType: 'text/csv', filename: `${type}.csv`, body: exportToCsv(data.columns, data.rows, { generatedBy: user.fullName, timezone: org.timezone }), rowCount: data.rows.length };
+    return { contentType: 'text/csv', filename: exportFilename(type, 'csv'), body: exportToCsv(data.columns, data.rows), rowCount: data.rows.length };
   }
   if (fmt === 'xls' || fmt === 'xlsx') {
     // Tab name is capped at 31 chars by the .xlsx format (sanitised); the FULL title is
@@ -796,10 +799,16 @@ export async function exportReport(
     const title = truncated
       ? `${data.title} — first ${XLSX_MAX_ROWS.toLocaleString()} of ${data.rows.length.toLocaleString()} rows (export as CSV for the complete report)`
       : data.title;
-    const buf = await exportToExcel(data.columns, shown, data.title, title, { generatedBy: user.fullName, timezone: org.timezone });
+    const buf = await exportToExcel(data.columns, shown, data.title, title, {
+      generatedBy: user.fullName,
+      generatedByEmployeeId: user.employeeId,
+      timezone: org.timezone,
+      orgName: org.name,
+      referenceNumber: ref,
+    });
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      filename: `${type}.xlsx`,
+      filename: exportFilename(type, 'xlsx'),
       body: buf,
       rowCount: shown.length,
     };
@@ -810,12 +819,11 @@ export async function exportReport(
     orgName: org.name,
     orgLogoPath: /^(https?:|data:)/.test(org.logoPath) ? org.logoPath : undefined,
     reportTitle: data.title,
-    referenceNumber: generateReportReference(),
+    referenceNumber: ref,
     generatedByName: user.fullName,
     generatedByEmployeeId: user.employeeId,
     generatedAt: new Date(),
     timezone: org.timezone,
-    printedByName: isPrint ? user.fullName : undefined,
   };
   // RPT-1: PDF generation needs headless Chrome, which isn't on every host. Fail with a
   // clear, actionable 503 (like the audit export) instead of an opaque 500.
@@ -832,5 +840,5 @@ export async function exportReport(
     logger.error(`Report PDF export failed (${type}): ${(e as Error)?.message ?? e}`);
     throw new AppError(503, 'PDF_UNAVAILABLE', 'PDF export is unavailable on this server. Please export as Excel or CSV instead.');
   }
-  return { contentType: 'application/pdf', filename: `${type}.pdf`, body: pdf, rowCount: data.rows.length };
+  return { contentType: 'application/pdf', filename: exportFilename(type, 'pdf'), body: pdf, rowCount: data.rows.length };
 }

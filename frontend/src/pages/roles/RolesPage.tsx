@@ -18,6 +18,7 @@ import { apiError } from '@/lib/axios';
 import { printHtml, printTable } from '@/lib/print';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
+import { exportFilename } from '@izlearn/shared';
 
 type PermMatrix = Record<string, Record<string, boolean>>;
 
@@ -353,7 +354,7 @@ export default function RolesPage() {
     printHtml(`Role Permissions — ${role.roleName}`, body);
   }
   function exportMatrix(role: RoleRow) {
-    downloadCsv(`role-${role.roleName}-permissions.csv`, MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
+    downloadCsv(exportFilename(`role-permissions-${role.roleName}`, 'csv'), MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
   }
   function handlePrintList() {
     const body =

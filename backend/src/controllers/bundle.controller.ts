@@ -3,6 +3,7 @@ import { asyncHandler, sendSuccess, sendCreated, sendPaginated } from '../utils/
 import { paginationQuery, addTopicToBundlesSchema, assignBundleSchema } from '@izlearn/shared';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/bundle.service';
+import { exportFilename } from '@izlearn/shared';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
@@ -16,7 +17,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const csv = await svc.exportBundlesCsv(q);
   await recordEvent({ action: 'EXPORT', entityType: 'TopicBundle', entityId: 'list', newValue: { search: q.search } });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="bundles.csv"');
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('bundles', 'csv')}"`);
   res.send(csv);
 });
 

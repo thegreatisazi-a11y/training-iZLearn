@@ -21,6 +21,7 @@ import { todayInput } from '@/lib/format';
 import { printHtml, printTable, escapeHtml } from '@/lib/print';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
+import { exportFilename } from '@izlearn/shared';
 
 interface Topic {
   id: string;
@@ -223,7 +224,7 @@ export default function TopicsPage() {
 
   function exportOne(r: Topic) {
     downloadCsv(
-      `course-${r.topicNumber || r.topicCode}.csv`,
+      exportFilename(`course-${r.topicNumber || r.topicCode}`, 'csv'),
       ['Field', 'Value'],
       [
         ['SOP No.', r.topicNumber || r.topicCode],

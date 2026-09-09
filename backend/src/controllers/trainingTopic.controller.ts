@@ -5,6 +5,7 @@ import { hasPermission } from '../utils/permissions';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/trainingTopic.service';
 import * as historySvc from '../services/topicVersionHistory.service';
+import { exportFilename } from '@izlearn/shared';
 
 /** Course managers (courseManagement:write) see drafts; everyone else only PUBLISHED (4.3). */
 function canManageCourses(req: Request): boolean {
@@ -25,7 +26,7 @@ export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const csv = await svc.exportTopicsCsv({ status, search }, canManageCourses(req));
   await recordEvent({ action: 'EXPORT', entityType: 'TrainingTopic', entityId: 'catalogue', newValue: { status, search } });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="training-courses.csv"');
+  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('courses', 'csv')}"`);
   res.send(csv);
 });
 
