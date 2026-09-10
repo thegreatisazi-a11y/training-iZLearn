@@ -242,6 +242,23 @@ export async function getJDForViewer(id: string, requester: JdRequester) {
   return jd;
 }
 
+/**
+ * One JD, name-resolved, for the server-rendered printout.
+ *
+ * `self` resolves the caller's OWN live JD instead of taking an id from the browser, which is
+ * how "My Job Description" prints. Either way the record is re-read here, so the PDF reflects
+ * what is stored rather than what the page happened to be showing.
+ */
+export async function getJDForPrint(
+  opts: { id?: string; self?: boolean },
+  requester: JdRequester,
+) {
+  const jd = opts.self ? await getMyJD(requester.id) : opts.id ? await getJDForViewer(opts.id, requester) : null;
+  if (!jd) throw AppError.notFound('No job description found.');
+  const [enriched] = await enrichJdsForDisplay([jd]);
+  return enriched;
+}
+
 /** JD-4: a user's JD version history, viewer-scoped (was unscoped). */
 export async function getEmployeeJDHistoryForViewer(targetUserId: string, requester: JdRequester) {
   await assertCanViewUserJDs(targetUserId, requester);

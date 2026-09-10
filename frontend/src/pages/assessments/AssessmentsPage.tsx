@@ -17,7 +17,7 @@ import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 import { formatDateTime } from '@/lib/format';
-import { printHtml, escapeHtml } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 
 interface ReviewDetail {
   questionId: string;
@@ -112,77 +112,6 @@ function fmtDuration(s?: number | null): string {
   if (s === null || s === undefined) return '—';
   const m = Math.floor(s / 60);
   return m > 0 ? `${m}m ${s % 60}s` : `${s % 60}s`;
-}
-
-/** Item 3: build & open a printable ("Save as PDF") document for a completed attempt —
- *  the same summary + per-question breakdown shown on screen. Used by the Download
- *  action on both a learner's own test and (for managers) a team member's test. */
-function printAttemptReview(data: AttemptReview): void {
-  const heading = `${data.topicNumber ? `${data.topicNumber} – ` : ''}${data.topicTitle ?? 'Assessment'}`;
-  const completedOn = data.completedAt ? formatDateTime(data.completedAt) : '—';
-  const passed = data.isPassed;
-  const accent = passed ? '#15803d' : '#b91c1c';
-  const accentBg = passed ? '#dcfce7' : '#fee2e2';
-
-  // A prominent pass/fail banner with the headline score.
-  const banner =
-    `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
-    `border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
-    `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">${passed ? 'PASSED' : 'FAILED'}</div>` +
-    `<div style="text-align:right;color:#334155;">` +
-    `<div style="font-size:22px;font-weight:700;line-height:1;">${data.score}%</div>` +
-    `<div style="font-size:11px;color:#64748b;margin-top:2px;">Passing score ${data.passingScorePercent}%</div>` +
-    `</div></div>`;
-
-  // A clean, readable key/value grid (labels muted + uppercase, values bold).
-  const cell = (label: string, value: string) =>
-    `<td style="padding:8px 10px;vertical-align:top;border-bottom:1px solid #eef2f7;width:33%;">` +
-    `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:2px;">${escapeHtml(label)}</div>` +
-    `<div style="font-size:13px;font-weight:600;color:#1e293b;">${value}</div></td>`;
-  const row = (...cells: string[]) => `<tr>${cells.join('')}</tr>`;
-
-  // Result / Score / Passing score already live in the banner above — the grid only carries
-  // the identity, timing and correct/incorrect counts, to avoid repeating them.
-  const details =
-    `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
-    row(
-      cell('Employee', escapeHtml(data.employeeName || '—')),
-      cell('Employee ID', escapeHtml(data.employeeId || '—')),
-      cell('Department', escapeHtml(data.department || '—')),
-    ) +
-    row(
-      cell('Completed On', escapeHtml(completedOn)),
-      cell('Attempt', `${data.attemptNumber} of ${data.maxAttempts}`),
-      cell('Correct', String(data.correctCount)),
-    ) +
-    row(
-      cell('Incorrect', String(data.incorrectCount)),
-      cell('Unattempted', String(data.unattempted ?? 0)),
-      cell('Time on Assessment', fmtDuration(data.timeSpentSeconds)),
-    ) +
-    row(
-      cell('Time on Reading', fmtDuration(data.readingTimeSeconds)),
-      cell('', ''),
-      cell('', ''),
-    ) +
-    `</table>`;
-  const summary = banner + details;
-  const review = data.allDetails?.length ? data.allDetails : data.incorrectDetails ?? [];
-  const questions = review
-    .map(
-      (d, i) =>
-        `<div style="margin:10px 0;padding:8px 0;border-top:1px solid #ddd;">` +
-        `<div><strong>${i + 1}. ${escapeHtml(d.questionText)}</strong>${d.isCorrect === true ? ' ✓' : d.isCorrect === false ? ' ✗' : ''}</div>` +
-        `<div>Your answer: ${escapeHtml(formatCorrect(d.userAnswer) || '—')}</div>` +
-        `${d.correctAnswer != null && d.correctAnswer !== '' ? `<div>Correct answer: ${escapeHtml(formatCorrect(d.correctAnswer))}</div>` : ''}` +
-        `${d.explanation ? `<div>Explanation: ${escapeHtml(String(d.explanation))}</div>` : ''}` +
-        `</div>`,
-    )
-    .join('');
-  printHtml(
-    'Assessment Result',
-    `<h1>${escapeHtml(heading)}</h1><div class="sub">Assessment Result</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
-  );
 }
 
 /**
@@ -333,15 +262,13 @@ export default function AssessmentsPage() {
   const managedRows = managed.data ?? [];
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  // Item 3: "Download" fetches the attempt's full review then opens a printable
-  // ("Save as PDF") document. Own tests hide the answer key; managers get the full key.
+  // Item 3: "Download" asks the server to render the attempt as a PDF. The answer key is
+  // included or withheld by the same rule as the on-screen review (own attempt hides it,
+  // a manager reviewing someone else's gets it) - that decision stays server-side.
   const downloadReview = async (attemptId: string) => {
     setDownloadingId(attemptId);
     try {
-      const data = (await svc.assessments.review(attemptId)) as unknown as AttemptReview;
-      printAttemptReview(data); // employee details come from the review payload (S2)
-    } catch (e) {
-      toast.error(apiError(e));
+      await printDocument('assessment-result', { attemptId });
     } finally {
       setDownloadingId(null);
     }

@@ -15,7 +15,7 @@ import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESi
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printHtml, printTable } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
 import { exportFilename } from '@izlearn/shared';
@@ -246,7 +246,6 @@ type StatusFilter = 'active' | 'inactive' | 'all';
 export default function RolesPage() {
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
-  const me = useAuthStore((s) => s.user);
   const canWrite = hasPermission('roleManagement', 'write');
   const canPrint = hasPermission('roleManagement', 'print');
   const canExport = hasPermission('roleManagement', 'export');
@@ -345,23 +344,17 @@ export default function RolesPage() {
       editName.trim() !== editRole.roleName ||
       (editDesc.trim() || '') !== (editRole.description ?? ''));
 
+  // Shows ALL permissions (granted + not granted), consistent with Export to Excel: a
+  // matrix listing only what is granted cannot be reviewed, because absent and denied look
+  // identical. "Printed by" is gone from the body - the footer carries it.
   function printMatrix(role: RoleRow) {
-    // Show ALL permissions (granted + not granted), consistent with Export to Excel.
-    const body =
-      `<h1>Role Permissions — ${role.roleName}</h1>` +
-      `<div class="meta">Status: ${role.isActive ? 'Active' : 'Inactive'} · Printed by ${me?.fullName ?? '—'}</div>` +
-      printTable(MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
-    printHtml(`Role Permissions — ${role.roleName}`, body);
+    void printDocument('role-permissions', { id: role.id });
   }
   function exportMatrix(role: RoleRow) {
     downloadCsv(exportFilename(`role-permissions-${role.roleName}`, 'csv'), MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
   }
   function handlePrintList() {
-    const body =
-      `<h1>Roles &amp; Access Control</h1>` +
-      `<div class="meta">Printed by ${me?.fullName ?? '—'} • Filter: ${statusFilter}</div>` +
-      printTable(['Role', 'Description', 'Status'], rows.map((r) => [r.roleName, r.description ?? '', r.isActive ? 'Active' : 'Inactive']));
-    printHtml('Roles & Access Control', body);
+    void printDocument('roles', { search, status: statusFilter });
   }
 
   const columns: Column<RoleRow>[] = [

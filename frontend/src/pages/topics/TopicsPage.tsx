@@ -18,7 +18,7 @@ import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
 import { todayInput } from '@/lib/format';
-import { printHtml, printTable, escapeHtml } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
 import { exportFilename } from '@izlearn/shared';
@@ -240,30 +240,11 @@ export default function TopicsPage() {
   }
 
   function printList() {
-    const body =
-      `<h1>Training Courses</h1><div class="sub">${rows.length} course(s) · printed from izLearn</div>` +
-      printTable(
-        ['SOP No.', 'Title', 'Type', 'Duration', 'Pass %', 'Version', 'Status'],
-        rows.map((r) => [r.topicNumber || r.topicCode, r.title, typeLabels(r), r.durationMinutes, `${r.passingScorePercent}%`, `v${r.currentVersion}`, r.status]),
-      );
-    printHtml('Training Courses', body);
+    void printDocument('courses', { search, status: statusFilter });
   }
 
   function printOne(r: Topic) {
-    printHtml(
-      `Course — ${r.title}`,
-      `<h1>${escapeHtml(r.title)}</h1><div class="sub">${escapeHtml(r.topicNumber || r.topicCode)} · v${r.currentVersion} · ${escapeHtml(r.status)}</div>` +
-        printTable(
-          ['Field', 'Value'],
-          [
-            ['Type', typeLabels(r)],
-            ['Duration (min)', r.durationMinutes],
-            // Same as the table: unused placeholders on a reading course.
-            ['Pass %', r.requiresAssessment === false ? '—' : `${r.passingScorePercent}%`],
-            ['Max Attempts', r.requiresAssessment === false ? '—' : r.maxAttempts],
-          ],
-        ),
-    );
+    void printDocument('course', { id: r.id });
   }
 
   const columns: Column<Topic>[] = [

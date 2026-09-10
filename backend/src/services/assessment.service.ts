@@ -13,7 +13,9 @@ import { hasCompletedRequiredReading } from './materialView.service';
 import { gradeQuestion } from '../utils/grading';
 import { hasPermission } from '../utils/permissions';
 import { isOrgWideUserManager, directReportIds } from '../utils/accessScope';
-import { failureReasonLabel, failureReasonIsTechnical, failureReasonCountsAsAttempt } from '@izlearn/shared';
+import { failureReasonLabel, failureReasonIsTechnical } from '@izlearn/shared';
+import { effectiveMaxAttempts, attemptsUsed } from '../utils/attemptAllowance';
+import { withholdAnswerKey, maySeeAnswerKey } from '../utils/answerKey';
 import type { AssessmentResult, QuestionResult, AssessmentFailureReason, PermissionMatrix, PermissionAction } from '@izlearn/shared';
 
 interface SnapshotQuestion {
@@ -173,15 +175,20 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   // never penalized for a technical interruption beyond their control. The reason is still
   // recorded in the audit trail for transparency. (Re-read fresh: the loop above just
   // updated some reasons.)
-  const extraAttempts = assignments.reduce((m, a) => Math.max(m, a.extraAttempts ?? 0), 0);
-  const effectiveMax = topic.maxAttempts + extraAttempts;
+  // Extras apply only if granted for THIS version - see utils/attemptAllowance.ts.
+  const effectiveMax = effectiveMaxAttempts(topic.maxAttempts, assignments, topic.currentVersion);
   // Attempt limit is scoped to the CURRENT version: a revision gives the learner a fresh
   // set of attempts (prior-version attempts don't count against the re-training).
   const finalized = await prisma.assessmentAttempt.findMany({
-    where: { userId, topicId, isDeleted: false, completedAt: { not: null }, topicVersion: topic.currentVersion },
-    select: { submissionReason: true },
+    where: { userId, topicId, isDeleted: false, topicVersion: topic.currentVersion },
+    select: { topicVersion: true, completedAt: true },
   });
-  const completedCount = finalized.filter((a) => !a.submissionReason || failureReasonCountsAsAttempt(a.submissionReason as AssessmentFailureReason)).length;
+  // EVERY completed attempt counts, technical failures included. The reason is still
+  // recorded so a supervisor can see the interruption was not the learner's fault and
+  // approve an unblock - but that is their judgement, not an automatic exemption. The
+  // earlier rule silently forgave ABANDONED / SYSTEM_FAILURE, which made the count shown
+  // to the learner differ from the count this gate enforced.
+  const completedCount = attemptsUsed(finalized, topic.currentVersion);
   // L-C3: `blockAfterMaxAttempts` is a deliberate per-course toggle. When ON, hitting the
   // limit blocks the trainee pending supervisor review; when OFF, maxAttempts is advisory
   // and retries stay open — this is intended, not a bypass.
@@ -435,6 +442,20 @@ export async function submitAttempt(
   // Score is over the whole question set; guard divide-by-zero for a (blocked) empty test.
   const score = total > 0 ? Number(((correctCount / total) * 100).toFixed(2)) : 0;
   const isPassed = score >= topic.passingScorePercent;
+  // The limit the learner is actually held to, so the result screen can report
+  // "Attempt X of Y" against the SAME number the gate enforces. It used to return the raw
+  // topic.maxAttempts, so a granted retake was invisible: a learner with 4 attempts
+  // allowed and 4 used was shown "Attempt 4 of 2".
+  const sourceAssignment = attempt.assignmentId
+    ? await prisma.trainingAssignment.findUnique({ where: { id: attempt.assignmentId } })
+    : null;
+  const effectiveMax = effectiveMaxAttempts(topic.maxAttempts, sourceAssignment ? [sourceAssignment] : [], topic.currentVersion);
+  // Withheld unless they passed - see utils/answerKey.ts. Stripped SERVER-SIDE, so the key
+  // never reaches the browser and cannot be read out of the response in devtools. The
+  // learner still gets the score, pass/fail, per-question isCorrect and their own answer,
+  // so they can see WHICH questions they got wrong. incorrectDetails holds the same objects
+  // as allDetails (pushed by reference above), so one pass covers both.
+  withholdAnswerKey(allDetails, maySeeAnswerKey(true, isPassed));
   // Distinguish "answered but wrong" from "never attempted" so the result isn't misleading.
   const unattempted = total - attempted;
   const incorrectCount = attempted - correctCount;
@@ -492,11 +513,6 @@ export async function submitAttempt(
       certificateId = undefined;
     }
   } else {
-    // Effective limit includes any extra attempts granted by an approved retake.
-    const sourceAssignment = attempt.assignmentId
-      ? await prisma.trainingAssignment.findUnique({ where: { id: attempt.assignmentId } })
-      : null;
-    const effectiveMax = topic.maxAttempts + (sourceAssignment?.extraAttempts ?? 0);
     if (topic.blockAfterMaxAttempts && attempt.attemptNumber >= effectiveMax) {
       isBlocked = true;
       await prisma.assessmentAttempt.update({ where: { id: attemptId }, data: { isBlocked: true } });
@@ -536,7 +552,7 @@ export async function submitAttempt(
     isPassed,
     isBlocked,
     attemptNumber: attempt.attemptNumber,
-    maxAttempts: topic.maxAttempts,
+    maxAttempts: effectiveMax,
     // A2: after submission, show every wrong answer (selected + correct + explanation)
     // for BOTH pass and fail. Explanation text is included where the question has one.
     incorrectDetails,
@@ -808,11 +824,10 @@ export async function reviewAttempt(
   const topic = await prisma.trainingTopic.findUnique({ where: { id: attempt.topicId } });
   const questions = (attempt.questionsUsed as unknown as SnapshotQuestion[]) ?? [];
   const answers = (attempt.answers as Record<string, unknown>) ?? {};
-  // A learner reviewing their OWN past attempt must NOT see the answer key or explanations
-  // — the assessment can be re-attempted, so revealing correct answers here would let them
-  // learn the answers between attempts. Only a manager reviewing SOMEONE ELSE's attempt
-  // (e.g. for coordinator review) sees the full breakdown.
-  const hideAnswerKey = attempt.userId === userId;
+  // Same rule as submitAttempt (utils/answerKey.ts), so the result screen, a later review
+  // and the printed PDF never disagree.
+  const revealAnswerKey = maySeeAnswerKey(attempt.userId === userId, !!attempt.isPassed);
+  const hideAnswerKey = !revealAnswerKey;
   const allDetails: QuestionResult[] = [];
   const incorrectDetails: QuestionResult[] = [];
   let correctCount = 0;
@@ -837,13 +852,23 @@ export async function reviewAttempt(
   const total = questions.length;
   const unattempted = total - attempted;
   const incorrectCount = attempted - correctCount;
-  const [readingLogs, owner] = await Promise.all([
+  const [readingLogs, owner, reviewAssignment] = await Promise.all([
     prisma.materialViewLog.findMany({
       where: { userId: attempt.userId, topicId: attempt.topicId, topicVersion: attempt.topicVersion },
       select: { elapsedSeconds: true },
     }),
     prisma.user.findUnique({ where: { id: attempt.userId }, select: { fullName: true, employeeId: true, departmentId: true } }),
+    attempt.assignmentId
+      ? prisma.trainingAssignment.findUnique({ where: { id: attempt.assignmentId } })
+      : Promise.resolve(null),
   ]);
+  // The limit as it applied to THIS attempt's version — a review of an old attempt must not
+  // report the current version's allowance, and a granted retake must not be invisible.
+  const reviewEffectiveMax = effectiveMaxAttempts(
+    topic?.maxAttempts,
+    reviewAssignment ? [reviewAssignment] : [],
+    attempt.topicVersion,
+  );
   const readingTimeSeconds = readingLogs.reduce((s, l) => s + (l.elapsedSeconds ?? 0), 0);
   // S2: the assessed employee's details so the view/printout is identifiable.
   const department = owner?.departmentId
@@ -866,7 +891,8 @@ export async function reviewAttempt(
     passingScorePercent: topic?.passingScorePercent ?? 0,
     isPassed: !!attempt.isPassed,
     attemptNumber: attempt.attemptNumber,
-    maxAttempts: topic?.maxAttempts ?? 0,
+    // Effective limit, matching what the gate enforces - not the raw course setting.
+    maxAttempts: reviewEffectiveMax,
     allDetails,
     incorrectDetails,
     timeSpentSeconds: Math.max(0, Math.round((attempt.completedAt.getTime() - attempt.startedAt.getTime()) / 1000)),
@@ -893,8 +919,18 @@ export async function unblockAssignment(assignmentId: string, req: Request) {
   const usedAttempts = await prisma.assessmentAttempt.count({
     where: { userId: assignment.userId, topicId: assignment.topicId, topicVersion: topic?.currentVersion ?? undefined, isDeleted: false },
   });
+  // Stamp the version the grant is for. The allowance resets on every revision, so an
+  // unstamped grant would keep applying after one and hand the new version a fresh
+  // allowance PLUS this offset - i.e. double. Only carry a previous offset forward when it
+  // belonged to this same version.
+  const priorForThisVersion =
+    assignment.extraAttemptsVersion === topic?.currentVersion ? assignment.extraAttempts ?? 0 : 0;
   return prisma.trainingAssignment.update({
     where: { id: assignmentId },
-    data: { status: 'PENDING', extraAttempts: Math.max(assignment.extraAttempts ?? 0, usedAttempts) },
+    data: {
+      status: 'PENDING',
+      extraAttempts: Math.max(priorForThisVersion, usedAttempts),
+      extraAttemptsVersion: topic?.currentVersion ?? null,
+    },
   });
 }

@@ -3,8 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, FileText, UserCircle, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { printJobDescription } from '@/lib/jdPrint';
-import { printCurriculumVitae } from '@/lib/cvPrint';
+import { printDocument } from '@/lib/printDocument';
 import { CvDocument } from '@/components/common/CvDocument';
 import { CvReviewActions } from '@/components/common/CvReviewActions';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -33,8 +32,12 @@ interface AssignmentRow {
   dueDate?: string | null;
   createdAt: string;
   maxAttempts?: number | null;
+  /** Only a grant made for the version this row shows; null once a revision supersedes it. */
   extraAttempts?: number | null;
+  /** Completed attempts on THIS row's version — the allowance resets on every revision. */
   attemptsUsed: number;
+  /** Completed attempts on superseded versions, shown as context, not counted against the limit. */
+  attemptsOnOtherVersions?: number;
   bestScore?: number | null;
   /** False for a reading-only course completed by read & acknowledge (no score/attempts). */
   gradedAssessment?: boolean;
@@ -191,8 +194,23 @@ export default function TeamMemberPage() {
       render: (r) => {
         // A reading-only completion has no assessment attempts to report.
         if (r.isPassed && !r.gradedAssessment) return <span className="text-slate-400">—</span>;
+        // Both figures are measured against the version this row shows. The allowance resets
+        // on every revision, so attempts made on an earlier version are reported separately
+        // rather than added in — counting them made "4 of 4 used" read as "6 / 4".
         const max = (r.maxAttempts ?? 0) + (r.extraAttempts ?? 0);
-        return <span className="text-sm">{r.attemptsUsed}{max ? ` / ${max}` : ''}{r.extraAttempts ? <span className="ml-1 text-xs text-emerald-600">(+{r.extraAttempts})</span> : null}</span>;
+        const earlier = r.attemptsOnOtherVersions ?? 0;
+        return (
+          <span className="text-sm">
+            {r.attemptsUsed}
+            {max ? ` / ${max}` : ''}
+            {r.extraAttempts ? <span className="ml-1 text-xs text-emerald-600">(+{r.extraAttempts})</span> : null}
+            {earlier ? (
+              <span className="ml-1 text-xs text-slate-400" title="Attempts made on earlier versions of this course. The attempt limit resets on each revision, so these do not count against the current allowance.">
+                ({earlier} on earlier {earlier === 1 ? 'version' : 'versions'})
+              </span>
+            ) : null}
+          </span>
+        );
       },
     },
     { key: 'score', header: 'Best Score', render: (r) => (r.bestScore != null ? `${r.bestScore}%` : '—') },
@@ -344,19 +362,7 @@ export default function TeamMemberPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() =>
-                          printJobDescription({
-                            title: jd.title,
-                            version: jd.version,
-                            status: jd.status,
-                            employeeName: data?.user.fullName ?? null,
-                            employeeCode: data?.user.employeeId ?? null,
-                            department: jd.departmentId ? deptName.get(jd.departmentId) ?? null : null,
-                            functionalRole: jd.functionalRoleId ? roleName.get(jd.functionalRoleId) ?? null : null,
-                            acknowledgedAt: jd.acknowledgedAt ?? null,
-                            content: jd.content ?? null,
-                          })
-                        }
+                        onClick={() => void printDocument('job-description', { id: jd.id })}
                       >
                         <Printer className="h-4 w-4" /> Print
                       </Button>
@@ -393,7 +399,7 @@ export default function TeamMemberPage() {
             <Button
               variant="outline"
               disabled={!cvData?.cv}
-              onClick={() => cvData?.header && printCurriculumVitae(cvData.header, cvData.cv)}
+              onClick={() => void printDocument('cv', { userId })}
             >
               <Printer className="h-4 w-4" /> Print CV
             </Button>

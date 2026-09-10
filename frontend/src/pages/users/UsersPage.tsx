@@ -19,7 +19,7 @@ import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { api, apiError } from '@/lib/axios';
 import { svc, downloadBlob } from '@/services';
-import { printHtml, printTable } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 
 interface UserRow {
   id: string;
@@ -356,27 +356,11 @@ export default function UsersPage() {
     }
   }
 
-  // CR-12: print the currently-displayed users list (client-side, no server dependency).
+  // The filters go to the server, which re-reads the users and renders the PDF. Note this
+  // prints ALL matching rows, not just the page on screen, which is what a printed list of
+  // "Users" is expected to contain.
   function handlePrint() {
-    const body =
-      `<h1>Users</h1>` +
-      `<div class="sub">${rows.length} record(s)${search ? ` · search: "${search}"` : ''} · ${
-        statusFilter === 'all' ? 'All' : statusFilter === 'inactive' ? 'Inactive' : 'Active'
-      }</div>` +
-      printTable(
-        ['Employee ID', 'Full Name', 'Username', 'Email', 'Department', 'Location', 'Roles', 'Status'],
-        rows.map((r) => [
-          r.employeeId,
-          r.fullName,
-          r.windowsUsername,
-          r.email ?? '',
-          r.departmentName ?? '',
-          r.locationName ?? '',
-          (r.roleNames ?? []).join(', '),
-          r.isActive ? 'Active' : 'Inactive',
-        ]),
-      );
-    printHtml('Users', body);
+    void printDocument('users', { search, status: statusFilter });
   }
 
   // CR-12: download the filtered users list from the export endpoint (authenticated blob).

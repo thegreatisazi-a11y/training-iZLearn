@@ -16,7 +16,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printHtml, printTable } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { svc } from '@/services';
 
 interface TeamMember {
@@ -289,24 +289,7 @@ export default function MyTeamPage() {
   });
 
   function handlePrint() {
-    const body =
-      `<h1>My Team</h1>` +
-      `<div class="sub">${rows.length} team member(s)</div>` +
-      printTable(
-        ['Name', 'Employee ID', 'Functional Role(s)', 'Training (done/total)', 'Assessments passed', 'JD Ack', 'CV', 'Certificates', 'TNI pending'],
-        rows.map((r) => [
-          r.fullName,
-          r.employeeId,
-          (r.functionalRoleNames ?? []).join(', '),
-          `${r.training.completed}/${r.training.total}`,
-          r.assessmentsPassed ?? 0,
-          r.jdAcknowledged ? 'Yes' : 'Pending',
-          r.cvCompleted ? 'Yes' : 'No',
-          r.certificates,
-          r.tniPending,
-        ]),
-      );
-    printHtml('My Team', body);
+    void printDocument('my-team', { search });
   }
 
   const columns: Column<TeamMember>[] = [

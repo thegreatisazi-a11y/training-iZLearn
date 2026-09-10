@@ -16,7 +16,7 @@ import { PageLoader } from '@/components/ui/spinner';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printHtml, printTable, escapeHtml } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
 import { BundleForm, EMPTY_BUNDLE_FORM, bundlePayload, type BundleFormValue } from './BundleForm';
@@ -144,16 +144,7 @@ export default function BundleDetailPage() {
   }
 
   function printDetail() {
-    const body =
-      `<h1>${escapeHtml(b.name)}</h1><div class="sub">${escapeHtml(b.description ?? 'Training bundle')} · ${b.isActive ? 'Active' : 'Inactive'}</div>` +
-      `<div class="section">Courses (${b.topics.length})</div>` +
-      printTable(['Course No.', 'Course', 'Type', 'Version', 'Status'], b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status])) +
-      `<div class="section">Targets</div>` +
-      printTable(
-        ['Departments', 'Functional Roles', 'Roles', 'Resolved users'],
-        [[b.departments.map((d) => d.name).join(', ') || '—', b.designations.map((d) => d.displayName).join(', ') || '—', b.roles.map((r) => r.roleName).join(', ') || '—', b.resolvedUserCount]],
-      );
-    printHtml(`Bundle — ${b.name}`, body);
+    void printDocument('bundle', { id: b.id });
   }
 
   const topicColumns: Column<BundleTopic>[] = [

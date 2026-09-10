@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileText, Printer, ChevronLeft, History } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { printJobDescription } from '@/lib/jdPrint';
-import { useAuthStore } from '@/store/authStore';
+import { printDocument } from '@/lib/printDocument';
 import { JD_ACK_SENTENCE } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -38,7 +37,6 @@ interface HistJD {
   approvedByName?: string | null;
 }
 function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const userName = useAuthStore((s) => s.user?.fullName);
   const { data, isLoading } = useQuery({
     queryKey: ['my-jd-history'],
     queryFn: () => svc.jds.mineHistory() as unknown as Promise<HistJD[]>,
@@ -46,22 +44,7 @@ function JdHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void
   });
   const [viewing, setViewing] = useState<HistJD | null>(null);
   const rows = data ?? [];
-  const print = (j: HistJD) =>
-    printJobDescription(
-      {
-        title: j.title,
-        version: j.version,
-        status: j.status,
-        employeeName: j.employeeName ?? userName ?? null,
-        employeeCode: j.employeeCode ?? null,
-        department: j.departmentName ?? null,
-        functionalRole: j.functionalRoleName ?? null,
-        approvedByName: j.approvedByName ?? null,
-        acknowledgedAt: j.acknowledgedAt ?? null,
-        content: j.content,
-      },
-      { printedBy: userName },
-    );
+  const print = (j: HistJD) => void printDocument('job-description', { id: j.id });
   return (
     <Dialog open={open} onClose={() => { setViewing(null); onClose(); }} className="max-w-2xl" title="Job Description — Version History" footer={<Button variant="outline" onClick={() => { setViewing(null); onClose(); }}>Close</Button>}>
       {isLoading ? (
@@ -144,24 +127,8 @@ export default function MyJobDescriptionPage() {
   // B1: when the user holds more than one JD, this is the one they opened from the list.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [histOpen, setHistOpen] = useState(false);
-  const userName = useAuthStore((s) => s.user?.fullName);
 
-  const printMyJD = (j: MyJD) =>
-    printJobDescription(
-      {
-        title: j.title,
-        version: j.version,
-        status: j.status,
-        employeeName: j.employeeName ?? userName ?? null,
-        employeeCode: j.employeeCode ?? null,
-        department: j.departmentName ?? null,
-        functionalRole: j.functionalRoleName ?? null,
-        approvedByName: j.approvedByName ?? null,
-        acknowledgedAt: j.acknowledgedAt ?? null,
-        content: j.content,
-      },
-      { printedBy: userName },
-    );
+  const printMyJD = (j: MyJD) => void printDocument('job-description', { id: j.id });
 
   const { data, isLoading } = useQuery({ queryKey: ['my-jd-list'], queryFn: () => svc.jds.mineList() as unknown as Promise<MyJD[]> });
   const jds = (data ?? []) as MyJD[];

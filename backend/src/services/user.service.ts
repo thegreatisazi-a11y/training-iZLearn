@@ -1023,11 +1023,20 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   // under), so a re-training assignment on a revised course shows only ITS OWN attempts and the
   // version it was completed at — instead of every row repeating the course's aggregate totals
   // (which produced "4 / 2" attempts and the newest version on every historical row).
-  type Sum = { used: number; best: number | null; passed: boolean; passedVersion: number | null; hasQuestions: boolean };
-  const blank = (): Sum => ({ used: 0, best: null, passed: false, passedVersion: null, hasQuestions: false });
+  // `usedByVersion` rather than one total: the attempt allowance RESETS on every revision
+  // (startAttempt scopes its limit to topicVersion), so a row showing v3 with a v3 allowance
+  // must not count the attempts made on v2. Reporting "6 / 4" for a learner who used 4 of 4
+  // allowed on v3 - because two older v2 attempts were added in - read as though they had
+  // exceeded the limit. `usedOtherVersions` keeps that history visible without inflating the
+  // figure. Every completed attempt counts, technical failures included, matching the gate.
+  type Sum = { usedByVersion: Map<number, number>; best: number | null; passed: boolean; passedVersion: number | null; hasQuestions: boolean };
+  const blank = (): Sum => ({ usedByVersion: new Map(), best: null, passed: false, passedVersion: null, hasQuestions: false });
   const merge = (m: Map<string, Sum>, key: string, a: (typeof attempts)[number]) => {
     const s = m.get(key) ?? blank();
-    if (a.completedAt) s.used += 1;
+    if (a.completedAt) {
+      const v = a.topicVersion ?? -1;
+      s.usedByVersion.set(v, (s.usedByVersion.get(v) ?? 0) + 1);
+    }
     // A reading-only (acknowledgement) completion has no questions and stores a placeholder
     // score — it must not surface as a "100%" best score. Only graded attempts set a score.
     const graded = ((a.questionsUsed as unknown[] | null) ?? []).length > 0;
@@ -1072,6 +1081,11 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
       // Effective status: a passing attempt means COMPLETED even if the assignment
       // row wasn't updated (e.g. an attempt taken without a linked assignmentId).
       const effectiveStatus = sum.passed ? 'COMPLETED' : a.status;
+      // The version this row represents - the one it was completed at, else the one the
+      // learner would sit now. Counts and allowance are both measured against it.
+      const rowVersion = (effectiveStatus === 'COMPLETED' ? sum.passedVersion : null) ?? t?.currentVersion ?? null;
+      const usedTotal = Array.from(sum.usedByVersion.values()).reduce((n, x) => n + x, 0);
+      const usedThisVersion = rowVersion == null ? 0 : sum.usedByVersion.get(rowVersion) ?? 0;
       return {
         id: a.id,
         topicId: a.topicId,
@@ -1080,14 +1094,18 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
         trainingType: t?.trainingType ?? null,
         // A completed row keeps the version it was actually completed at; an open row shows the
         // course's current version (the one the user will take).
-        version: (effectiveStatus === 'COMPLETED' ? sum.passedVersion : null) ?? t?.currentVersion ?? null,
+        version: rowVersion,
         isSuperseded: !!t?.supersededByTopicId,
         status: effectiveStatus,
         dueDate: a.dueDate,
         createdAt: a.createdAt,
         maxAttempts: t?.maxAttempts ?? null,
-        extraAttempts: a.extraAttempts,
-        attemptsUsed: sum.used,
+        // Only a grant made for the version this row shows still applies - an unstamped or
+        // older grant would otherwise hand this version a second full allowance.
+        extraAttempts: a.extraAttemptsVersion === rowVersion ? a.extraAttempts : null,
+        attemptsUsed: usedThisVersion,
+        // History on superseded versions, so a version-scoped 0 doesn't read as "never sat".
+        attemptsOnOtherVersions: usedTotal - usedThisVersion,
         // Null for a reading-only completion — there is no score to report.
         bestScore: sum.hasQuestions ? sum.best : null,
         // Distinguishes a graded pass from a read & acknowledged completion in the UI.

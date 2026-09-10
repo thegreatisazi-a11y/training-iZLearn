@@ -452,7 +452,19 @@ model TrainingAssignment {
   // Extra assessment attempts granted on top of the topic's maxAttempts (via an
   // approved RetakeRequest). Effective limit = topic.maxAttempts + extraAttempts.
   // Optional so existing documents (written before this field) still read cleanly.
+  //
+  // NOTE this is a HIGH-WATER OFFSET, not a count of spare attempts: it is set to the
+  // number of attempts already used, so maxAttempts + extraAttempts grants a FRESH full
+  // allowance from that point.
   extraAttempts    Int?
+  // The course version the grant above was made for. The attempt allowance resets on every
+  // revision (startAttempt scopes its limit to topicVersion), so a grant must reset with it
+  // — otherwise a grant made on v2 silently gave v3 DOUBLE its allowance (a fresh
+  // maxAttempts plus the stale offset). A grant applies only while this equals the course's
+  // currentVersion. Absent on documents written before this field, which reads as "not for
+  // the current version" and so does not apply — deliberate: those are old grants whose
+  // version is unknown, and the learner still gets the new version's full fresh allowance.
+  extraAttemptsVersion Int?
   isDeleted        Boolean          @default(false)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt

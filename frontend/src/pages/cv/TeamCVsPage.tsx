@@ -12,7 +12,7 @@ import { PageLoader } from '@/components/ui/spinner';
 import { CvDocument } from '@/components/common/CvDocument';
 import { CvReviewActions } from '@/components/common/CvReviewActions';
 import { svc } from '@/services';
-import { printCurriculumVitae } from '@/lib/cvPrint';
+import { printDocument } from '@/lib/printDocument';
 
 interface TeamRow {
   id: string;
@@ -114,8 +114,8 @@ export default function TeamCVsPage() {
   ];
 
   function handlePrint() {
-    if (!cvData?.header) return;
-    printCurriculumVitae(cvData.header, cvData.cv);
+    if (!viewUserId) return;
+    void printDocument('cv', { userId: viewUserId });
   }
 
   return (

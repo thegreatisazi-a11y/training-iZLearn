@@ -149,7 +149,14 @@ export async function decideRetakeRequest(id: string, input: RetakeDecisionInput
           dueDate: new Date(Date.now() + OVERDUE_ACCESS_GRACE_DAYS * 24 * 60 * 60 * 1000),
           overdueNotifiedAt: null,
         }
-      : { status: 'PENDING' as const, extraAttempts: usedAttempts };
+      : {
+          status: 'PENDING' as const,
+          extraAttempts: usedAttempts,
+          // Stamp the version this grant is for. The allowance resets on every revision,
+          // so an unstamped grant would keep applying afterwards and hand the new version
+          // a fresh allowance PLUS this offset - i.e. double it.
+          extraAttemptsVersion: rtTopic?.currentVersion ?? null,
+        };
     const { updated } = await auditedTransaction(prisma, async (tx) => {
       const updatedRequest = await tx.retakeRequest.update({
         where: { id },

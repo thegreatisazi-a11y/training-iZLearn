@@ -63,19 +63,3 @@ export function exportFilename(subject: string, ext: string, date: Date = new Da
   const safeExt = ext.replace(/^\./, '').toLowerCase();
   return `izlearn_${slugify(subject)}_${exportStamp(date)}.${safeExt}`;
 }
-
-/**
- * Document reference stamped in the header of a generated PDF/print view:
- * `REP-YYYYMMDDHHmmss-XXXXXX`.
- *
- * Deliberately NOT persisted anywhere — it identifies a printed copy, it is not a lookup
- * key — so the browser minting one is equivalent to the server doing it. The authoritative
- * record of who exported what and when is the AuditTrail EXPORT/PRINT event.
- */
-export function reportReference(prefix = 'REP', date: Date = new Date()): string {
-  const p = istParts(date);
-  const ts = `${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}`;
-  let fragment = '';
-  for (let i = 0; i < 6; i++) fragment += '0123456789ABCDEF'[Math.floor(Math.random() * 16)];
-  return `${prefix}-${ts}-${fragment}`;
-}

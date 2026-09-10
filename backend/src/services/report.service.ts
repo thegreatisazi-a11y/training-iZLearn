@@ -4,10 +4,9 @@ import { AppError } from '../utils/response';
 import { formatDate } from '../utils/dateUtils';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
-import { exportFilename, reportReference } from '@izlearn/shared';
+import { exportFilename } from '@izlearn/shared';
 import { renderPdfFromHtml } from '../utils/pdfGenerator';
 import { buildHeaderTemplate, buildFooterTemplate, escapeHtml } from '../utils/reportHeader';
-import { generateReportReference } from '../utils/certificateNumber';
 import { getOrgInfo } from './systemConfig.service';
 
 export interface ReportFilters {
@@ -779,8 +778,6 @@ export async function exportReport(
   const fmt = format.toLowerCase();
   // Every format stamps "Generated on …" in the configured display timezone (IST).
   const org = await getOrgInfo();
-  // One reference for whichever format is produced, matching the PDF header.
-  const ref = reportReference();
 
   if (fmt === 'csv') {
     return { contentType: 'text/csv', filename: exportFilename(type, 'csv'), body: exportToCsv(data.columns, data.rows), rowCount: data.rows.length };
@@ -804,7 +801,6 @@ export async function exportReport(
       generatedByEmployeeId: user.employeeId,
       timezone: org.timezone,
       orgName: org.name,
-      referenceNumber: ref,
     });
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -819,7 +815,6 @@ export async function exportReport(
     orgName: org.name,
     orgLogoPath: /^(https?:|data:)/.test(org.logoPath) ? org.logoPath : undefined,
     reportTitle: data.title,
-    referenceNumber: ref,
     generatedByName: user.fullName,
     generatedByEmployeeId: user.employeeId,
     generatedAt: new Date(),

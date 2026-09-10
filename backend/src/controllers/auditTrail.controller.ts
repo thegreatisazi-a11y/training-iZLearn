@@ -5,7 +5,6 @@ import { queryAuditTrail, recordEvent } from '../services/auditTrail.service';
 import { escapeCsv } from '../utils/csvExporter';
 import { renderPdfFromHtml } from '../utils/pdfGenerator';
 import { buildHeaderTemplate, buildFooterTemplate, escapeHtml } from '../utils/reportHeader';
-import { generateReportReference } from '../utils/certificateNumber';
 import { getOrgInfo } from '../services/systemConfig.service';
 import { formatDateTime, toEndBound, formatStamp } from '../utils/dateUtils';
 import { exportFilename } from '@izlearn/shared';
@@ -225,7 +224,7 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
       rows,
       'Audit Trail',
       title,
-      { generatedBy, generatedByEmployeeId: req.user!.employeeId, timezone: org.timezone, orgName: org.name, referenceNumber: generateReportReference('AUD') },
+      { generatedBy, generatedByEmployeeId: req.user!.employeeId, timezone: org.timezone, orgName: org.name },
     );
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('audit-trail', 'xlsx')}"`);
@@ -247,12 +246,10 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
   const rows = r.data.slice(0, PDF_CAP).map(mapRow);
   await recordEvent({ action: 'EXPORT', entityType: 'AuditTrail', newValue: { format, count: rows.length, truncated } });
 
-  const ref = generateReportReference('AUD');
   const cfg = {
     orgName: org.name,
     orgLogoPath: /^(https?:|data:)/.test(org.logoPath) ? org.logoPath : undefined,
     reportTitle: 'Audit Trail Report',
-    referenceNumber: ref,
     generatedByName: req.user!.fullName,
     generatedByEmployeeId: req.user!.employeeId,
     generatedAt: new Date(),

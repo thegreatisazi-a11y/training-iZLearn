@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printHtml, printTable } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { svc } from '@/services';
 
 interface TNI {
@@ -275,16 +275,9 @@ export default function TNIPage() {
     queryFn: () => svc.tni.list({ page, status: status || undefined }),
   });
 
-  /** Print the TNI requests currently loaded, via the shared print helper. */
+  /** Print every TNI matching the current status filter (server-rendered). */
   function printList() {
-    const rows = (data?.data ?? []) as unknown as TNI[];
-    const body =
-      `<h1>Training Needs Identification</h1><div class="sub">${rows.length} record(s) · printed from izLearn</div>` +
-      printTable(
-        ['User', 'Course', 'Justification', 'Status'],
-        rows.map((r) => [r.userFullName ?? '—', r.topicTitle ?? '—', r.justification ?? '', r.status]),
-      );
-    printHtml('Training Needs Identification', body);
+    void printDocument('tni', { status });
   }
 
   const createMut = useMutation({

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, XCircle, ArrowLeft, Clock, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
-import { printHtml, escapeHtml } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,6 @@ import { InlineFileViewer } from '@/components/common/InlineFileViewer';
 import { svc } from '@/services';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
-import { useAuthStore } from '@/store/authStore';
 import { formatDateTime } from '@/lib/format';
 
 interface ReadingItem {
@@ -88,6 +87,7 @@ interface IncorrectDetail {
   explanation?: string | null;
 }
 interface SubmitResult {
+  attemptId: string;
   score: number;
   totalQuestions: number;
   correctCount: number;
@@ -710,92 +710,11 @@ export default function TakeAssessmentPage() {
     // has no questions — so there is no score/pass-fail to report. Present it as a completion
     // record rather than an assessment result.
     const isReadingCompletion = (result.totalQuestions ?? 0) === 0;
-    // BUG-07: the printout must mirror the full on-screen result — summary AND every
-    // question with the user's answer, the correct answer and any explanation.
-    const printResult = async () => {
-      const head = start.data?.topicNumber ?? start.data?.topicCode;
-      const heading = `${head ? `${head} – ` : ''}${(start.data?.topicTitle ?? topicTitle) || 'Assessment'}`;
-      const me = useAuthStore.getState().user;
-      // Pull the signed-in user's profile so the printout can show their Department (name),
-      // matching the completed-attempts print. Self-scoped endpoint — falls back gracefully.
-      const profile = (await svc.users.myProfile().catch(() => null)) as
-        | { fullName?: string; employeeId?: string; departmentName?: string | null }
-        | null;
-      const employeeName = profile?.fullName || me?.fullName || '—';
-      const employeeCode = profile?.employeeId || me?.employeeId || '—';
-      const department = profile?.departmentName || '—';
-      const completedOn = formatDateTime(new Date().toISOString());
-      const passed = result.isPassed;
-      const accent = isReadingCompletion ? '#15803d' : passed ? '#15803d' : '#b91c1c';
-      const accentBg = isReadingCompletion ? '#dcfce7' : passed ? '#dcfce7' : '#fee2e2';
-      // A reading-only course has no score to report — show a plain completion banner instead
-      // of a pass/fail + percentage (there was no assessment).
-      const banner = isReadingCompletion
-        ? `<div style="border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
-          `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">COMPLETED</div>` +
-          `<div style="font-size:11px;color:#64748b;margin-top:2px;">Read &amp; acknowledged — no assessment for this course</div>` +
-          `</div>`
-        : `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;` +
-        `border:1px solid ${accent};background:${accentBg};border-radius:8px;padding:12px 16px;margin:14px 0;">` +
-        `<div style="font-size:18px;font-weight:700;letter-spacing:.03em;color:${accent};">${passed ? 'PASSED' : 'FAILED'}</div>` +
-        `<div style="text-align:right;color:#334155;">` +
-        `<div style="font-size:22px;font-weight:700;line-height:1;">${result.score}%</div>` +
-        `<div style="font-size:11px;color:#64748b;margin-top:2px;">Passing score ${result.passingScorePercent}%</div>` +
-        `</div></div>`;
-      const cell = (label: string, value: string) =>
-        `<td style="padding:8px 10px;vertical-align:top;border-bottom:1px solid #eef2f7;width:33%;">` +
-        `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:2px;">${escapeHtml(label)}</div>` +
-        `<div style="font-size:13px;font-weight:600;color:#1e293b;">${value}</div></td>`;
-      const row = (...cells: string[]) => `<tr>${cells.join('')}</tr>`;
-      const blank = `<td style="border-bottom:1px solid #eef2f7;"></td>`;
-      const identityRow = row(
-        cell('Employee', escapeHtml(employeeName)),
-        cell('Employee ID', escapeHtml(employeeCode)),
-        cell('Department', escapeHtml(department)),
-      );
-      // Reading-only completion: identity + when + reading time. No score/question counts.
-      const details = isReadingCompletion
-        ? `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
-          identityRow +
-          row(
-            cell('Completed On', escapeHtml(completedOn)),
-            cell('Completion Method', 'Read &amp; acknowledged'),
-            cell('Time on Reading', fmtDuration(result.readingTimeSeconds)),
-          ) +
-          `</table>`
-        : `<table style="width:100%;border-collapse:collapse;margin:6px 0 4px;">` +
-          identityRow +
-          row(
-            cell('Completed On', escapeHtml(completedOn)),
-            cell('Attempt', `${result.attemptNumber} of ${result.maxAttempts}`),
-            cell('Correct', String(result.correctCount)),
-          ) +
-          row(
-            cell('Incorrect', String(result.incorrectCount)),
-            cell('Unattempted', String(result.unattempted ?? 0)),
-            cell('Time on Assessment', fmtDuration(result.timeSpentSeconds)),
-          ) +
-          row(cell('Time on Reading', fmtDuration(result.readingTimeSeconds)), blank, blank) +
-          `</table>`;
-      const summary = banner + details;
-      const review = result.allDetails?.length ? result.allDetails : result.incorrectDetails ?? [];
-      const questions = review
-        .map(
-          (d, i) =>
-            `<div style="margin:10px 0;padding:8px 0;border-top:1px solid #ddd;">` +
-            `<div><strong>${i + 1}. ${escapeHtml(d.questionText)}</strong>${d.isCorrect === true ? ' ✓' : d.isCorrect === false ? ' ✗' : ''}</div>` +
-            `<div>Your answer: ${escapeHtml(formatCorrect(d.userAnswer) || '—')}</div>` +
-            `<div>Correct answer: ${escapeHtml(formatCorrect(d.correctAnswer))}</div>` +
-            `${d.explanation ? `<div>Explanation: ${escapeHtml(String(d.explanation))}</div>` : ''}` +
-            `</div>`,
-        )
-        .join('');
-      const docTitle = isReadingCompletion ? 'Training Completion Record' : 'Assessment Result';
-      printHtml(
-        docTitle,
-        `<h1>${escapeHtml(heading)}</h1><div class="sub">${docTitle}</div>${summary}${questions ? `<div class="section">Question Review</div>${questions}` : ''}`,
-      );
-    };
+    // The PDF is rendered server-side from the stored attempt, so the printed copy is the
+    // record rather than a snapshot of this screen. NOTE: the server withholds the answer key
+    // when a learner prints their OWN attempt (retakes are possible), while this page shows it
+    // immediately after submission - a pre-existing inconsistency between the two views.
+    const printResult = () => printDocument('assessment-result', { attemptId: result.attemptId });
     return (
       <div>
         <PageHeader
@@ -900,7 +819,13 @@ export default function TakeAssessmentPage() {
                           <p className={`mt-1 text-sm ${correct ? 'text-green-700' : 'text-red-700'}`}>
                             Your answer: {formatCorrect(d.userAnswer) || '—'}
                           </p>
-                          {!correct && <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>}
+                          {/* The correct answer / explanation are withheld unless the learner
+                              PASSED — a failed attempt can be re-taken and a retake reuses
+                              these questions. The backend strips them, so this only avoids
+                              rendering an empty "Correct answer:" line. */}
+                          {!correct && d.correctAnswer != null && d.correctAnswer !== '' && (
+                            <p className="mt-1 text-sm text-green-700">Correct answer: {formatCorrect(d.correctAnswer)}</p>
+                          )}
                           {d.explanation && <p className="mt-1 text-sm text-slate-600">{d.explanation}</p>}
                         </div>
                       </div>

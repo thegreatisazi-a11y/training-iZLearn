@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printHtml, printTable, escapeHtml } from '@/lib/print';
+import { printDocument } from '@/lib/printDocument';
 import { svc } from '@/services';
 import { BundleForm, EMPTY_BUNDLE_FORM, bundlePayload, type BundleFormValue } from './BundleForm';
 
@@ -122,36 +122,11 @@ export default function BundlesPage() {
   const rows = (data?.data ?? []) as unknown as BundleRow[];
 
   function printList() {
-    const body =
-      `<h1>Bundles</h1><div class="sub">${rows.length} bundle(s) · printed from izLearn</div>` +
-      printTable(
-        ['Name', 'Courses', 'Targets', 'Status'],
-        rows.map((r) => [
-          r.name,
-          r.topicIds?.length ?? 0,
-          `${r.departmentIds?.length ?? 0} dept · ${r.designationIds?.length ?? 0} desig · ${r.userIds?.length ?? 0} user`,
-          r.isActive ? 'Active' : 'Inactive',
-        ]),
-      );
-    printHtml('Bundles', body);
+    void printDocument('bundles', { search });
   }
 
   function printOne(r: BundleRow) {
-    printHtml(
-      `Bundle — ${r.name}`,
-      `<h1>${escapeHtml(r.name)}</h1><div class="sub">${escapeHtml(r.description ?? 'Training bundle')}</div>` +
-        printTable(
-          ['Field', 'Value'],
-          [
-            ['Courses', r.topicIds?.length ?? 0],
-            ['Departments', r.departmentIds?.length ?? 0],
-            ['Functional Roles', r.designationIds?.length ?? 0],
-            ['Users', r.userIds?.length ?? 0],
-            ['Due date', r.dueDate ? String(r.dueDate).slice(0, 10) : '—'],
-            ['Status', r.isActive ? 'Active' : 'Inactive'],
-          ],
-        ),
-    );
+    void printDocument('bundle', { id: r.id });
   }
 
   const columns: Column<BundleRow>[] = [

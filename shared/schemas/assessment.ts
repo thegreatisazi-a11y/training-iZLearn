@@ -41,16 +41,16 @@ export function failureReasonIsTechnical(r: AssessmentFailureReason): boolean {
   return r !== 'USER_SUBMITTED';
 }
 
-/**
- * Whether an attempt that ended for this reason should count toward the maximum-attempts
- * limit. Only SERVER-DETERMINED no-submission failures are free (a crash/abandon where no
- * answers ever reached the server is not a real attempt) — these cannot be spoofed by the
- * client. All attempts where the learner actually submitted answers count, but the recorded
- * reason lets a supervisor grant a retake/unblock if a technical issue was to blame.
+/*
+ * NOTE: there is deliberately no `failureReasonCountsAsAttempt`. EVERY completed attempt
+ * counts toward the maximum, technical failures included — see
+ * backend/src/utils/attemptAllowance.ts. The previous rule exempted ABANDONED and
+ * SYSTEM_FAILURE automatically, which meant the attempt number shown to the learner and the
+ * count the block gate enforced could differ. The reason is still recorded (that is what
+ * `failureReasonIsTechnical` above is for, in the audit trail), so a supervisor reviewing an
+ * unblock request can see the interruption was not the learner's fault and approve it —
+ * a judgement they make, rather than one the system makes silently.
  */
-export function failureReasonCountsAsAttempt(r: AssessmentFailureReason): boolean {
-  return r !== 'ABANDONED' && r !== 'SYSTEM_FAILURE';
-}
 
 /** Submit answers for a started attempt: { questionId: answer }. */
 export const submitAssessmentSchema = z.object({

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Eye, Printer } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { printJobDescription } from '@/lib/jdPrint';
+import { printDocument } from '@/lib/printDocument';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, Column } from '@/components/common/DataTable';
 import { ESignatureModal, ESignaturePayload } from '@/components/common/ESignatureModal';
@@ -57,7 +57,6 @@ export default function JDPage() {
   const canWrite = useAuthStore((s) => s.hasPermission)('jobDescription', 'write');
   const canApprove = useAuthStore((s) => s.hasPermission)('jobDescription', 'approve');
   const canPrint = useAuthStore((s) => s.hasPermission)('jobDescription', 'print');
-  const currentUserName = useAuthStore((s) => s.user?.fullName);
 
   const [tab, setTab] = useState('jds');
   const [page, setPage] = useState(1);
@@ -202,22 +201,8 @@ export default function JDPage() {
   const jdDepartment = (jd: JD) => (jd.departmentId ? deptName.get(jd.departmentId) ?? '—' : '—');
   const jdRole = (jd: JD) => (jd.functionalRoleId ? frName.get(jd.functionalRoleId) ?? '—' : '—');
 
-  const printJD = (jd: JD) =>
-    printJobDescription(
-      {
-        title: jd.title,
-        version: jd.version,
-        status: jd.status,
-        employeeName: jdEmployeeName(jd),
-        employeeCode: jdEmployeeCode(jd),
-        department: jdDepartment(jd),
-        functionalRole: jdRole(jd),
-        approvedByName: jd.approvedByName ?? null,
-        acknowledgedAt: jd.acknowledgedAt ?? null,
-        content: jd.content,
-      },
-      { printedBy: currentUserName },
-    );
+  // The server re-reads the JD and renders the PDF, so only the id travels.
+  const printJD = (jd: JD) => void printDocument('job-description', { id: jd.id });
 
   // A JD is "active" once it is approved/under review and not obsoleted.
   const isJdActive = (r: JD) => r.status === 'APPROVED' || r.status === 'UNDER_REVIEW';

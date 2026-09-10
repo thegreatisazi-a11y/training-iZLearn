@@ -9,18 +9,6 @@ export const list = asyncHandler(async (_req: Request, res: Response) => {
   sendSuccess(res, await svc.listConfig());
 });
 
-/**
- * Org branding for the header/footer of CLIENT-side printed documents, so a browser
- * printout carries the same org name, logo and timezone as a server-rendered PDF.
- *
- * Deliberately readable by ANY authenticated user (no systemConfig:read): every role can
- * print, and this exposes only what is already stamped on every report they receive.
- */
-export const branding = asyncHandler(async (_req: Request, res: Response) => {
-  const org = await svc.getOrgInfo();
-  sendSuccess(res, { orgName: org.name, logoPath: org.logoPath, timezone: org.timezone });
-});
-
 export const update = asyncHandler(async (req: Request, res: Response) => {
   // Two-component e-signature is required to change system configuration.
   await signFromRequest(req, 'SystemConfig', 'config', 'Approved');

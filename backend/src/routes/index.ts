@@ -33,6 +33,7 @@ import trainingTypeMasterRoutes from './trainingTypeMaster.routes';
 import documentTypeMasterRoutes from './documentTypeMaster.routes';
 import designationRoutes from './designation.routes';
 import bundleRoutes from './bundle.routes';
+import printDocumentRoutes from './printDocument.routes';
 
 const router = Router();
 
@@ -61,6 +62,7 @@ router.use('/signatures', eSignatureRoutes);
 router.use('/audit-trail', auditTrailRoutes);
 router.use('/system-config', systemConfigRoutes);
 router.use('/reports', reportRoutes);
+router.use('/print', printDocumentRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/admin', adminRoutes);
 router.use('/admin/certificate-templates', certificateTemplateRoutes);
