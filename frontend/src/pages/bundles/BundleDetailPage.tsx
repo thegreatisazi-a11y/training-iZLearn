@@ -16,11 +16,9 @@ import { PageLoader } from '@/components/ui/spinner';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printDocument } from '@/lib/printDocument';
-import { downloadCsv } from '@/lib/csv';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
 import { svc } from '@/services';
 import { BundleForm, EMPTY_BUNDLE_FORM, bundlePayload, type BundleFormValue } from './BundleForm';
-import { exportFilename } from '@izlearn/shared';
 
 interface BundleTopic {
   id: string;
@@ -135,12 +133,10 @@ export default function BundleDetailPage() {
     setEditOpen(true);
   }
 
-  function exportCsv() {
-    downloadCsv(
-      exportFilename(`bundle-${b.name}`, 'csv'),
-      ['Course No.', 'Course', 'Type', 'Version', 'Status'],
-      b.topics.map((t) => [t.topicNumber || t.topicCode, t.title, t.trainingType, `v${t.currentVersion}`, t.status]),
-    );
+  // Built server-side from the stored bundle, like every other export, so CSV and Excel
+  // share one column definition and the file matches the record rather than this view.
+  function exportDetail(format: 'csv' | 'xlsx') {
+    void svc.bundles.exportDetail(b.id, format).catch((e) => toast.error(apiError(e)));
   }
 
   function printDetail() {
@@ -174,8 +170,12 @@ export default function BundleDetailPage() {
               : <Button variant="outline" onClick={() => setArchiveOpen(true)}><RotateCcw className="h-4 w-4" /> Restore</Button>)}
             {(canExport || canPrint) && (
               <ExportMenu
-                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
-                onSelect={(f) => (f === 'csv' ? exportCsv() : printDetail())}
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  if (f === 'print') return printDetail();
+                  if (f === 'pdf') return void downloadDocumentPdf('bundle', { id: b.id });
+                  return exportDetail(f === 'excel' ? 'xlsx' : 'csv');
+                }}
               />
             )}
           </div>

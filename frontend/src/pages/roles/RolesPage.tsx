@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Eye, Printer, Download, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Plus, Eye, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { PERMISSION_CATALOG, PERMISSION_CATEGORIES, type PermModuleDef } from '@izlearn/shared';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -15,10 +15,9 @@ import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESi
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printDocument } from '@/lib/printDocument';
-import { downloadCsv } from '@/lib/csv';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { svc } from '@/services';
-import { exportFilename } from '@izlearn/shared';
 
 type PermMatrix = Record<string, Record<string, boolean>>;
 
@@ -32,7 +31,6 @@ interface RoleRow {
   permissions?: PermMatrix;
 }
 
-const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(PERMISSION_CATEGORIES.map((c) => [c.key, c.label]));
 
 /** A blank matrix containing exactly the catalog's modules + actions, all false. */
 function buildEmptyMatrix(): PermMatrix {
@@ -229,18 +227,6 @@ function PermissionEditor({
   );
 }
 
-/** Build matrix export/print rows from the catalog. */
-function matrixRows(matrix: PermMatrix): string[][] {
-  const rows: string[][] = [];
-  for (const def of PERMISSION_CATALOG) {
-    for (const a of def.actions) {
-      rows.push([CATEGORY_LABEL[def.category] ?? def.category, def.label, def.module, a.label, a.key, matrix[def.module]?.[a.key] ? 'Yes' : 'No']);
-    }
-  }
-  return rows;
-}
-const MATRIX_HEADERS = ['Category', 'Module', 'Module Key', 'Action', 'Action Key', 'Granted'];
-
 type StatusFilter = 'active' | 'inactive' | 'all';
 
 export default function RolesPage() {
@@ -350,8 +336,10 @@ export default function RolesPage() {
   function printMatrix(role: RoleRow) {
     void printDocument('role-permissions', { id: role.id });
   }
-  function exportMatrix(role: RoleRow) {
-    downloadCsv(exportFilename(`role-permissions-${role.roleName}`, 'csv'), MATRIX_HEADERS, matrixRows(matrixFromRole(role.permissions)));
+  // Built server-side from PERMISSION_CATALOG so the exported matrix cannot drift from
+  // the printed one (they were two separate implementations of the same table).
+  function exportMatrix(role: RoleRow, format: 'csv' | 'xlsx') {
+    void svc.rolesExport.matrix(role.id, format).catch((e) => toast.error(apiError(e)));
   }
   function handlePrintList() {
     void printDocument('roles', { search, status: statusFilter });
@@ -406,7 +394,19 @@ export default function RolesPage() {
         description="Define identity, scope, and per-module permissions. All changes are e-signed and audited."
         actions={
           <div className="flex gap-2">
-            {canPrint && <Button variant="outline" onClick={handlePrintList}><Printer className="h-4 w-4" /> Print</Button>}
+            {(canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  const params = { search: search || undefined, status: statusFilter };
+                  if (f === 'print') return handlePrintList();
+                  if (f === 'pdf') return void downloadDocumentPdf('roles', params);
+                  return void svc.rolesExport
+                    .list({ ...params, format: f === 'excel' ? 'xlsx' : 'csv' })
+                    .catch((e) => toast.error(apiError(e)));
+                }}
+              />
+            )}
             {canWrite && <Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> New Role</Button>}
           </div>
         }
@@ -505,8 +505,17 @@ export default function RolesPage() {
         className="max-w-5xl"
         footer={
           <div className="flex gap-2">
-            {canPrint && viewRole && <Button variant="outline" onClick={() => printMatrix(viewRole)}><Printer className="h-4 w-4" /> Print</Button>}
-            {canExport && viewRole && <Button variant="outline" onClick={() => exportMatrix(viewRole)}><Download className="h-4 w-4" /> Export</Button>}
+            {viewRole && (canExport || canPrint) && (
+              <ExportMenu
+                align="left"
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  if (f === 'print') return printMatrix(viewRole);
+                  if (f === 'pdf') return void downloadDocumentPdf('role-permissions', { id: viewRole.id });
+                  return exportMatrix(viewRole, f === 'excel' ? 'xlsx' : 'csv');
+                }}
+              />
+            )}
             <Button variant="outline" onClick={() => setViewRole(null)}>Close</Button>
           </div>
         }

@@ -46,10 +46,24 @@ function qs(params?: Record<string, unknown>): string {
  */
 async function downloadAuthed(url: string, fallbackName: string, onProgress?: (pct: number) => void): Promise<void> {
   const res = await api.get(url, downCfg(onProgress));
+  downloadBlob(res.data as Blob, filenameFromResponse(res, fallbackName));
+}
+
+/**
+ * The filename the SERVER chose, from Content-Disposition.
+ *
+ * Exported because a blob download sets `a.download`, which overrides the header entirely —
+ * so a page that builds its own name silently discards the standardised
+ * `izlearn_<subject>_<stamp>.<ext>`. Audit Trail, Reports and Users each did exactly that.
+ * Always run a downloaded blob's name through here.
+ */
+export function filenameFromResponse(
+  res: { headers: Record<string, unknown> },
+  fallbackName: string,
+): string {
   const cd = (res.headers['content-disposition'] as string | undefined) ?? '';
   const match = /filename\*?=(?:UTF-8'')?"?([^"";]+)"?/i.exec(cd);
-  const name = match ? decodeURIComponent(match[1]) : fallbackName;
-  downloadBlob(res.data as Blob, name);
+  return match ? decodeURIComponent(match[1]) : fallbackName;
 }
 
 /** Central API facade. Pages call e.g. svc.users.list(params), svc.assessments.start(...). */
@@ -106,7 +120,9 @@ export const svc = {
     publishDraft: (id: string, body: unknown) => data(api.post(`/topics/${id}/publish-draft`, body)),
     updateStatus: (id: string, body: unknown) => data(api.patch(`/topics/${id}/status`, body)),
     history: (id: string, params?: ListParams) => api.get(`/topics/${id}/history`, { params }).then((r) => r.data),
-    exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/topics/export${qs(params)}`, 'training-courses.csv'),
+    // format: 'csv' | 'xlsx' — PDF comes from the print-document registry instead.
+    exportTable: (params?: { status?: string; search?: string; format?: string }) =>
+      downloadAuthed(`/topics/export${qs(params)}`, `courses.${params?.format ?? 'csv'}`),
   },
 
   materials: {
@@ -177,7 +193,11 @@ export const svc = {
     addTopicToBundles: (topicId: string, bundleIds: string[]) => data(api.post(`/bundles/topics/${topicId}`, { bundleIds })),
     assign: (id: string, body: unknown) => data(api.post(`/bundles/${id}/assign`, body)),
     setActive: (id: string, isActive: boolean, reasonForChange: string) => data(api.patch(`/bundles/${id}/active`, { isActive, reasonForChange })),
-    exportCsv: (params?: { search?: string }) => downloadAuthed(`/bundles/export${qs(params)}`, 'bundles.csv'),
+    exportTable: (params?: { search?: string; format?: string }) =>
+      downloadAuthed(`/bundles/export${qs(params)}`, `bundles.${params?.format ?? 'csv'}`),
+    /** One bundle's course list, built server-side from the stored bundle. */
+    exportDetail: (id: string, format: 'csv' | 'xlsx' = 'csv') =>
+      downloadAuthed(`/bundles/${id}/export?format=${format}`, `bundle.${format}`),
   },
 
   questions: createCrud('/questions'),
@@ -282,7 +302,8 @@ export const svc = {
     ...createCrud('/tni'),
     restore: (id: string) => data(api.post(`/tni/${id}/restore`, {})),
     decide: (id: string, body: unknown) => data(api.post(`/tni/${id}/decision`, body)),
-    exportCsv: (params?: { status?: string; search?: string }) => downloadAuthed(`/tni/export${qs(params)}`, 'tni.csv'),
+    exportTable: (params?: { status?: string; search?: string; format?: string }) =>
+      downloadAuthed(`/tni/export${qs(params)}`, `tni.${params?.format ?? 'csv'}`),
     matrix: () => data(api.get('/tni/requirements/matrix')),
     setRequirement: (body: unknown) => data(api.post('/tni/requirements', body)),
     applyMatrix: (body: unknown) => data(api.post('/tni/requirements/apply', body)),
@@ -322,6 +343,21 @@ export const svc = {
     list: (params?: ListParams) => api.get('/audit-trail', { params }).then((r) => r.data),
     export: (format: string, body: unknown, onProgress?: (pct: number) => void) =>
       api.post('/audit-trail/export', { format, ...(body as object) }, downCfg(onProgress)),
+  },
+
+  rolesExport: {
+    /** Roles list as CSV/Excel. */
+    list: (params?: { search?: string; status?: string; format?: string }) =>
+      downloadAuthed(`/roles/export${qs(params)}`, `roles.${params?.format ?? 'csv'}`),
+    /** One role's FULL permission matrix (granted + not granted) as CSV/Excel. */
+    matrix: (id: string, format: 'csv' | 'xlsx' = 'csv') =>
+      downloadAuthed(`/roles/${id}/export?format=${format}`, `role-permissions.${format}`),
+  },
+
+  team: {
+    /** My Team as CSV/Excel — same scope the list applies, all rows not just the page. */
+    exportTable: (params?: { search?: string; format?: string }) =>
+      downloadAuthed(`/users/team/export${qs(params)}`, `my-team.${params?.format ?? 'csv'}`),
   },
 
   systemConfig: {

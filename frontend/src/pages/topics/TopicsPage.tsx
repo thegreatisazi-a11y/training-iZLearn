@@ -18,7 +18,7 @@ import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
 import { todayInput } from '@/lib/format';
-import { printDocument } from '@/lib/printDocument';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
 import { downloadCsv } from '@/lib/csv';
 import { svc } from '@/services';
 import { exportFilename } from '@izlearn/shared';
@@ -301,12 +301,16 @@ export default function TopicsPage() {
           <div className="flex flex-wrap gap-2">
             {(canExport || canPrint) && (
               <ExportMenu
-                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
-                onSelect={(f) =>
-                  f === 'csv'
-                    ? svc.topics.exportCsv({ status: statusFilter, search: search || undefined }).catch((e) => toast.error(apiError(e)))
-                    : printList()
-                }
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  const params = { status: statusFilter, search: search || undefined };
+                  if (f === 'print') return printList();
+                  // PDF is the same server-rendered document as Print, downloaded instead.
+                  if (f === 'pdf') return void downloadDocumentPdf('courses', params);
+                  return void svc.topics
+                    .exportTable({ ...params, format: f === 'excel' ? 'xlsx' : 'csv' })
+                    .catch((e) => toast.error(apiError(e)));
+                }}
               />
             )}
             {canCreate && (

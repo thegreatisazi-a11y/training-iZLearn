@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Field } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAuthStore } from '@/store/authStore';
-import { svc, downloadBlob } from '@/services';
+import { svc, downloadBlob, filenameFromResponse } from '@/services';
 import { printPdfBlob } from '@/lib/print';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
@@ -104,15 +104,16 @@ export default function ReportsPage() {
     mutationFn: async ({ format, print }: { format: string; print?: boolean }) => {
       setExportPct(0);
       const res = await svc.reports.export(type, { ...filters(), format, ...(print ? { print: true } : {}) }, setExportPct);
-      return { blob: res.data as Blob, format, print: !!print };
+      return { blob: res.data as Blob, format, print: !!print, filename: filenameFromResponse(res, `${type}.${EXT[format] ?? format}`) };
     },
     onSettled: () => setExportPct(null),
-    onSuccess: ({ blob, format, print }) => {
-      // Print opens the PDF in the browser's print dialog; every other format downloads a file.
+    onSuccess: ({ blob, print, filename }) => {
+      // Print opens the PDF in the browser's print dialog; every other format downloads a file
+      // under the SERVER's standardised name (a.download overrides Content-Disposition).
       if (print) {
         if (!printPdfBlob(blob)) toast.error('Please allow pop-ups to print this report.');
       } else {
-        downloadBlob(blob, `${type}.${EXT[format] ?? format}`);
+        downloadBlob(blob, filename);
       }
     },
     onError: (e) => toast.error(apiError(e)),

@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printDocument } from '@/lib/printDocument';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
 import { svc } from '@/services';
 
 interface TNI {
@@ -400,12 +400,15 @@ export default function TNIPage() {
                 loaded rows through the shared print helper. */}
             {view === 'requests' && (canExport || canPrint) && (
               <ExportMenu
-                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
-                onSelect={(f) =>
-                  f === 'csv'
-                    ? svc.tni.exportCsv({ status: status || undefined }).catch((e) => toast.error(apiError(e)))
-                    : printList()
-                }
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  const params = { status: status || undefined };
+                  if (f === 'print') return printList();
+                  if (f === 'pdf') return void downloadDocumentPdf('tni', params);
+                  return void svc.tni
+                    .exportTable({ ...params, format: f === 'excel' ? 'xlsx' : 'csv' })
+                    .catch((e) => toast.error(apiError(e)));
+                }}
               />
             )}
             {canWrite && view === 'requests' && (

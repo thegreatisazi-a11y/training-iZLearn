@@ -19,6 +19,7 @@ router.use(authenticate);
 router.get('/', requirePermission('bundleManagement', 'view'), c.list);
 router.get('/export', requirePermission('bundleManagement', 'export'), c.exportCsv);
 router.get('/:id/detail', requirePermission('bundleManagement', 'view'), c.detail);
+router.get('/:id/export', requirePermission('bundleManagement', 'export'), c.exportDetail);
 router.get('/:id', requirePermission('bundleManagement', 'view'), c.get);
 router.post('/', requirePermission('bundleManagement', 'create'), validate(createBundleSchema), c.create);
 router.patch(

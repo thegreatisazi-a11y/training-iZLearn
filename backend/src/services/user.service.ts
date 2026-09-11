@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import type { ExportTable } from '../utils/exportTable';
 import { Prisma, UserType } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
@@ -994,6 +995,46 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
  * Scoped: the caller must be the member's supervisor, or have team-wide visibility
  * (SUPER_ADMIN / userManagement:approve). Enforced server-side.
  */
+/**
+ * Column/row data for the My Team export — the same rows, scope and figures the screen
+ * shows, read server-side so the file covers every team member rather than the page on
+ * screen.
+ */
+export async function buildMyTeamExport(
+  supervisorId: string,
+  seeAll: boolean,
+  q: PaginationQuery,
+): Promise<ExportTable> {
+  const { data } = await listMyTeam(supervisorId, seeAll, { ...q, page: 1, pageSize: 100000 });
+  const columns = [
+    { header: 'Name', key: 'name' },
+    { header: 'Employee ID', key: 'employeeId' },
+    { header: 'Functional Role(s)', key: 'functionalRoles' },
+    { header: 'Training Completed', key: 'trainingCompleted' },
+    { header: 'Training Total', key: 'trainingTotal' },
+    { header: 'Assessments Passed', key: 'assessmentsPassed' },
+    { header: 'JD Acknowledged', key: 'jdAcknowledged' },
+    { header: 'CV', key: 'cv' },
+    { header: 'Certificates', key: 'certificates' },
+    { header: 'TNI Pending', key: 'tniPending' },
+  ];
+  const rows = data.map((r) => ({
+    name: r.fullName,
+    employeeId: r.employeeId,
+    functionalRoles: (r.functionalRoleNames ?? []).join(', '),
+    // Split across two columns rather than "3/5": a spreadsheet should hold numbers it can
+    // total and filter, not a string a human has to parse.
+    trainingCompleted: r.training.completed,
+    trainingTotal: r.training.total,
+    assessmentsPassed: r.assessmentsPassed ?? 0,
+    jdAcknowledged: r.jdAcknowledged ? 'Yes' : 'Pending',
+    cv: r.cvCompleted ? 'Yes' : 'No',
+    certificates: r.certificates,
+    tniPending: r.tniPending,
+  }));
+  return { title: 'My Team', columns, rows };
+}
+
 export async function getTeamMemberHistory(req: Request, targetUserId: string) {
   const requester = req.user!;
   // Org-wide access is a PERMISSION (userManagement:view_all / team:view_all in Roles &

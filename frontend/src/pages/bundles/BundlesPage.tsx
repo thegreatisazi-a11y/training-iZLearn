@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printDocument } from '@/lib/printDocument';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
 import { svc } from '@/services';
 import { BundleForm, EMPTY_BUNDLE_FORM, bundlePayload, type BundleFormValue } from './BundleForm';
 
@@ -166,10 +166,15 @@ export default function BundlesPage() {
           <div className="flex flex-wrap gap-2">
             {(canExport || canPrint) && (
               <ExportMenu
-                formats={[...(canExport ? (['csv'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
-                onSelect={(f) =>
-                  f === 'csv' ? svc.bundles.exportCsv({ search: search || undefined }).catch((e) => toast.error(apiError(e))) : printList()
-                }
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  const params = { search: search || undefined };
+                  if (f === 'print') return printList();
+                  if (f === 'pdf') return void downloadDocumentPdf('bundles', params);
+                  return void svc.bundles
+                    .exportTable({ ...params, format: f === 'excel' ? 'xlsx' : 'csv' })
+                    .catch((e) => toast.error(apiError(e)));
+                }}
               />
             )}
             {canCreate && (

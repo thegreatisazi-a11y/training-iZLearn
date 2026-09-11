@@ -18,8 +18,8 @@ import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { api, apiError } from '@/lib/axios';
-import { svc, downloadBlob } from '@/services';
-import { printDocument } from '@/lib/printDocument';
+import { svc, downloadBlob, filenameFromResponse } from '@/services';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
 
 interface UserRow {
   id: string;
@@ -375,7 +375,8 @@ export default function UsersPage() {
           if (e.total) setExportPct(Math.min(100, Math.round((e.loaded / e.total) * 100)));
         },
       });
-      downloadBlob(res.data as Blob, `users.${format}`);
+      // Server's standardised name — a.download would otherwise override it.
+      downloadBlob(res.data as Blob, filenameFromResponse(res, `users.${format}`));
       toast.success('Users exported.');
     } catch (e) {
       toast.error(apiError(e));
@@ -475,8 +476,13 @@ export default function UsersPage() {
             {(canExport || canPrint) && (
               <ExportMenu
                 busy={exporting}
-                formats={[...(canExport ? (['csv', 'excel'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
-                onSelect={(f) => (f === 'csv' ? handleExport('csv') : f === 'excel' ? handleExport('xlsx') : handlePrint())}
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  if (f === 'print') return handlePrint();
+                  // PDF is the same server-rendered document as Print, downloaded instead.
+                  if (f === 'pdf') return void downloadDocumentPdf('users', { search, status: statusFilter });
+                  return handleExport(f === 'excel' ? 'xlsx' : 'csv');
+                }}
               />
             )}
             {exporting && <span className="self-center text-sm text-slate-500">Exporting… {exportPct ?? 0}%</span>}

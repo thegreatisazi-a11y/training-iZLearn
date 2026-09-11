@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { exportFilename } from '@izlearn/shared';
 import { asyncHandler, sendSuccess, sendCreated } from '../utils/response';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/certificateTemplate.service';
@@ -42,6 +43,6 @@ export const preview = asyncHandler(async (req: Request, res: Response) => {
   const pdf = await svc.previewTemplatePdf(req.params.id);
   await recordEvent({ action: 'PRINT', entityType: 'CertificateTemplate', entityId: req.params.id, newValue: { preview: true } });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'inline; filename="certificate-preview.pdf"');
+  res.setHeader('Content-Disposition', `inline; filename="${exportFilename('certificate-preview', 'pdf')}"`);
   res.send(pdf);
 });

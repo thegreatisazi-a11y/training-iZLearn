@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import { parseTableFormat, sendTableExport } from '../utils/exportTable';
+import { getOrgInfo } from '../services/systemConfig.service';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
 import { paginationQuery, userRequestDecisionSchema } from '@izlearn/shared';
 import { exportToCsv } from '../utils/csvExporter';
@@ -147,6 +149,16 @@ export const team = asyncHandler(async (req: Request, res: Response) => {
   const seeAll = hasOrgWideScope(req.user!.permissions as PermissionMatrix, 'team');
   const r = await svc.listMyTeam(req.user!.id, seeAll, q);
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
+});
+
+/** Export My Team as CSV or Excel, with the same scope the list applies. */
+export const exportTeam = asyncHandler(async (req: Request, res: Response) => {
+  const q = paginationQuery.parse(req.query);
+  const seeAll = hasOrgWideScope(req.user!.permissions as PermissionMatrix, 'team');
+  const format = parseTableFormat(req.query.format);
+  const table = await svc.buildMyTeamExport(req.user!.id, seeAll, q);
+  await recordEvent({ action: 'EXPORT', entityType: 'User', entityId: 'team', newValue: { format, count: table.rows.length } });
+  await sendTableExport(res, table, 'my-team', format, req.user!, await getOrgInfo());
 });
 
 // Training history for one team member (scoped to the caller's reports / admin).

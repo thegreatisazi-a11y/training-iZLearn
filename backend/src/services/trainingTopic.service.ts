@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import type { ExportTable } from '../utils/exportTable';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
@@ -6,7 +7,6 @@ import { auditContext } from '../utils/auditContext';
 import { generateTopicCode } from '../utils/certificateNumber';
 import { generateStoredName } from '../utils/fileUtils';
 import { startOfDay, formatDateIso } from '../utils/dateUtils';
-import { toCsv } from '../utils/csv';
 import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
 import { snapshotVersion } from './topicVersionHistory.service';
@@ -78,31 +78,46 @@ export async function listTopics(q: PaginationQuery & { status?: string }, canMa
 }
 
 /** Build a CSV export of the (filtered) topic catalogue. */
-export async function exportTopicsCsv(
+/**
+ * Column/row data for the course-catalogue export, format-agnostic so the controller can
+ * render it as CSV or Excel from one definition (they used to drift).
+ */
+export async function buildTopicsExport(
   filter: { status?: string; search?: string },
   canManage = true,
-): Promise<string> {
+): Promise<ExportTable> {
   // Reuse the same visibility rules as the list (large page so we get everything).
   const { data } = await listTopics(
     { page: 1, pageSize: 100000, sortBy: 'createdAt', sortDir: 'desc', search: filter.search, status: filter.status } as PaginationQuery & { status?: string },
     canManage,
   );
-  const headers = ['Course No.', 'Title', 'Type', 'Duration (min)', 'Pass %', 'Max Attempts', 'Version', 'Status', 'Effective Date', 'Review Date'];
-  const rows = data.map((t) => [
-    t.topicNumber || t.topicCode,
-    t.title,
-    t.trainingType,
-    t.durationMinutes,
+  const columns = [
+    { header: 'Course No.', key: 'courseNo' },
+    { header: 'Title', key: 'title' },
+    { header: 'Type', key: 'type' },
+    { header: 'Duration (min)', key: 'duration' },
+    { header: 'Pass %', key: 'passPercent' },
+    { header: 'Max Attempts', key: 'maxAttempts' },
+    { header: 'Version', key: 'version' },
+    { header: 'Status', key: 'status' },
+    { header: 'Effective Date', key: 'effectiveDate' },
+    { header: 'Review Date', key: 'reviewDate' },
+  ];
+  const rows = data.map((t) => ({
+    courseNo: t.topicNumber || t.topicCode,
+    title: t.title,
+    type: t.trainingType,
+    duration: t.durationMinutes,
     // A reading course stores an unused pass mark / attempt limit; export them as blank so the
     // file matches the on-screen table instead of implying "0% to pass, 1 attempt".
-    t.requiresAssessment === false ? '' : t.passingScorePercent,
-    t.requiresAssessment === false ? '' : t.maxAttempts,
-    `v${t.currentVersion}`,
-    t.status,
-    formatDateIso(t.effectiveDate),
-    formatDateIso(t.reviewDate),
-  ]);
-  return toCsv(headers, rows);
+    passPercent: t.requiresAssessment === false ? '' : t.passingScorePercent,
+    maxAttempts: t.requiresAssessment === false ? '' : t.maxAttempts,
+    version: `v${t.currentVersion}`,
+    status: t.status,
+    effectiveDate: formatDateIso(t.effectiveDate),
+    reviewDate: formatDateIso(t.reviewDate),
+  }));
+  return { title: 'Training Courses', columns, rows };
 }
 
 export async function getTopic(id: string, canManage = true) {

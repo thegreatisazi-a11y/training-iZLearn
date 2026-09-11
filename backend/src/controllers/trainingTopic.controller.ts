@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
+import { getOrgInfo } from '../services/systemConfig.service';
+import { parseTableFormat, sendTableExport } from '../utils/exportTable';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
 import { paginationQuery, updateTopicStatusSchema } from '@izlearn/shared';
 import { hasPermission } from '../utils/permissions';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/trainingTopic.service';
 import * as historySvc from '../services/topicVersionHistory.service';
-import { exportFilename } from '@izlearn/shared';
 
 /** Course managers (courseManagement:write) see drafts; everyone else only PUBLISHED (4.3). */
 function canManageCourses(req: Request): boolean {
@@ -19,15 +20,19 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
   sendPaginated(res, r.data, { page: r.page, pageSize: r.pageSize, total: r.total });
 });
 
-/** Export the (filtered) topic catalogue as CSV. Guarded by courseManagement:export. */
+/** Export the (filtered) course catalogue as CSV or Excel. Guarded by courseManagement:export. */
 export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
   const search = typeof req.query.search === 'string' ? req.query.search : undefined;
-  const csv = await svc.exportTopicsCsv({ status, search }, canManageCourses(req));
-  await recordEvent({ action: 'EXPORT', entityType: 'TrainingTopic', entityId: 'catalogue', newValue: { status, search } });
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('courses', 'csv')}"`);
-  res.send(csv);
+  const format = parseTableFormat(req.query.format);
+  const table = await svc.buildTopicsExport({ status, search }, canManageCourses(req));
+  await recordEvent({
+    action: 'EXPORT',
+    entityType: 'TrainingTopic',
+    entityId: 'catalogue',
+    newValue: { status, search, format, count: table.rows.length },
+  });
+  await sendTableExport(res, table, 'courses', format, req.user!, await getOrgInfo());
 });
 
 export const get = asyncHandler(async (req: Request, res: Response) => {

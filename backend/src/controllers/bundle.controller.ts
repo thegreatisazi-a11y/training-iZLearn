@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
+import { getOrgInfo } from '../services/systemConfig.service';
+import { parseTableFormat, sendTableExport } from '../utils/exportTable';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated } from '../utils/response';
 import { paginationQuery, addTopicToBundlesSchema, assignBundleSchema } from '@izlearn/shared';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/bundle.service';
-import { exportFilename } from '@izlearn/shared';
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
@@ -14,11 +15,28 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
 /** Export the (filtered) bundle list as CSV. Guarded by bundleManagement:export. */
 export const exportCsv = asyncHandler(async (req: Request, res: Response) => {
   const q = paginationQuery.parse(req.query);
-  const csv = await svc.exportBundlesCsv(q);
-  await recordEvent({ action: 'EXPORT', entityType: 'TopicBundle', entityId: 'list', newValue: { search: q.search } });
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${exportFilename('bundles', 'csv')}"`);
-  res.send(csv);
+  const format = parseTableFormat(req.query.format);
+  const table = await svc.buildBundlesExport(q);
+  await recordEvent({
+    action: 'EXPORT',
+    entityType: 'TopicBundle',
+    entityId: 'list',
+    newValue: { search: q.search, format, count: table.rows.length },
+  });
+  await sendTableExport(res, table, 'bundles', format, req.user!, await getOrgInfo());
+});
+
+/** Export ONE bundle's course list as CSV or Excel. */
+export const exportDetail = asyncHandler(async (req: Request, res: Response) => {
+  const format = parseTableFormat(req.query.format);
+  const table = await svc.buildBundleDetailExport(req.params.id);
+  await recordEvent({
+    action: 'EXPORT',
+    entityType: 'TopicBundle',
+    entityId: req.params.id,
+    newValue: { format, count: table.rows.length },
+  });
+  await sendTableExport(res, table, `bundle-${req.params.id}`, format, req.user!, await getOrgInfo());
 });
 
 export const get = asyncHandler(async (req: Request, res: Response) => {

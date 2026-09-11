@@ -16,6 +16,8 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', requirePermission('roleManagement', 'read'), c.list);
+router.get('/export', requirePermission('roleManagement', 'export'), c.exportRoles);
+router.get('/:id/export', requirePermission('roleManagement', 'export'), c.exportPermissions);
 router.get('/:id', requirePermission('roleManagement', 'read'), c.get);
 // L-A3: capture a reason-for-change when provided (a new role has no prior value, so it
 // isn't mandatory) — records it in the audit trail like the edit/delete paths.

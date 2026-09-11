@@ -16,7 +16,8 @@ import { Dialog } from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/authStore';
 import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
-import { printDocument } from '@/lib/printDocument';
+import { printDocument, downloadDocumentPdf } from '@/lib/printDocument';
+import { ExportMenu } from '@/components/common/ExportMenu';
 import { svc } from '@/services';
 
 interface TeamMember {
@@ -235,6 +236,7 @@ export default function MyTeamPage() {
   const can = useAuthStore((s) => s.hasPermission);
   const me = useAuthStore((s) => s.user);
   const canPrint = can('team', 'print');
+  const canExport = can('team', 'export');
   // Item D: "Add Team Member" has its OWN permission (team:create), independent of the
   // Users module. Read EXACTLY from the matrix so the derived `write`/legacy fallback
   // doesn't implicitly re-enable it.
@@ -361,7 +363,19 @@ export default function MyTeamPage() {
                 <UserPlus className="h-4 w-4" /> Add Team Member
               </Button>
             )}
-            {canPrint && <Button variant="outline" onClick={handlePrint}>Print</Button>}
+            {(canExport || canPrint) && (
+              <ExportMenu
+                formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+                onSelect={(f) => {
+                  const params = { search: search || undefined };
+                  if (f === 'print') return handlePrint();
+                  if (f === 'pdf') return void downloadDocumentPdf('my-team', params);
+                  return void svc.team
+                    .exportTable({ ...params, format: f === 'excel' ? 'xlsx' : 'csv' })
+                    .catch((e) => toast.error(apiError(e)));
+                }}
+              />
+            )}
           </div>
         }
       />

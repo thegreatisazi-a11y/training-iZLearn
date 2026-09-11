@@ -27,6 +27,7 @@ router.get('/me', c.myProfile);
 // Team overview — gated on the team module (CR: per-action team RBAC) and still
 // supervisor-scoped server-side (a supervisor sees only their own reports; admin sees all).
 router.get('/team', requirePermission('team', 'view'), c.team);
+router.get('/team/export', requirePermission('team', 'export'), c.exportTeam);
 router.get('/team/:userId/history', requirePermission('team', 'view'), c.teamHistory);
 
 // Creation requests (specific routes before '/:id'). The User Requests QUEUE (list +

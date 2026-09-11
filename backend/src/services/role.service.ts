@@ -1,4 +1,6 @@
 import { Request } from 'express';
+import type { ExportTable } from '../utils/exportTable';
+import { PERMISSION_CATALOG, PERMISSION_CATEGORIES } from '@izlearn/shared';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
@@ -59,6 +61,59 @@ export async function listRoles(q: PaginationQuery) {
     prisma.role.count({ where }),
   ]);
   return { data, total, page: q.page, pageSize: q.pageSize };
+}
+
+/** Column/row data for the roles list. */
+export async function buildRolesExport(q: PaginationQuery): Promise<ExportTable> {
+  const { data } = await listRoles({ ...q, page: 1, pageSize: 100000 });
+  const columns = [
+    { header: 'Role', key: 'role' },
+    { header: 'Description', key: 'description' },
+    { header: 'Status', key: 'status' },
+  ];
+  const rows = data.map((r) => ({
+    role: r.roleName,
+    description: r.description ?? '',
+    status: r.isActive ? 'Active' : 'Inactive',
+  }));
+  return { title: 'Roles & Access Control', columns, rows };
+}
+
+/**
+ * Column/row data for ONE role's permission matrix.
+ *
+ * Lists EVERY catalog action, granted or not — a matrix showing only what is granted cannot
+ * be reviewed, because "absent" and "denied" look identical. Built from PERMISSION_CATALOG
+ * server-side so it can no longer drift from the print/PDF version.
+ */
+export async function buildRolePermissionsExport(id: string): Promise<ExportTable> {
+  const role = await getRole(id);
+  const matrix = (role.permissions ?? {}) as PermissionMatrix;
+  const categoryLabel: Record<string, string> = Object.fromEntries(
+    PERMISSION_CATEGORIES.map((c) => [c.key, c.label]),
+  );
+  const columns = [
+    { header: 'Category', key: 'category' },
+    { header: 'Module', key: 'module' },
+    { header: 'Module Key', key: 'moduleKey' },
+    { header: 'Action', key: 'action' },
+    { header: 'Action Key', key: 'actionKey' },
+    { header: 'Granted', key: 'granted' },
+  ];
+  const rows: Array<Record<string, unknown>> = [];
+  for (const def of PERMISSION_CATALOG) {
+    for (const a of def.actions) {
+      rows.push({
+        category: categoryLabel[def.category] ?? def.category,
+        module: def.label,
+        moduleKey: def.module,
+        action: a.label,
+        actionKey: a.key,
+        granted: matrix[def.module]?.[a.key] ? 'Yes' : 'No',
+      });
+    }
+  }
+  return { title: `Role Permissions - ${role.roleName}`, columns, rows };
 }
 
 export async function getRole(id: string) {

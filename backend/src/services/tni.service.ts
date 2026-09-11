@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import type { ExportTable } from '../utils/exportTable';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
@@ -7,7 +8,6 @@ import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import { startOfDay, formatDateIso } from '../utils/dateUtils';
-import { toCsv } from '../utils/csv';
 import type {
   CreateTNIInput,
   UpdateTNIInput,
@@ -52,18 +52,26 @@ export async function listTNI(q: PaginationQuery & { userId?: string; status?: s
  * user is looking at, so the file matches the filters rather than the pagination — the same
  * approach the Courses, Users and Bundles list exports take.
  */
-export async function exportTniCsv(q: PaginationQuery & { userId?: string; status?: string }): Promise<string> {
+/** Column/row data for the TNI export — rendered as CSV or Excel by the controller. */
+export async function buildTniExport(q: PaginationQuery & { userId?: string; status?: string }): Promise<ExportTable> {
   const { data } = await listTNI({ ...q, page: 1, pageSize: 100000 });
-  const headers = ['User', 'Course', 'Justification', 'Status', 'Identified On', 'Approved On'];
-  const rows = data.map((t) => [
-    t.userFullName ?? '',
-    t.topicTitle ?? '',
-    t.justification ?? '',
-    t.status,
-    formatDateIso(t.createdAt as unknown as string | null),
-    formatDateIso(t.approvedAt as unknown as string | null),
-  ]);
-  return toCsv(headers, rows);
+  const columns = [
+    { header: 'User', key: 'user' },
+    { header: 'Course', key: 'course' },
+    { header: 'Justification', key: 'justification' },
+    { header: 'Status', key: 'status' },
+    { header: 'Identified On', key: 'identifiedOn' },
+    { header: 'Approved On', key: 'approvedOn' },
+  ];
+  const rows = data.map((t) => ({
+    user: t.userFullName ?? '',
+    course: t.topicTitle ?? '',
+    justification: t.justification ?? '',
+    status: t.status,
+    identifiedOn: formatDateIso(t.createdAt as unknown as string | null),
+    approvedOn: formatDateIso(t.approvedAt as unknown as string | null),
+  }));
+  return { title: 'Training Needs Identification', columns, rows };
 }
 
 export async function getTNI(id: string) {

@@ -9,7 +9,8 @@ import { Input, Field } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { useAuthStore } from '@/store/authStore';
-import { svc, downloadBlob } from '@/services';
+import { svc, downloadBlob, filenameFromResponse } from '@/services';
+import { printPdfBlob } from '@/lib/print';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
 import { formatDateTime } from '@/lib/format';
@@ -231,6 +232,7 @@ const ACTIONS = [
 
 export default function AuditTrailPage() {
   const canExport = useAuthStore((s) => s.hasPermission)('auditTrail', 'export');
+  const canPrint = useAuthStore((s) => s.hasPermission)('auditTrail', 'print');
   const [page, setPage] = useState(1);
 
   // Resolve user IDs in change details to names (e.g. "Approved By: … → System Administrator").
@@ -319,7 +321,7 @@ export default function AuditTrailPage() {
 
   const exportMutation = useMutation({
     // Item 6: audit-trail export no longer requires an e-signature.
-    mutationFn: async (fmt: 'xlsx' | 'csv' | 'pdf') => {
+    mutationFn: async ({ fmt, print }: { fmt: 'xlsx' | 'csv' | 'pdf'; print?: boolean }) => {
       setExportPct(0);
       const res = await svc.audit.export(
         fmt,
@@ -333,11 +335,18 @@ export default function AuditTrailPage() {
         },
         setExportPct,
       );
-      return { blob: res.data as Blob, fmt };
+      return { blob: res.data as Blob, print: !!print, filename: filenameFromResponse(res, `audit-trail.${fmt}`) };
     },
     onSettled: () => setExportPct(null),
-    onSuccess: ({ blob, fmt }) => {
-      downloadBlob(blob, `audit-trail.${fmt}`);
+    onSuccess: ({ blob, print, filename }) => {
+      // Print renders the same server PDF and opens the print dialog; everything else
+      // downloads under the SERVER's standardised name (a.download overrides the header,
+      // so building a name here silently discarded izlearn_audit-trail_<stamp>.<ext>).
+      if (print) {
+        if (!printPdfBlob(blob)) toast.error('Please allow pop-ups to print the audit trail.');
+        return;
+      }
+      downloadBlob(blob, filename);
       toast.success('Audit trail exported.');
     },
     onError: async (e) => {
@@ -399,11 +408,15 @@ export default function AuditTrailPage() {
         title="Audit Trail"
         description="Immutable record of all system actions (21 CFR Part 11)."
         actions={
-          canExport && (
+          (canExport || canPrint) && (
             <ExportMenu
               busy={exportMutation.isPending}
-              formats={['csv', 'excel', 'pdf']}
-              onSelect={(f) => exportMutation.mutate(f === 'excel' ? 'xlsx' : (f as 'csv' | 'pdf'))}
+              formats={[...(canExport ? (['csv', 'excel', 'pdf'] as const) : []), ...(canPrint ? (['print'] as const) : [])]}
+              onSelect={(f) =>
+                f === 'print'
+                  ? exportMutation.mutate({ fmt: 'pdf', print: true })
+                  : exportMutation.mutate({ fmt: f === 'excel' ? 'xlsx' : (f as 'csv' | 'pdf') })
+              }
             />
           )
         }

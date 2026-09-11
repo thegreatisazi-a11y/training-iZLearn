@@ -1,10 +1,10 @@
 import { Prisma } from '@prisma/client';
+import type { ExportTable } from '../utils/exportTable';
 import { prisma } from '../config/prisma';
 import { formatDateIso } from '../utils/dateUtils';
 import { AppError } from '../utils/response';
 import type { Request } from 'express';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
-import { toCsv } from '../utils/csv';
 import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import type { CreateBundleInput, UpdateBundleInput, PaginationQuery } from '@izlearn/shared';
@@ -307,21 +307,57 @@ export async function getBundleDetail(id: string) {
 }
 
 /** Build a CSV export of the (filtered) bundle list. */
-export async function exportBundlesCsv(q: PaginationQuery): Promise<string> {
+/** Column/row data for the bundle-list export — rendered as CSV or Excel by the controller. */
+export async function buildBundlesExport(q: PaginationQuery): Promise<ExportTable> {
   const { data } = await listBundles({ ...q, page: 1, pageSize: 100000 });
-  const headers = ['Name', 'Description', 'Courses', 'Departments', 'Designations', 'Roles', 'Users', 'Due Date', 'Status'];
-  const rows = data.map((b) => [
-    b.name,
-    b.description ?? '',
-    b.topicIds.length,
-    ((b.departmentIds as string[]) ?? []).length,
-    ((b.designationIds as string[]) ?? []).length,
-    ((b.roleIds as string[]) ?? []).length,
-    ((b.userIds as string[]) ?? []).length,
-    formatDateIso(b.dueDate as unknown as string | null),
-    b.isActive ? 'Active' : 'Inactive',
-  ]);
-  return toCsv(headers, rows);
+  const columns = [
+    { header: 'Name', key: 'name' },
+    { header: 'Description', key: 'description' },
+    { header: 'Courses', key: 'courses' },
+    { header: 'Departments', key: 'departments' },
+    { header: 'Designations', key: 'designations' },
+    { header: 'Roles', key: 'roles' },
+    { header: 'Users', key: 'users' },
+    { header: 'Due Date', key: 'dueDate' },
+    { header: 'Status', key: 'status' },
+  ];
+  const rows = data.map((b) => ({
+    name: b.name,
+    description: b.description ?? '',
+    courses: b.topicIds.length,
+    departments: ((b.departmentIds as string[]) ?? []).length,
+    designations: ((b.designationIds as string[]) ?? []).length,
+    roles: ((b.roleIds as string[]) ?? []).length,
+    users: ((b.userIds as string[]) ?? []).length,
+    dueDate: formatDateIso(b.dueDate as unknown as string | null),
+    status: b.isActive ? 'Active' : 'Inactive',
+  }));
+  return { title: 'Bundles', columns, rows };
+}
+
+/**
+ * Column/row data for a single bundle's course list.
+ *
+ * Server-side like every other export, so the file is built from the stored bundle rather
+ * than from whatever the detail page had loaded — and so CSV and Excel share one definition.
+ */
+export async function buildBundleDetailExport(id: string): Promise<ExportTable> {
+  const b = await getBundleDetail(id);
+  const columns = [
+    { header: 'Course No.', key: 'courseNo' },
+    { header: 'Course', key: 'course' },
+    { header: 'Type', key: 'type' },
+    { header: 'Version', key: 'version' },
+    { header: 'Status', key: 'status' },
+  ];
+  const rows = b.topics.map((t) => ({
+    courseNo: t.topicNumber || t.topicCode,
+    course: t.title,
+    type: t.trainingType,
+    version: `v${t.currentVersion}`,
+    status: t.status,
+  }));
+  return { title: `Bundle - ${b.name}`, columns, rows };
 }
 
 export { bundleTopicIds, setBundleTopics };
