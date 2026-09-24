@@ -20,6 +20,24 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
+  "//overrides": [
+    "Transitive pins that a direct dependency will not raise on its own. Keep each entry",
+    "WITHIN the parent's declared semver range so nothing breaks, and delete an entry once",
+    "the parent ships a fixed version of its own.",
+    "@xmldom/xmldom is covered by GHSA-6gmq-8vp8-gcm6 and friends (XML injection, ReDoS,",
+    "quadratic parsing) up to 0.8.14. mammoth@1.12.0 declares ^0.8.6 and resolves 0.8.13, and",
+    "there is no newer mammoth that raises it, so pin the patched 0.8 release. It MUST stay on",
+    "the 0.8 line: 0.9 is a breaking rewrite outside mammoth's declared range, and mammoth's",
+    ".docx preview is bundled into the frontend.",
+    "Scoped to mammoth rather than global so a future dependency on the 0.9 line is not",
+    "silently dragged backwards. (read-excel-file also used to pull xmldom in; 9.3.10 dropped",
+    "it for saxen, which is why the frontend pins ^9.3.10 rather than ^9.2.0.)"
+  ],
+  "overrides": {
+    "mammoth": {
+      "@xmldom/xmldom": "^0.8.15"
+    }
+  },
   "engines": {
     "node": "20.x"
   }
