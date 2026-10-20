@@ -28,7 +28,7 @@ export const lock = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const unlock = asyncHandler(async (req: Request, res: Response) => {
-  const result = await svc.unlock(req.user!.id, req.user!.sessionId, req.body.password);
+  const result = await svc.unlock(req.body.refreshToken, req.body.windowsUsername, req.body.password, req.ip, req.get('user-agent'));
   sendSuccess(res, result, 'Session unlocked');
 });
 

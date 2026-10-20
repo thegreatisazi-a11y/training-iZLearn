@@ -33,9 +33,9 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-let refreshing: Promise<string | null> | null = null;
+let refreshing: Promise<string | 'LOCKED' | null> | null = null;
 
-async function doRefresh(): Promise<string | null> {
+async function doRefresh(): Promise<string | 'LOCKED' | null> {
   const refreshToken = tokenStore.getRefresh();
   if (!refreshToken) return null;
   try {
@@ -46,7 +46,8 @@ async function doRefresh(): Promise<string | null> {
       return access;
     }
     return null;
-  } catch {
+  } catch (error) {
+    if ((error as AxiosError).response?.status === 423) return 'LOCKED';
     tokenStore.clear();
     return null;
   }
@@ -90,6 +91,10 @@ api.interceptors.response.use(
       refreshing = refreshing ?? doRefresh();
       const access = await refreshing;
       refreshing = null;
+      if (access === 'LOCKED') {
+        window.dispatchEvent(new CustomEvent('izlearn:locked'));
+        return Promise.reject(error);
+      }
       if (access) {
         original.headers.Authorization = `Bearer ${access}`;
         return api(original);

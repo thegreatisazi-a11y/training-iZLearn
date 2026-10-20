@@ -19,8 +19,9 @@ export const refreshSchema = z.object({
 });
 export type RefreshInput = z.infer<typeof refreshSchema>;
 
-/** Re-authenticate to release the inactivity lock (does not issue new tokens). */
+/** Re-authenticate the existing session and issue a new access token. */
 export const unlockSchema = z.object({
+  refreshToken: nonEmptyString,
   windowsUsername: nonEmptyString,
   password: nonEmptyString,
 });

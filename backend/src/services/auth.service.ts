@@ -189,13 +189,67 @@ export async function lockSession(userId: string, sessionId: string): Promise<vo
   await recordEvent({ action: 'SESSION_LOCKED', entityType: 'UserSession', entityId: sessionId });
 }
 
-export async function unlock(userId: string, sessionId: string, password: string): Promise<{ ok: true }> {
-  const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false } });
-  if (!user || !(await comparePassword(password, user.passwordHash))) {
+export async function unlock(
+  refreshToken: string,
+  windowsUsername: string,
+  password: string,
+  ip?: string,
+  userAgent?: string,
+): Promise<{ accessToken: string }> {
+  let payload;
+  try {
+    payload = verifyRefreshToken(refreshToken);
+  } catch {
+    throw new AppError(401, 'SESSION_EXPIRED', 'Your session has expired. Please log in again.');
+  }
+
+  if (!(await session.isSessionActive(payload.sub, payload.sid))) {
+    throw new AppError(401, 'SESSION_EXPIRED', 'Your session has expired. Please log in again.');
+  }
+
+  const user = await prisma.user.findFirst({ where: { id: payload.sub, isDeleted: false, isActive: true } });
+  if (!user) {
+    throw new AppError(401, 'SESSION_EXPIRED', 'Your session has expired. Please log in again.');
+  }
+
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName, sessionId: payload.sid });
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    throw new AppError(423, 'LOCKED', 'Account locked. Try again later.');
+  }
+
+  const passwordValid = user.windowsUsername.toLowerCase() === windowsUsername.trim().toLowerCase()
+    && ((await ldap.isEnabled())
+      ? await ldap.authenticate(user.windowsUsername, password)
+      : await comparePassword(password, user.passwordHash));
+
+  if (!passwordValid) {
+    const authPolicy = await getAuthPolicy();
+    const attempts = user.failedLoginAttempts + 1;
+    const reachedLimit = attempts >= authPolicy.maxFailedAttempts;
+    await auditContext.runWithoutAudit(() =>
+      prisma.user.update({
+        where: { id: user.id },
+        data: reachedLimit
+          ? { failedLoginAttempts: 0, lockedUntil: new Date(Date.now() + authPolicy.lockoutMinutes * 60 * 1000) }
+          : { failedLoginAttempts: attempts },
+      }),
+    );
+    await recordEvent({
+      action: 'LOGIN_FAILED',
+      entityType: 'User',
+      entityId: user.id,
+      newValue: { attempts, locked: reachedLimit, reason: 'Session unlock' },
+      ipAddress: ip,
+      userAgent,
+    });
     throw AppError.unauthorized('Invalid credentials');
   }
-  await clearLock(userId, sessionId);
-  return { ok: true };
+
+  await auditContext.runWithoutAudit(() =>
+    prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lockedUntil: null } }),
+  );
+  await clearLock(user.id, payload.sid);
+  return { accessToken: signAccessToken(user.id, payload.sid) };
 }
 
 export async function changePassword(userId: string, current: string, next: string): Promise<{ ok: true }> {

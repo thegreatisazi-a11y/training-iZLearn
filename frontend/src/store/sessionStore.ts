@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import { api } from '../lib/axios';
+import type { AxiosError } from 'axios';
+import { api, tokenStore } from '../lib/axios';
+import { useAuthStore } from './authStore';
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Your session has expired. Please log in again.');
+  }
+}
 
 interface SessionState {
   locked: boolean;
@@ -20,7 +28,26 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   setLocked: (v) => set({ locked: v }),
   async unlock(windowsUsername, password) {
-    await api.post('/auth/unlock', { windowsUsername, password });
-    set({ locked: false });
+    const refreshToken = tokenStore.getRefresh();
+    if (!refreshToken) {
+      tokenStore.clear();
+      useAuthStore.getState().setUser(null);
+      set({ locked: false });
+      throw new SessionExpiredError();
+    }
+    try {
+      const res = await api.post('/auth/unlock', { refreshToken, windowsUsername, password });
+      tokenStore.set(res.data.data.accessToken);
+      set({ locked: false });
+    } catch (error) {
+      const code = (error as AxiosError<{ error?: { code?: string } }>).response?.data?.error?.code;
+      if (code === 'SESSION_EXPIRED') {
+        tokenStore.clear();
+        useAuthStore.getState().setUser(null);
+        set({ locked: false });
+        throw new SessionExpiredError();
+      }
+      throw error;
+    }
   },
 }));

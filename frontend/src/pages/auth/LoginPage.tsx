@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { GraduationCap } from 'lucide-react';
 import { useAuthStore, SessionConflictError } from '@/store/authStore';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,8 @@ import { apiError } from '@/lib/axios';
 export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+  const location = useLocation();
+  const sessionMessage = (location.state as { message?: string } | null)?.message;
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -42,6 +44,7 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold">izLearn</h1>
           <p className="text-xs text-slate-500">GxP-Compliant Learning Management System</p>
         </div>
+        {sessionMessage && <p className="mb-4 text-sm text-amber-700">{sessionMessage}</p>}
         <form
           onSubmit={(e) => {
             e.preventDefault();

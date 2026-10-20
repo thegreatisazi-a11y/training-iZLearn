@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
-import { useSessionStore } from '@/store/sessionStore';
+import { SessionExpiredError, useSessionStore } from '@/store/sessionStore';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '../ui/button';
 import { Input, Field } from '../ui/input';
@@ -8,6 +9,7 @@ import { apiError } from '@/lib/axios';
 
 /** Lock screen requiring re-authentication (does NOT log the user out). */
 export function InactivityLockOverlay() {
+  const navigate = useNavigate();
   const locked = useSessionStore((s) => s.locked);
   const unlock = useSessionStore((s) => s.unlock);
   const expectedUser = useAuthStore((s) => s.user?.windowsUsername ?? '');
@@ -32,7 +34,11 @@ export function InactivityLockOverlay() {
     try {
       await unlock(username, password);
     } catch (e) {
-      setError(apiError(e));
+      if (e instanceof SessionExpiredError) {
+        navigate('/login', { replace: true, state: { message: e.message } });
+      } else {
+        setError(apiError(e));
+      }
     } finally {
       setLoading(false);
     }

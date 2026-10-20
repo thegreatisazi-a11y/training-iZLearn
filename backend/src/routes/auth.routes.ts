@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import * as c from '../controllers/auth.controller';
-import { authenticate, authenticateAllowLocked } from '../middlewares/auth.middleware';
+import { authenticate } from '../middlewares/auth.middleware';
 import { authRateLimiter } from '../middlewares/rateLimit.middleware';
 import { validate } from '../middlewares/validate.middleware';
 import {
@@ -29,7 +29,7 @@ router.post('/refresh', validate(refreshSchema), c.refresh);
 // Authenticated endpoints.
 router.post('/logout', authenticate, c.logout);
 router.post('/lock', authenticate, c.lock);
-router.post('/unlock', authenticateAllowLocked, validate(unlockSchema), c.unlock);
+router.post('/unlock', validate(unlockSchema), c.unlock);
 router.delete('/sessions/previous', authenticate, c.terminatePreviousSessions);
 router.post('/change-password', authenticate, validate(changePasswordSchema), c.changePassword);
 router.post('/set-signature-password', authenticate, validate(setSignaturePasswordSchema), c.setSignaturePassword);
