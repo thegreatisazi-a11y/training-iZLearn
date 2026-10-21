@@ -30,12 +30,15 @@ import { logger } from '../config/logger';
 /** Stay safely under MongoDB's hard 16 MB BSON document limit. */
 const MONGO_MAX_BYTES = 15 * 1024 * 1024;
 
-type Driver = 'r2' | 'mongo' | 'local';
-function driver(): Driver {
-  if (env.r2.enabled) return 'r2';
+export type StorageDriver = 'r2' | 'mongo' | 'local';
+export function storageDriver(): StorageDriver {
   if (process.env.STORAGE_DRIVER === 'local') return 'local';
+  if (process.env.STORAGE_DRIVER === 'mongo') return 'mongo';
+  if (process.env.STORAGE_DRIVER === 'r2' && !env.r2.enabled) throw new Error('STORAGE_DRIVER=r2 requires R2 credentials.');
+  if (env.r2.enabled) return 'r2';
   return 'mongo';
 }
+const driver = storageDriver;
 
 export function isR2(): boolean {
   return env.r2.enabled;

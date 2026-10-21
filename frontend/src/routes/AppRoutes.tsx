@@ -40,6 +40,7 @@ const AnnouncementsPage = lazy(() => import('@/pages/announcements/Announcements
 const ReportsPage = lazy(() => import('@/pages/reports/ReportsPage'));
 const AuditTrailPage = lazy(() => import('@/pages/audit/AuditTrailPage'));
 const SystemConfigPage = lazy(() => import('@/pages/system/SystemConfigPage'));
+const BackupsPage = lazy(() => import('@/pages/system/BackupsPage'));
 const ProfilePage = lazy(() => import('@/pages/profile/ProfilePage'));
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'));
 
@@ -101,6 +102,7 @@ export function AppRoutes() {
             <Route path="/reports" element={gate('reports', 'read', <ReportsPage />)} />
             <Route path="/audit-trail" element={gate('auditTrail', 'read', <AuditTrailPage />)} />
             <Route path="/system-config" element={gate('systemConfig', 'read', <SystemConfigPage />)} />
+            <Route path="/backups" element={gate('backup', 'view', <BackupsPage />)} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>

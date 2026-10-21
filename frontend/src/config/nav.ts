@@ -1,6 +1,6 @@
 import {
   Home, Users, Shield, MapPin, BookOpen, FolderOpen, FileText, ClipboardList,
-  CalendarDays, CheckSquare, Award, MessageSquare, Megaphone, BarChart3, ScrollText, Settings, UserCircle, Stamp, GraduationCap, UserPlus,
+  CalendarDays, CheckSquare, Award, MessageSquare, Megaphone, BarChart3, ScrollText, Settings, UserCircle, Stamp, GraduationCap, UserPlus, Database,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PermissionAction } from '@izlearn/shared';
@@ -39,5 +39,6 @@ export const NAV: NavItem[] = [
   { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports', action: 'read' },
   { to: '/audit-trail', label: 'Audit Trail', icon: ScrollText, module: 'auditTrail', action: 'read' },
   { to: '/system-config', label: 'System Config', icon: Settings, module: 'systemConfig', action: 'read' },
+  { to: '/backups', label: 'Backup & Restore', icon: Database, module: 'backup', action: 'view' },
   { to: '/profile', label: 'My Profile', icon: UserCircle },
 ];

@@ -9,7 +9,7 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      chromium ca-certificates fonts-liberation gnupg curl \
+      chromium ca-certificates fonts-liberation gnupg curl tar \
       libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
       libcairo2 libasound2 \
@@ -32,12 +32,18 @@ RUN curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg --dearmor -o /usr/sh
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY . .
-# Install all deps (including devDependencies) so tsx is available at runtime
-RUN npm install
-
-# Set NODE_ENV after install so devDependencies are not skipped
 ENV NODE_ENV=production
+# tsx runs the API and seed script, and Prisma CLI syncs the Mongo schema on boot.
+# Both are explicit runtime dependencies. Install only backend/shared production
+# dependencies; frontend build tools and test tooling do not belong in this image.
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY shared/package.json shared/package.json
+COPY frontend/package.json frontend/package.json
+RUN npm ci --omit=dev --workspace @izlearn/backend --workspace @izlearn/shared --include-workspace-root=false
+
+COPY backend ./backend
+COPY shared ./shared
 
 WORKDIR /app/backend
 RUN npx prisma generate

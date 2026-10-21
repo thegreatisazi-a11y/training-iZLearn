@@ -285,6 +285,7 @@ export default function SystemConfigPage() {
   const groups = useMemo(() => {
     const map = new Map<string, ConfigItem[]>();
     for (const item of data ?? []) {
+      if (item.key === 'backup.destination_path') continue; // deployment-owned; configured with BACKUP_DESTINATION
       const g = groupOf(item.key);
       if (!map.has(g)) map.set(g, []);
       map.get(g)!.push(item);

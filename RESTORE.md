@@ -1,80 +1,37 @@
-# izLearn — Backup Restore & Disaster Recovery
+# Complete izLearn backup and restore
 
-**Recovery objectives:** RPO = 24 hours (daily automated backup) · RTO = 4 hours.
+The Backup & Restore page (`/backups`) creates one `izlearn-full-*.tar.gz` bundle containing:
 
-Backups are PostgreSQL `pg_dump` plain-SQL files named `izlearn-YYYYMMDD-HHmmss.sql`, each accompanied
-by a `*.sha256` checksum, written to `backup.destination_path` (default `/app/backups` in Docker, or
-`./storage/backups` locally).
+- `database.archive.gz`: every collection in the application MongoDB database, including users, roles, settings, audit records, sessions, and Mongo-backed `FileBlob` objects.
+- `files.tar.gz`: uploaded files from the selected file-storage driver (`local` or R2). This is empty when files are stored in MongoDB.
+- `manifest.json`: creation time, app-version identifier, storage mode, file count, and SHA-256 checksums for both archives.
 
----
+The archive restores *website data*, not the executable deployment. Keep the Git release/commit, Docker Compose file, TLS/tunnel configuration, and environment secrets in a separate protected recovery record. The manifest's `appVersion` helps identify the matching release. Do not put secrets into downloadable in-app backups.
+Redis/Bull queue state (such as in-flight emails) is not included; repeatable schedules are registered again when the backend starts.
 
-## 1. Locate and verify the backup
+## Storage configuration
 
-```bash
-ls -lt /path/to/backups            # newest dumps first
-./scripts/verify-backup.sh /path/to/backups/izlearn-YYYYMMDD-HHmmss.sql
-```
-Proceed only if the script prints `OK: checksum matches`.
+- `STORAGE_DRIVER=local` makes the server's `STORAGE_ROOT` volume the live file store, even if R2 credentials are configured for backups.
+- `BACKUP_STORAGE_DRIVER=local` writes archives to `BACKUP_DESTINATION` (on the server: `/app/backups`). Copy these archives to a separate disk, NAS, or off-site destination. A second volume on the same physical machine is not disaster recovery.
+- `BACKUP_STORAGE_DRIVER=r2` writes archives to `backups/` in `BACKUP_R2_BUCKET` (or `R2_BUCKET` if the dedicated bucket is unset). R2 credentials must have access to the backup bucket. A dedicated private bucket is recommended.
+- The backend needs temporary free disk space for a full database dump, a copy of uploaded files, and the compressed bundle. R2 single-object upload is currently limited to 5 GB per bundle; implement multipart upload before backups approach that size.
+- No automatic pruning is enabled yet. Monitor backup capacity and define a retention policy before accumulating large files or videos.
+- The legacy `backup.destination_path` System Configuration value is not used by the new bundle writer. Set `BACKUP_DESTINATION` in deployment configuration instead.
 
-## 2. Stop the application (keep the database running)
+## Routine operation
 
-```bash
-docker compose stop backend frontend
-```
+The existing scheduled backup job uses `backup.auto_enabled` and `backup.cron_expression`. Manual backups are e-signed and queued; the page shows recent job status and can list, verify, and download bundles. Verify and test-restore a backup periodically; a successful upload alone does not prove recovery. A sleeping/free Render instance is not a reliable scheduler—use an always-on backend/worker or an external scheduler until the physical server is running.
 
-## 3. Restore into a clean database
+Schedule backups during a quiet period. The MongoDB dump and file copy are sequential, not an atomic cross-system snapshot. Do not update or delete training materials while a backup is in progress. For a strict recovery point, stop application writes during backup.
 
-> Restoring overwrites data. Take a fresh `pg_dump` of the current state first if it may be needed.
+## Restore procedure
 
-```bash
-# Drop & recreate the database (adjust user/db names to your .env)
-docker compose exec postgres psql -U "$POSTGRES_USER" -d postgres \
-  -c "DROP DATABASE IF EXISTS \"$POSTGRES_DB\";" \
-  -c "CREATE DATABASE \"$POSTGRES_DB\";"
+1. Prepare a maintenance window and prevent users from writing to the application. Record the desired archive and the matching application release.
+2. Confirm backup storage is reachable and there is enough temporary disk space. Keep the current environment/secrets and TLS/tunnel settings outside the archive.
+3. Verify the archive from the Backup & Restore page. Temporarily set `BACKUP_RESTORE_ENABLED=true` and restart the backend. This setting is **false by default**.
+4. Select **Restore**, type `RESTORE`, and provide an electronic signature. The backend verifies both archive checksums, creates a new safety backup of the current state, restores MongoDB with `--drop`, replaces the uploaded files, disables restored login sessions, and records a restore event.
+5. Set `BACKUP_RESTORE_ENABLED=false` again, restart the backend, log in afresh, and check representative users, roles, course materials, certificates, and reports.
 
-# Load the dump
-cat /path/to/backups/izlearn-YYYYMMDD-HHmmss.sql | \
-  docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-```
+Restore is destructive and is not atomic across MongoDB and the file store. If either stage fails, keep the site in maintenance mode and use the automatically created `PRE_RESTORE` safety backup or another verified archive to recover. Never expose MongoDB's port to remote users.
 
-For a non-Docker setup:
-```bash
-dropdb izlearn && createdb izlearn
-psql "$DATABASE_URL" -f izlearn-YYYYMMDD-HHmmss.sql
-```
-
-## 4. Confirm migrations & immutability triggers are intact
-
-The dump includes the schema and the `pgcrypto` extension. Verify the triggers are present:
-
-```bash
-docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-  -c "SELECT tgname FROM pg_trigger WHERE tgname IN ('audit_trail_immutable','electronic_signature_immutable');"
-```
-You must see **both** triggers. If missing (e.g. an older dump), re-apply them:
-```bash
-docker compose run --rm backend npx prisma migrate deploy
-```
-
-## 5. Restart and validate
-
-```bash
-docker compose start backend frontend
-curl -s http://localhost:4000/api/health   # expect "status":"ok" with all checks true
-```
-Then log in and spot-check that recent records and the audit trail are present and that
-`auditImmutabilityTrigger` is `true` in the health response.
-
-## 6. Record the recovery
-
-Log the restore event (date, operator, backup file, checksum, reason) per your SOP. The post-restore
-system continues to capture all subsequent actions in the immutable audit trail.
-
----
-
-## Notes
-
-- Uploaded files (training materials, personal documents, generated certificates) live on the
-  `storage` volume, **not** in the database dump. Back up and restore that volume alongside the DB for a
-  complete recovery (e.g. `docker run --rm -v izlearn_storage:/data -v $PWD:/backup alpine tar czf /backup/storage.tgz /data`).
-- Never edit a dump by hand — it would invalidate the checksum and break traceability.
+For a completely lost server, first reinstall the matching application release and recreate secrets/deployment settings; then provide the archive in the configured backup destination and follow the restore steps. If the archive is in R2, configure the backup bucket credentials before starting the backend.

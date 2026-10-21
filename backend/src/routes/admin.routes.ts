@@ -11,8 +11,9 @@ router.use(authenticate);
 // requireRole('SUPER_ADMIN') stopped matching once the role was renamed in the UI, which
 // left manual backup and restore unreachable by anyone.
 router.post('/backup/trigger', requirePermission('backup', 'create'), c.triggerBackup);
-router.get('/backups', requirePermission('backup', 'read'), c.backups);
-router.post('/backup/verify', requirePermission('backup', 'read'), c.verify);
+router.get('/backups', requirePermission('backup', 'view'), c.backups);
+router.post('/backup/verify', requirePermission('backup', 'view'), c.verify);
+router.get('/backup/download/:file', requirePermission('backup', 'approve'), c.download);
 router.post('/backup/restore', requirePermission('backup', 'approve'), c.restore);
 
 export default router;

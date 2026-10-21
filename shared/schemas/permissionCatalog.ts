@@ -391,7 +391,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     actions: [
       A('view', 'View Backups', 'View the list of backups.'),
       A('create', 'Trigger Backup', 'Trigger a new backup.'),
-      A('approve', 'Restore (e-signed)', 'Restore the system from a backup — requires an electronic signature.'),
+      A('approve', 'Download / Restore', 'Download complete data archives or restore the system — restore requires an electronic signature.'),
     ],
   },
 ];

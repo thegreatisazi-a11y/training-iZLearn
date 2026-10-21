@@ -243,17 +243,14 @@ docker compose -f docker-compose.server.yml up -d --build   # rebuild the change
 
 ---
 
-## Part 10 — Backups (you own these)
-Back up **off the VM**, regularly:
-1. **Database** (includes the audit trail):
-   ```bash
-   docker exec izlearn-server-mongo-1 sh -c \
-     'mongodump --uri="mongodb://localhost:27017/izlearn?replicaSet=rs0" --gzip --archive=/tmp/izlearn-$(date +%F).archive'
-   docker cp izlearn-server-mongo-1:/tmp/izlearn-$(date +%F).archive ./   # then copy off-box
-   ```
-2. **The uploaded-files volume** (`izlearn-server_storage`) and your **`.env`** — not in git.
-
-Schedule with `cron`; test a restore periodically (see [`RESTORE.md`](./RESTORE.md)).
+## Part 10 — Complete backups
+The backend schedules complete database-plus-files bundles. Admins can trigger,
+verify, download, and (during a controlled maintenance window) restore them from
+**Backup & Restore**. Configure `BACKUP_STORAGE_DRIVER` in `.env` to use local
+storage or a private R2 bucket. If backups are local, copy them **off the physical
+server**. Protect a separate copy of `.env` and deployment configuration; those
+secrets are intentionally not in downloadable bundles. Follow [`RESTORE.md`](./RESTORE.md)
+and test a full restore before relying on the backup.
 
 ---
 

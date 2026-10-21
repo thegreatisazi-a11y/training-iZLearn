@@ -40,7 +40,7 @@ export const DEFAULT_SYSTEM_CONFIG: Record<string, { value: string; description:
   'smtp.from': { value: 'izLearn <no-reply@example.com>', description: 'Default From address' },
   'backup.auto_enabled': { value: 'true', description: 'Enable scheduled database backups' },
   'backup.cron_expression': { value: '0 1 * * *', description: 'Cron for automatic backups' },
-  'backup.destination_path': { value: '/app/backups', description: 'Directory where backups are written' },
+  'backup.destination_path': { value: '/app/backups', description: 'Legacy setting; complete backup destination is configured by BACKUP_DESTINATION' },
   'upload.max_size_mb': { value: '0', description: 'Maximum upload size in MB. 0 = no limit.' },
   'security.allowed_origins': { value: 'http://localhost:5173', description: 'Comma-separated CORS whitelist' },
   'security.allowed_ip_ranges': { value: '', description: 'UR-80: comma-separated client IP prefixes allowed to access the app (empty = no restriction)' },

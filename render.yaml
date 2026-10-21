@@ -41,6 +41,13 @@ services:
         sync: false
       - key: R2_SECRET_ACCESS_KEY
         sync: false
+      - key: BACKUP_STORAGE_DRIVER
+        value: r2
+      # Optional separate private bucket; when unset backups use R2_BUCKET/backups/.
+      - key: BACKUP_R2_BUCKET
+        sync: false
+      - key: BACKUP_RESTORE_ENABLED
+        value: "false"
       - key: SEED_ADMIN_USERNAME
         sync: false
       - key: SEED_ADMIN_PASSWORD
