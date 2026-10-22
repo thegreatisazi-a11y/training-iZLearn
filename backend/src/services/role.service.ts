@@ -8,6 +8,18 @@ import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { deriveLegacyFlags } from '@izlearn/shared';
 import type { CreateRoleInput, UpdateRoleInput, PaginationQuery, PermissionMatrix } from '@izlearn/shared';
+import { normalizeRoleName } from '../utils/roleIdentity';
+
+async function assertUniqueRoleName(name: string, exceptId?: string): Promise<void> {
+  const key = normalizeRoleName(name);
+  const roles = await prisma.role.findMany({ where: { isDeleted: false }, select: { id: true, roleName: true, isSystem: true } });
+  if (key === normalizeRoleName('Super Admin') && roles.some((role) => role.isSystem && role.id !== exceptId)) {
+    throw AppError.conflict('The Super Admin name is reserved for the protected system role, even after it is renamed.');
+  }
+  if (roles.some((role) => role.id !== exceptId && normalizeRoleName(role.roleName) === key)) {
+    throw AppError.conflict('A role with this name already exists. Spaces, underscores and case are treated as equivalent.');
+  }
+}
 
 /**
  * Persist both the 10 granular verbs AND the derived legacy flags (read/write/
@@ -123,6 +135,7 @@ export async function getRole(id: string) {
 }
 
 export async function createRole(input: CreateRoleInput, req: Request) {
+  await assertUniqueRoleName(input.roleName);
   // CR-6: creating a role is a controlled action — two-component e-signature.
   await signFromRequest(req, 'Role', 'new', 'Approved');
   return prisma.role.create({
@@ -137,6 +150,10 @@ export async function createRole(input: CreateRoleInput, req: Request) {
 
 export async function updateRole(id: string, input: UpdateRoleInput, req: Request) {
   const existing = await getRole(id);
+  if (existing.isSystem && input.isActive === false) {
+    throw AppError.badRequest('The built-in administrator role cannot be deactivated.');
+  }
+  if (input.roleName !== undefined) await assertUniqueRoleName(input.roleName, id);
 
   // No-op rule: if nothing actually changes, do NOT sign, write, or audit.
   const normalizedNew = input.permissions !== undefined ? normalizePermissions(input.permissions) : undefined;

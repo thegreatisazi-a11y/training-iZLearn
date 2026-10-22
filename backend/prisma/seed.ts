@@ -1,23 +1,23 @@
 /**
- * izLearn database seed — bootstraps the baseline GMP data set:
+ * Explicit setup implementations (never imported by normal API startup):
  *   - System configuration defaults
- *   - The 8 default RBAC roles with permission matrices
+ *   - The 4 baseline RBAC roles with permission matrices
  *   - A default Location + Department
  *   - The first SUPER_ADMIN user
  *
- * Run with: npm run seed  (or: npx prisma db seed)
+ * Run via prisma/bootstrap.ts or prisma/release.ts after schema sync.
  *
- * NOTE: the seed intentionally uses a bare PrismaClient (no audit middleware)
- * because it is a one-time bootstrap that runs before any user exists. Every
- * record is stamped createdBy = 'SYSTEM'.
+ * These controlled setup commands use a bare PrismaClient and stamp their
+ * bootstrap records createdBy = 'SYSTEM'. Run against a backed-up database.
  */
 import dotenv from 'dotenv';
 import path from 'path';
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { normalizeRoleName } from '../src/utils/roleIdentity';
 
 // Load backend/.env if present, else fall back to the monorepo-root .env (same
-// resolution as src/config/env.ts) so `npm run seed` works from the backend workspace.
+// resolution as src/config/env.ts) so setup commands work from the backend workspace.
 dotenv.config();
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 import { DEFAULT_SYSTEM_CONFIG, PERMISSION_CATALOG, deriveLegacyFlags } from '@izlearn/shared';
@@ -26,6 +26,14 @@ const prisma = new PrismaClient();
 
 const BCRYPT_COST = 12;
 const SYSTEM = 'SYSTEM';
+
+function bootstrapPassword(): string {
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password || password.length < 12 || /^change[\W_]*me/i.test(password) || /^replace[\W_]*with/i.test(password)) {
+    throw new Error('Set SEED_ADMIN_PASSWORD to a unique password of at least 12 characters before first-time bootstrap.');
+  }
+  return password;
+}
 
 type Flags = Record<string, boolean>;
 
@@ -201,7 +209,7 @@ const TRAINING_TYPES: { code: string; displayName: string }[] = [
   { code: 'WORKSHOP', displayName: 'Workshop' },
 ];
 
-async function main() {
+async function bootstrapRolesAndConfig(): Promise<string> {
   console.log('🌱 Seeding izLearn baseline data...');
 
   // 1. System configuration -------------------------------------------------
@@ -215,19 +223,31 @@ async function main() {
   console.log(`   ✓ ${Object.keys(DEFAULT_SYSTEM_CONFIG).length} system config keys`);
 
   // 2. Roles -----------------------------------------------------------------
-  // Match existing roles by a NORMALISED name so a role renamed via the UI is never
-  // duplicated on re-seed. Normalisation lower-cases AND treats underscores/spaces as
-  // equivalent (collapsing runs), so 'SUPER_ADMIN' and 'Super Admin' are the same role —
-  // previously only case was normalised, so an underscore→space rename (SUPER_ADMIN →
-  // 'Super Admin') slipped through and each seed run left TWO active 'Super Admin' roles.
-  // A live role's permissions/name are PRESERVED (never clobbered); defaults apply on create.
-  const normRole = (s: string) => s.trim().toLowerCase().replace(/[\s_]+/g, ' ');
-  const roleIdByName = new Map<string, string>();
+  // Existing duplicate identities require explicit review: never merge user links or
+  // permissions automatically during setup.
+  let systemRoleId: string | undefined;
   const allRoles = await prisma.role.findMany();
-  const activeLinks = (roleId: string) => prisma.userRole.count({ where: { roleId, isActive: true } });
+  const activeRoles = allRoles.filter((r) => !r.isDeleted);
+  const names = new Map<string, string>();
+  for (const role of activeRoles) {
+    const key = normalizeRoleName(role.roleName);
+    const previous = names.get(key);
+    if (previous) throw new Error(`Duplicate role identity '${role.roleName}' (${previous}, ${role.id}). Reconcile these roles explicitly before bootstrap.`);
+    names.set(key, role.id);
+  }
+  if (activeRoles.filter((r) => r.isSystem).length > 1) throw new Error('Multiple system roles found. Reconcile them explicitly before bootstrap.');
+  const protectedRole = activeRoles.find((r) => r.isSystem);
+  if (protectedRole && activeRoles.some((r) => r.id !== protectedRole.id && normalizeRoleName(r.roleName) === normalizeRoleName('Super Admin'))) {
+    throw new Error('A separate role still uses the legacy Super Admin name. Review its assignments before bootstrap; no automatic merge will occur.');
+  }
 
   for (const def of ROLE_DEFINITIONS) {
-    const matches = allRoles.filter((r) => normRole(r.roleName) === normRole(def.roleName));
+    const matches = def.isSystem && activeRoles.some((r) => r.isSystem)
+      ? activeRoles.filter((r) => r.isSystem)
+      : activeRoles.filter((r) => normalizeRoleName(r.roleName) === normalizeRoleName(def.roleName));
+    if (!def.isSystem && matches.some((r) => r.isSystem)) {
+      throw new Error(`The protected system role is named '${def.roleName}', which conflicts with a baseline role. Rename it before bootstrap.`);
+    }
     if (matches.length === 0) {
       const created = await prisma.role.create({
         data: {
@@ -238,43 +258,38 @@ async function main() {
           createdBy: SYSTEM,
         },
       });
-      roleIdByName.set(def.roleName, created.id);
+      if (def.isSystem) systemRoleId = created.id;
       continue;
     }
-    // Canonical = the surviving role: prefer non-deleted, then most active user links,
-    // so the live role that actually carries users always wins the merge.
-    const ranked: { r: (typeof matches)[number]; links: number }[] = [];
-    for (const r of matches) ranked.push({ r, links: await activeLinks(r.id) });
-    // Non-deleted first, then the one with the most active user links.
-    ranked.sort((a, b) => Number(!b.r.isDeleted) - Number(!a.r.isDeleted) || b.links - a.links);
-    const canonical = ranked[0].r;
-    roleIdByName.set(def.roleName, canonical.id);
-
-    // Stamp isSystem on the EXISTING role (it may have been renamed via the UI — matching
-    // is by normalised name, and the flag then becomes the durable identity). Metadata
-    // only: the role's own name and permissions are never clobbered here.
+    const canonical = matches[0];
+    if (def.isSystem) systemRoleId = canonical.id;
     if ((def.isSystem ?? false) && !canonical.isSystem) {
       await prisma.role.update({ where: { id: canonical.id }, data: { isSystem: true } });
       console.log(`   ✓ marked '${canonical.roleName}' as the protected system role`);
     }
-
-    // Merge & retire duplicate case-variants: reassign their users to the canonical
-    // role (skipping any the user already has), then soft-delete the duplicate. No
-    // permissions or user assignments are lost.
-    for (const { r: dupRole } of ranked.slice(1)) {
-      const links = await prisma.userRole.findMany({ where: { roleId: dupRole.id } });
-      for (const link of links) {
-        const already = await prisma.userRole.findFirst({ where: { userId: link.userId, roleId: canonical.id } });
-        if (already) await prisma.userRole.delete({ where: { id: link.id } });
-        else await prisma.userRole.update({ where: { id: link.id }, data: { roleId: canonical.id } });
-      }
-      if (!dupRole.isDeleted) {
-        await prisma.role.update({ where: { id: dupRole.id }, data: { isDeleted: true, isActive: false } });
-        console.log(`   ✓ merged duplicate role '${dupRole.roleName}' → '${canonical.roleName}'`);
-      }
-    }
   }
+  if (!systemRoleId) throw new Error('System administrator role was not seeded.');
   console.log(`   ✓ ${ROLE_DEFINITIONS.length} roles ensured`);
+  return systemRoleId;
+}
+
+/** Versioned release update; never runs as part of backend startup or bootstrap. */
+export async function runReleaseMigrations(): Promise<void> {
+  const markerKey = 'migration.release_2026_10_bootstrap_split_v1';
+  if (await prisma.systemConfig.findUnique({ where: { key: markerKey } })) return;
+  const liveRoles = await prisma.role.findMany({ where: { isDeleted: false } });
+  const names = new Set<string>();
+  for (const role of liveRoles) {
+    const key = normalizeRoleName(role.roleName);
+    if (names.has(key)) throw new Error(`Duplicate role identity '${role.roleName}'. Run setup:audit and reconcile before release migration.`);
+    names.add(key);
+  }
+  const systemRoles = await prisma.role.findMany({ where: { isSystem: true, isDeleted: false, isActive: true } });
+  if (systemRoles.length !== 1) throw new Error('Expected exactly one active system role before release migrations. Run role reconciliation.');
+  if (liveRoles.some((role) => role.id !== systemRoles[0].id && normalizeRoleName(role.roleName) === normalizeRoleName('Super Admin'))) {
+    throw new Error('A separate role uses the legacy Super Admin name. Reconcile its assignments before release migration.');
+  }
+  const systemRoleId = systemRoles[0].id;
 
   // 2a. Back-fill split permissions so no CUSTOM role loses access when a module is split.
   // "User Requests" was split from Users; "Certificate Templates" from Certificates. For
@@ -335,7 +350,7 @@ async function main() {
       // isn't locked out of org stats; every other role defaults to OFF — a team-only
       // dashboard — and can be granted it explicitly in Roles & Access Control.
       if (p.dashboard && p.dashboard.view_org === undefined) {
-        p.dashboard.view_org = role.id === roleIdByName.get('SUPER_ADMIN');
+        p.dashboard.view_org = role.id === systemRoleId;
         changed = true;
       }
       // "Version History" (topicVersionHistory:view) is now enforced on the course
@@ -409,9 +424,7 @@ async function main() {
     const markerKey = 'migration.view_all_super_admin_v1';
     const done = await prisma.systemConfig.findUnique({ where: { key: markerKey } });
     if (!done) {
-      const admins = (await prisma.role.findMany({ where: { isDeleted: false } })).filter(
-        (r) => normRole(r.roleName) === normRole('SUPER_ADMIN'),
-      );
+      const admins = await prisma.role.findMany({ where: { isDeleted: false, isSystem: true } });
       for (const r of admins) {
         const perms = (r.permissions ?? {}) as Record<string, Record<string, boolean>>;
         for (const mod of ['userManagement', 'team', 'cv', 'certificates']) {
@@ -457,6 +470,13 @@ async function main() {
     }
   }
 
+  await prisma.systemConfig.create({
+    data: { key: markerKey, value: 'done', description: 'Versioned permission updates after bootstrap split', updatedBy: SYSTEM },
+  });
+}
+
+async function bootstrapMastersAndAdmin(systemRoleId: string): Promise<void> {
+
   // 2b. Functional Roles (D-JD1) — stored in DesignationMaster ----------------
   for (const name of FUNCTIONAL_ROLES) {
     const code = functionalRoleCode(name);
@@ -495,49 +515,56 @@ async function main() {
 
   // 4. First SUPER_ADMIN -----------------------------------------------------
   const adminUsername = process.env.SEED_ADMIN_USERNAME || 'admin';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe@123';
-  const passwordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
-  const signaturePasswordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
-
   const existing = await prisma.user.findUnique({ where: { windowsUsername: adminUsername } });
   if (!existing) {
-    const admin = await prisma.user.create({
-      data: {
-        employeeId: 'EMP-0001',
-        fullName: 'System Administrator',
-        windowsUsername: adminUsername,
-        email: process.env.SEED_ADMIN_EMAIL || 'admin@example.com',
-        passwordHash,
-        signaturePasswordHash,
-        userType: 'INTERNAL',
-        departmentId: department.id,
-        locationId: location.id,
-        mustChangePassword: true,
-        passwordChangedAt: new Date(),
-        createdBy: SYSTEM,
-      },
+    if (await prisma.user.count()) {
+      throw new Error('Users already exist, but the named bootstrap administrator does not. Refusing to create a new privileged account. Run setup:audit.');
+    }
+    const adminPassword = bootstrapPassword();
+    const passwordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
+    const signaturePasswordHash = await bcrypt.hash(adminPassword, BCRYPT_COST);
+    await prisma.$transaction(async (tx) => {
+      const admin = await tx.user.create({
+        data: {
+          employeeId: 'EMP-0001',
+          fullName: 'System Administrator',
+          windowsUsername: adminUsername,
+          email: process.env.SEED_ADMIN_EMAIL || 'admin@example.com',
+          passwordHash,
+          signaturePasswordHash,
+          userType: 'INTERNAL',
+          departmentId: department.id,
+          locationId: location.id,
+          mustChangePassword: true,
+          passwordChangedAt: new Date(),
+          createdBy: SYSTEM,
+        },
+      });
+      await tx.userRole.create({ data: { userId: admin.id, roleId: systemRoleId, assignedBy: SYSTEM } });
+      await tx.passwordHistory.create({ data: { userId: admin.id, passwordHash } });
     });
-    await prisma.userRole.create({
-      data: { userId: admin.id, roleId: roleIdByName.get('SUPER_ADMIN')!, assignedBy: SYSTEM },
-    });
-    await prisma.passwordHistory.create({ data: { userId: admin.id, passwordHash } });
     console.log('   ✓ First SUPER_ADMIN created');
-    console.log('   ----------------------------------------------------------');
-    console.log(`   Login username : ${adminUsername}`);
-    console.log(`   Login password : ${adminPassword}  (must be changed on first login)`);
-    console.log('   ----------------------------------------------------------');
   } else {
-    console.log('   • SUPER_ADMIN already exists — skipped');
+    const link = await prisma.userRole.findFirst({ where: { userId: existing.id, roleId: systemRoleId, isActive: true } });
+    if (!link) throw new Error(`Bootstrap account '${adminUsername}' has no active system-role assignment. Inspect it and use the explicit repair command; no privilege was granted automatically.`);
+    console.log('   • Existing bootstrap administrator verified; credentials unchanged');
   }
 
-  console.log('✅ Seed complete.');
+  console.log('✅ Bootstrap complete.');
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+export async function runBootstrap(): Promise<void> {
+  const username = process.env.SEED_ADMIN_USERNAME || 'admin';
+  if (!(await prisma.user.findUnique({ where: { windowsUsername: username } }))) {
+    if (await prisma.user.count()) {
+      throw new Error('Users already exist, but the named bootstrap administrator does not. Refusing to create a new privileged account. Run setup:audit.');
+    }
+    bootstrapPassword();
+  }
+  const systemRoleId = await bootstrapRolesAndConfig();
+  await bootstrapMastersAndAdmin(systemRoleId);
+}
+
+export async function disconnectSetup(): Promise<void> {
+  await prisma.$disconnect();
+}

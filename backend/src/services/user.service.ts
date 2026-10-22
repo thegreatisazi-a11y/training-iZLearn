@@ -17,6 +17,7 @@ import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
 import { hasPermission, mergePermissions } from '../utils/permissions';
 import { isOrgWideUserManager, hasOrgWideScope, holdsSystemRole } from '../utils/accessScope';
+import { normalizeRoleName } from '../utils/roleIdentity';
 import { createUserSchema, PERMISSION_CATALOG } from '@izlearn/shared';
 import type {
   CreateUserInput,
@@ -780,11 +781,16 @@ export async function bulkPreview(buffer: Buffer): Promise<BulkPreviewResult> {
   const [departments, locations, roles] = await Promise.all([
     prisma.department.findMany({ where: { isDeleted: false } }),
     prisma.location.findMany({ where: { isDeleted: false } }),
-    prisma.role.findMany({ where: { isDeleted: false } }),
+    prisma.role.findMany({ where: { isDeleted: false, isActive: true } }),
   ]);
   const deptByName = new Map(departments.map((d) => [d.name.toLowerCase(), d.id]));
   const locByName = new Map(locations.map((l) => [l.name.toLowerCase(), l.id]));
-  const roleByName = new Map(roles.map((r) => [r.roleName.toLowerCase(), r.id]));
+  const roleByName = new Map<string, string>();
+  for (const role of roles) {
+    const key = normalizeRoleName(role.roleName);
+    if (roleByName.has(key)) throw AppError.conflict(`Ambiguous role name '${role.roleName}'. Reconcile duplicate roles before bulk upload.`);
+    roleByName.set(key, role.id);
+  }
 
   const valid: CreateUserInput[] = [];
   const errors: Array<{ row: number; messages: string[] }> = [];
@@ -817,7 +823,7 @@ export async function bulkPreview(buffer: Buffer): Promise<BulkPreviewResult> {
     if (!departmentId) messages.push(`Unknown Department "${departmentName}"`);
     const locationId = locByName.get(locationName.toLowerCase());
     if (!locationId) messages.push(`Unknown Location "${locationName}"`);
-    const roleId = roleByName.get(roleName.toLowerCase());
+    const roleId = roleByName.get(normalizeRoleName(roleName));
     if (!roleId) messages.push(`Unknown Role "${roleName}"`);
 
     if (messages.length || !departmentId || !locationId || !roleId) {

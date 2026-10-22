@@ -15,6 +15,16 @@ function ensureStorageDirs() {
 async function main() {
   await connectPrisma();
 
+  // Setup is an explicit deployment step. Never accept traffic when the schema,
+  // bootstrap administrator, or release permissions are incomplete.
+  const release = await prisma.systemConfig.findUnique({ where: { key: 'migration.release_2026_10_bootstrap_split_v1' } });
+  if (!release) throw new Error('Release setup is incomplete. Run schema sync, one-time bootstrap if needed, then setup:release before starting the API.');
+  const systemRoles = await prisma.role.findMany({ where: { isSystem: true, isActive: true, isDeleted: false }, select: { id: true } });
+  if (systemRoles.length !== 1) throw new Error('Expected exactly one active system role. Run setup:audit and reconcile roles before starting.');
+  const adminLink = await prisma.userRole.findFirst({ where: { roleId: systemRoles[0].id, isActive: true }, select: { userId: true } });
+  const admin = adminLink && await prisma.user.findFirst({ where: { id: adminLink.userId, isActive: true, isDeleted: false }, select: { id: true } });
+  if (!admin) throw new Error('No active administrator holds the system role. Run setup:audit and repair the bootstrap account if appropriate.');
+
   // 21 CFR Part 11 §11.10(e): never run unprotected. Verify immutability triggers.
   const triggersOk = await verifyAuditTrigger(prisma);
   if (!triggersOk && env.isProd) {

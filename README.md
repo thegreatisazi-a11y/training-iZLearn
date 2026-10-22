@@ -72,9 +72,9 @@ DATABASE_URL=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/izlearn?retryWrit
 JWT_ACCESS_SECRET=dev-access-secret-change-me
 JWT_REFRESH_SECRET=dev-refresh-secret-change-me
 
-# First SUPER_ADMIN created by the seed
+# First SUPER_ADMIN created by the explicit bootstrap command
 SEED_ADMIN_USERNAME=admin
-SEED_ADMIN_PASSWORD=ChangeMe@123
+SEED_ADMIN_PASSWORD=REPLACE-WITH-A-UNIQUE-LONG-PASSWORD
 SEED_ADMIN_EMAIL=admin@example.com
 
 # CORS origin for the local frontend is allowed automatically; this is for the deployed UI
@@ -101,15 +101,19 @@ If you are using a brand-new/empty database, also sync the schema once:
 `npm run migrate -w backend` (this runs `prisma db push`). Skip this when pointing at a database
 that is already set up.
 
-### 4. Seed the baseline data (first run only)
+### 4. Bootstrap and apply release updates (before starting the API)
 
 ```bash
 npm run seed -w backend
+npm run setup:release -w backend
 ```
 
 This creates the default RBAC roles, the functional-role and training-type masters, all
 `SystemConfig` defaults, a default Location/Department, and the first SUPER_ADMIN. It is idempotent
-and **skips the admin if it already exists**, so it never overwrites an existing password.
+and **verifies the admin if it already exists**, so it never overwrites an existing password.
+Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters before first bootstrap. Run
+`setup:audit` before applying updates to an existing database; ambiguous roles require
+operator review rather than automatic merging.
 
 ### 5. Run the app
 
@@ -132,8 +136,8 @@ npm run dev -w frontend    # http://localhost:5173  (Vite proxies /api to :4000)
 
 ### 6. Log in
 
-Sign in with the seeded SUPER_ADMIN — default `admin` / `ChangeMe@123` (or whatever you set in
-`SEED_ADMIN_*`). After logging in, set a **signature password** (Profile → Set Signature Password)
+Sign in with the bootstrap credentials you supplied in `SEED_ADMIN_*`. After logging in,
+set a **signature password** (Profile → Set Signature Password)
 before performing any e-signed action.
 
 ### 7. (Optional) Redis for background jobs

@@ -47,8 +47,8 @@ Browser ──HTTPS──▶ Vercel (SPA)  ──HTTPS /api──▶ Render (bac
    ```
    Keep this as your **`DATABASE_URL`** (set it in Render — never commit it).
 
-No migrations are needed: the backend runs `prisma db push` on boot to sync collections
-and indexes, then seeds the baseline roles + first admin (idempotent).
+Schema sync, one-time bootstrap, and release updates are explicit deployment steps; the
+backend no longer performs them on startup. See `SETUP.md` before deploying this release.
 
 ---
 
@@ -94,11 +94,12 @@ service (built from `backend/Dockerfile`) and a Redis instance.
    | `JWT_REFRESH_SECRET` | a different long random string |
    | `R2_BUCKET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | **optional** — only if using R2 (step 2). Leave unset to store files in MongoDB |
    | `FRONTEND_ORIGIN` | your Vercel URL, e.g. `https://izlearn.vercel.app` (comma-separate to allow several) |
-   | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | first admin (optional; defaults exist) |
+   | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_EMAIL` | first admin; a unique 12+ character password is required on first bootstrap |
 
    `REDIS_URL` is wired automatically from the Redis service. `PORT` is injected by
    Render. `NODE_ENV=production` and the JWT TTLs are preset in the Blueprint.
-3. Deploy. On boot the container runs: `prisma db push` → `seed` → `start`. Health check:
+3. Perform the explicit setup steps in `SETUP.md` before rolling out the new API image.
+   On boot the container now runs only the API. Health check:
    `GET /api/health`. Note the service URL, e.g. `https://izlearn-backend.onrender.com`.
 
 > Free Render web services sleep when idle and cold-start on the next request (a few
@@ -164,8 +165,8 @@ root** (a root `vercel.json` is included with the correct monorepo build).
 ---
 
 ## 5. First login
-Open the Vercel URL and sign in with the seeded admin
-(`SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`, default `admin` / `ChangeMe@123`).
+Open the Vercel URL and sign in with the bootstrap credentials supplied securely
+in `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD`.
 1. Change the password on first login.
 2. In **My Profile**, set a **signature password** — required for the e-signed actions
    (publish/revise/archive a course, change roles, assign a bundle, etc.).
@@ -195,7 +196,8 @@ See `.env.example` for the full annotated list.
 ## 7. Local development
 Running izLearn on your own machine is covered in **[`README.md`](./README.md)**. In short:
 point `DATABASE_URL` at your Atlas cluster (or a local single-node replica set),
-`npm install`, `npm run -w backend prisma:generate`, `npm run seed -w backend`, then
+`npm install`, `npm run -w backend prisma:generate`, schema sync,
+`npm run seed -w backend`, `npm run setup:release -w backend`, then
 `npm run dev`. Redis is **optional locally** — auth and the UI run without it (sessions are
 stored in MongoDB); only the background queues are skipped when Redis is absent.
 
@@ -205,8 +207,9 @@ stored in MongoDB); only the background queues are skipped when Redis is absent.
 - **Database backups:** use **Atlas's built-in backups**. The app's `mongodump` backup
   feature writes to local disk, which does **not** persist on Render's ephemeral
   filesystem — treat it as a self-hosted-only convenience.
-- **Schema changes:** there are no SQL migrations on Mongo. Editing `schema.prisma` and
-  redeploying re-runs `prisma db push` on boot to apply the changes (additive/sync).
+- **Schema changes:** there are no SQL migrations on Mongo. Run `prisma db push`
+  explicitly during a maintenance window, followed by versioned release updates;
+  redeploying does not silently change the database.
 - **Audit trail:** immutable by application design (no update/delete endpoints). With
   MongoDB there is no DB-level trigger enforcing this, unlike the prior Postgres build.
 - **Redis resilience:** Redis is an accelerator, not the source of truth. Sessions live in the

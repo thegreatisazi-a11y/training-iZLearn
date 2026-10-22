@@ -2,7 +2,7 @@
 # MongoDB Database Tools (mongodump/mongorestore) for backups, and headless
 # LibreOffice for converting Office documents to PDF in the locked material viewer.
 # Build context is the repo root.
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # Set Puppeteer config before apt so Chromium isn't re-downloaded by npm install
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
@@ -33,7 +33,7 @@ RUN curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg --dearmor -o /usr/sh
 
 WORKDIR /app
 ENV NODE_ENV=production
-# tsx runs the API and seed script, and Prisma CLI syncs the Mongo schema on boot.
+# tsx runs the API and explicit setup scripts; Prisma CLI is run during deployment.
 # Both are explicit runtime dependencies. Install only backend/shared production
 # dependencies; frontend build tools and test tooling do not belong in this image.
 COPY package.json package-lock.json ./
@@ -49,6 +49,6 @@ WORKDIR /app/backend
 RUN npx prisma generate
 
 EXPOSE 4000
-# Sync the schema to MongoDB (db push — Mongo has no SQL migrations), seed
-# (idempotent), then start.
-CMD ["sh", "-c", "npx prisma db push --skip-generate && (npm run seed || true) && npm run start"]
+# Schema sync, bootstrap, and versioned release updates are explicit deployment
+# steps. A failed setup must never be hidden behind a healthy-looking API.
+CMD ["npm", "run", "start"]

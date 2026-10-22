@@ -12,12 +12,16 @@
     "prisma:generate": "prisma generate",
     "migrate": "prisma db push",
     "migrate:dev": "prisma db push",
-    "seed": "tsx prisma/seed.ts",
+    "seed": "tsx prisma/bootstrap.ts",
+    "setup:bootstrap": "tsx prisma/bootstrap.ts",
+    "setup:release": "tsx prisma/release.ts",
+    "setup:audit": "tsx prisma/audit-roles.ts",
+    "setup:repair-admin": "tsx prisma/repair-admin.ts",
     "test": "jest --runInBand",
     "security:audit": "npm audit --audit-level=high"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/bootstrap.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1066.0",

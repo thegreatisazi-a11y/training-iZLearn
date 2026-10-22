@@ -144,12 +144,20 @@ Mongo and on-disk file storage — leave them.
 
 ---
 
-## Part 4 — Build and launch
+## Part 4 — Build, set up, and launch
 ```bash
-docker compose -f docker-compose.server.yml up -d --build
+docker compose -f docker-compose.server.yml build
+docker compose -f docker-compose.server.yml up -d mongo redis
+docker compose -f docker-compose.server.yml run --rm backend npx prisma db push --skip-generate
+docker compose -f docker-compose.server.yml run --rm backend npm run setup:bootstrap
+docker compose -f docker-compose.server.yml run --rm backend npm run setup:release
+docker compose -f docker-compose.server.yml up -d backend frontend
 ```
-First boot: Mongo initialises its replica set → backend runs `prisma db push` (indexes) →
-`seed` (baseline roles + first admin) → starts. Watch it:
+Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters in the protected `.env` before
+`setup:bootstrap`; it is never printed. On upgrades, back up first, run schema sync and
+`setup:audit` / `setup:release` as explicit maintenance steps, then start the new API.
+The bootstrap command is only for initial setup or a deliberate recheck, never a normal restart.
+Watch startup:
 ```bash
 docker compose -f docker-compose.server.yml ps
 docker compose -f docker-compose.server.yml logs -f backend   # wait for "izLearn API listening"
@@ -170,7 +178,8 @@ live only on Docker's internal network. Don't open them.
 ---
 
 ## Part 6 — First login & hardening
-Sign in — `admin` / `ChangeMe@123` on a fresh install (or your migrated admin creds, Part 8).
+Sign in with the `SEED_ADMIN_USERNAME` and private `SEED_ADMIN_PASSWORD` supplied during bootstrap
+(or your migrated admin credentials, Part 8).
 1. **Change the admin password** immediately.
 2. **Profile → Set Signature Password** (required for e-signed actions).
 3. **System Config**: configure SMTP (email), the password policy, and — for lockdown — the
