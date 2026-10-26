@@ -6,7 +6,9 @@ import { z } from 'zod';
  * frontend (form validation) and the backend (request validation).
  */
 
-export const uuid = z.string().uuid({ message: 'Must be a valid UUID' });
+// Zod 4's uuid() requires an RFC version/variant; guid() retains the format-only
+// validation used before the upgrade so existing stored identifiers remain valid.
+export const uuid = z.guid({ message: 'Must be a valid UUID' });
 
 export const nonEmptyString = z.string().trim().min(1, { message: 'This field is required' });
 

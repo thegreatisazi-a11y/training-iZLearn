@@ -71,7 +71,7 @@ it('records a reasoned audit entry when a supervisor marks training not required
   db.trainingTopic.findFirst.mockResolvedValue({ status: 'PUBLISHED', supersededByTopicId: null });
   db.assessmentAttempt.count.mockResolvedValue(0);
   db.trainingAssignment.findMany.mockResolvedValue([row]);
-  db.trainingAssignment.update.mockResolvedValue({ ...row, status: 'NOT_REQUIRED' });
+  db.trainingAssignment.update.mockResolvedValue({ ...row, status: 'NOT_REQUIRED', notRequiredReason: actor.auditReason, notRequiredBy: 'supervisor-1' });
   let audits: any[] = [];
   (auditedTransaction as jest.Mock).mockImplementation(async (_client, work) => {
     const result = await work(db);
@@ -86,7 +86,8 @@ it('records a reasoned audit entry when a supervisor marks training not required
   });
   expect(audits).toEqual([expect.objectContaining({
     entityType: 'TrainingAssignment', entityId: 'assignment-1', reasonForChange: actor.auditReason,
-    newValue: expect.objectContaining({ status: 'NOT_REQUIRED' }),
+    oldValue: row,
+    newValue: expect.objectContaining({ id: 'assignment-1', userId: 'user-1', topicId: 'course-1', status: 'NOT_REQUIRED', notRequiredReason: actor.auditReason }),
   })]);
 });
 
@@ -96,7 +97,7 @@ it('restores an exempt course, clears its exception, and audits the decision', a
   db.user.findFirst.mockResolvedValue({ supervisorId: 'supervisor-1' });
   db.trainingTopic.findFirst.mockResolvedValue({ status: 'PUBLISHED', supersededByTopicId: null });
   db.trainingAssignment.findMany.mockResolvedValue([row]);
-  db.trainingAssignment.update.mockResolvedValue({ ...row, status: 'PENDING' });
+  db.trainingAssignment.update.mockResolvedValue({ ...row, status: 'PENDING', notRequiredReason: null, notRequiredBy: null, notRequiredAt: null });
   let audits: any[] = [];
   (auditedTransaction as jest.Mock).mockImplementation(async (_client, work) => {
     const result = await work(db);
@@ -109,7 +110,10 @@ it('restores an exempt course, clears its exception, and audits the decision', a
     where: { id: 'assignment-1' },
     data: expect.objectContaining({ status: 'PENDING', notRequiredReason: null, notRequiredBy: null, notRequiredAt: null }),
   });
-  expect(audits).toEqual([expect.objectContaining({ entityId: 'assignment-1', reasonForChange: actor.auditReason, newValue: { status: 'PENDING' } })]);
+  expect(audits).toEqual([expect.objectContaining({
+    entityId: 'assignment-1', reasonForChange: actor.auditReason, oldValue: row,
+    newValue: expect.objectContaining({ id: 'assignment-1', userId: 'user-1', status: 'PENDING', notRequiredReason: null }),
+  })]);
 });
 
 it('refuses to mark training not required after an assessment attempt', async () => {

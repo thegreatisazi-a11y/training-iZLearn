@@ -107,9 +107,9 @@ service (built from `backend/Dockerfile`) and a Redis instance.
 
 ### If the service runs Render's **Node** runtime instead of Docker
 
-A service created manually (rather than from the Blueprint) runs the native Node runtime, which
-has neither of the two binaries the Docker image installs. Render cannot change a service's runtime
-after creation, so either recreate it from `render.yaml` or apply the following.
+A service created manually may use the native Node runtime, which has neither of the two binaries
+the Docker image installs. If keeping that runtime, apply the following configuration. The repo's
+`.node-version` selects Node 22 for this service.
 
 **Headless Chrome — needed for PDF export (audit trail, reports), certificate generation and the
 certificate-template preview.** Puppeteer caches Chrome in the home directory by default
@@ -120,7 +120,7 @@ persists:
 | Setting | Value |
 |---|---|
 | Env var `PUPPETEER_CACHE_DIR` | `/opt/render/project/src/.cache/puppeteer` |
-| Build Command | `npm install && npm run build:backend && npx puppeteer browsers install chrome` |
+| Build Command | `npm install && npm run build:backend && npm exec -w backend -- puppeteer browsers install chrome` |
 
 Leave `PUPPETEER_EXECUTABLE_PATH` unset (it selects a *system* Chromium and is meant for the Docker
 image). `.puppeteerrc.cjs` in the repo root pins the same path for the build; the env var is what

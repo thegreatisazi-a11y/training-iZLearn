@@ -430,11 +430,12 @@ export async function markNotRequired(id: string, req: Request) {
     const updated = [];
     const audits = [];
     for (const row of activeAssignments) {
-      updated.push(await tx.trainingAssignment.update({
+      const updatedRow = await tx.trainingAssignment.update({
         where: { id: row.id },
         data: { status: 'NOT_REQUIRED', notRequiredReason: reason, notRequiredBy: req.user!.id, notRequiredAt: at, activateOn: null },
-      }));
-      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: { status: 'NOT_REQUIRED', notRequiredReason: reason }, reasonForChange: reason });
+      });
+      updated.push(updatedRow);
+      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: updatedRow, reasonForChange: reason });
     }
     return { result: updated, audits };
   });
@@ -453,11 +454,12 @@ export async function restoreRequired(id: string, req: Request) {
     const updated = [];
     const audits = [];
     for (const row of rows) {
-      updated.push(await tx.trainingAssignment.update({
+      const updatedRow = await tx.trainingAssignment.update({
         where: { id: row.id },
         data: { status: 'PENDING', dueDate: row.dueDate && row.dueDate < startOfDay(new Date()) ? null : row.dueDate, notRequiredReason: null, notRequiredBy: null, notRequiredAt: null },
-      }));
-      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: { status: 'PENDING' }, reasonForChange: reason });
+      });
+      updated.push(updatedRow);
+      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: updatedRow, reasonForChange: reason });
     }
     return { result: updated, audits };
   });

@@ -42,6 +42,9 @@ const FIELD_LABELS: Record<string, string> = {
   isActive: 'Active',
   isDeleted: 'Deleted',
   status: 'Status',
+  notRequiredReason: 'Not Required Reason',
+  notRequiredBy: 'Marked Not Required By',
+  notRequiredAt: 'Marked Not Required At',
   roleName: 'Role Name',
   description: 'Description',
   permissions: 'Permissions',
@@ -84,7 +87,7 @@ function fieldLabel(k: string): string {
 // Fields whose values are user IDs — resolved to the user's name in change details.
 const USER_ID_FIELDS = new Set([
   'approvedBy', 'createdBy', 'updatedBy', 'assignedBy', 'decidedBy', 'changedBy', 'identifiedBy',
-  'supervisorId', 'releasedBy', 'userId', 'createdUserId', 'evaluatorId', 'trainerId', 'markedBy', 'archivedBy',
+  'supervisorId', 'releasedBy', 'userId', 'createdUserId', 'evaluatorId', 'trainerId', 'markedBy', 'archivedBy', 'notRequiredBy',
 ]);
 // Fields whose values are department / location IDs — resolved to their name in change details.
 const DEPT_ID_FIELDS = new Set(['departmentId']);
@@ -128,6 +131,9 @@ interface NameResolvers {
 
 function fmtVal(v: unknown, key?: string, resolvers?: NameResolvers): string {
   if (v === null || v === undefined) return '∅';
+  if (key === 'status' && typeof v === 'string') {
+    return v.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
   // Resolve id-valued fields to a human name instead of showing the raw UUID.
   if (key && typeof v === 'string' && resolvers) {
     if (USER_ID_FIELDS.has(key)) {
@@ -158,10 +164,21 @@ function fmtVal(v: unknown, key?: string, resolvers?: NameResolvers): string {
  *  - otherwise a friendly action description so no row is left blank.
  * User-id fields are resolved to names.
  */
-function changeSummary(entry: AuditEntry, resolvers?: NameResolvers): string {
+export function changeSummary(entry: AuditEntry, resolvers?: NameResolvers): string {
   const { action, oldValue, newValue } = entry;
   if (action === 'CREATE') return 'Record created';
   if (action === 'SOFT_DELETE') return 'Record removed (soft-delete)';
+  // Older training-exception audits stored a full old row but only a two-field
+  // patch as newValue. Compare only fields present in that patch; absent fields
+  // were not deleted, and must not appear as "→ ∅".
+  if (action === 'UPDATE' && entry.entityType === 'TrainingAssignment' && oldValue && newValue &&
+      (newValue.status === 'NOT_REQUIRED' || (oldValue.status === 'NOT_REQUIRED' && newValue.status === 'PENDING')) &&
+      Object.keys(newValue).every((k) => k === 'status' || k === 'notRequiredReason')) {
+    return Object.entries(newValue)
+      .filter(([k, v]) => JSON.stringify(oldValue[k]) !== JSON.stringify(v))
+      .map(([k, v]) => `${fieldLabel(k)}: ${fmtVal(oldValue[k], k, resolvers)} → ${fmtVal(v, k, resolvers)}`)
+      .join('; ') || 'No data fields changed';
+  }
   // A true before/after update: show only the fields that actually changed.
   if (oldValue && newValue && typeof oldValue === 'object' && typeof newValue === 'object') {
     const keys = new Set([...Object.keys(oldValue), ...Object.keys(newValue)]);

@@ -18,7 +18,8 @@
     "build:backend": "npm run build -w shared && npm run build -w backend"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "vite": "^8.3.5"
   },
   "//overrides": [
     "Transitive pins that a direct dependency will not raise on its own. Keep each entry",
@@ -39,6 +40,11 @@
     }
   },
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.9",
+    "express": "^4.22.3",
+    "follow-redirects": "^1.16.1"
   }
 }

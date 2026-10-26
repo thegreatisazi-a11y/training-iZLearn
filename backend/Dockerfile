@@ -36,11 +36,13 @@ ENV NODE_ENV=production
 # tsx runs the API and explicit setup scripts; Prisma CLI is run during deployment.
 # Both are explicit runtime dependencies. Install only backend/shared production
 # dependencies; frontend build tools and test tooling do not belong in this image.
+# Include the root's small runtime dependency set so hoisted packages (notably
+# swagger-ui-express) can resolve their Express peer from /app/node_modules.
 COPY package.json package-lock.json ./
 COPY backend/package.json backend/package.json
 COPY shared/package.json shared/package.json
 COPY frontend/package.json frontend/package.json
-RUN npm ci --omit=dev --workspace @izlearn/backend --workspace @izlearn/shared --include-workspace-root=false
+RUN npm ci --omit=dev --workspace @izlearn/backend --workspace @izlearn/shared --include-workspace-root=true
 
 COPY backend ./backend
 COPY shared ./shared
