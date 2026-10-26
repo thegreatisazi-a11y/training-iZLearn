@@ -44,6 +44,8 @@ interface AssignmentRow {
   isPassed: boolean;
   isBlocked: boolean;
   pendingRetakeId?: string | null;
+  notRequiredReason?: string | null;
+  notRequiredAt?: string | null;
 }
 
 interface RetakeRow {
@@ -100,6 +102,7 @@ const STATUS_TONE: Record<string, string> = {
   OVERDUE: 'REJECTED',
   BLOCKED: 'REJECTED',
   WAIVED: 'WAIVED',
+  NOT_REQUIRED: 'WAIVED',
   DEFERRED: 'PENDING',
 };
 
@@ -114,8 +117,10 @@ export default function TeamMemberPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canApprove = useAuthStore((s) => s.hasPermission)('team', 'approve');
+  const canManageException = useAuthStore((s) => s.hasPermission)('team', 'mark_not_required');
 
   const [decision, setDecision] = useState<{ open: boolean; kind: 'APPROVE' | 'REJECT'; row?: RetakeRow }>({ open: false, kind: 'APPROVE' });
+  const [exception, setException] = useState<{ row: AssignmentRow; restore: boolean } | null>(null);
   const [jdOpen, setJdOpen] = useState(false);
   const [cvOpen, setCvOpen] = useState(false);
 
@@ -146,6 +151,20 @@ export default function TeamMemberPage() {
     mutationFn: ({ id, body }: { id: string; body: unknown }) => svc.retake.decide(id, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['team-member', userId] });
+    },
+    onError: (e) => toast.error(apiError(e)),
+  });
+
+  const exceptionMutation = useMutation({
+    mutationFn: ({ row, restore, signature }: { row: AssignmentRow; restore: boolean; signature: ESignaturePayload }) => {
+      const { reason, ...credentials } = signature;
+      const body = { reasonForChange: reason, signature: credentials };
+      return restore ? svc.assignments.restoreRequired(row.id, body) : svc.assignments.markNotRequired(row.id, body);
+    },
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({ queryKey: ['team-member', userId] });
+      qc.invalidateQueries({ queryKey: ['my-team'] });
+      toast.success(variables.restore ? 'Training requirement restored.' : 'Training marked not required for this user.');
     },
     onError: (e) => toast.error(apiError(e)),
   });
@@ -187,7 +206,7 @@ export default function TeamMemberPage() {
     },
     { key: 'version', header: 'Version', render: (r) => (r.version != null ? `v${r.version}` : '—') },
     { key: 'type', header: 'Type', render: (r) => (r.trainingType ?? '').replace(/_/g, ' ') || '—' },
-    { key: 'status', header: 'Status', render: (r) => <Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status.replace(/_/g, ' ')}</Badge> },
+    { key: 'status', header: 'Status', render: (r) => <span><Badge tone={STATUS_TONE[r.status] ?? 'default'}>{r.status.replace(/_/g, ' ')}</Badge>{r.status === 'NOT_REQUIRED' && r.notRequiredReason && <span className="mt-1 block text-xs text-slate-500" title={r.notRequiredAt ? `Marked ${formatDateTime(r.notRequiredAt)}` : undefined}>{r.notRequiredReason}</span>}</span> },
     {
       key: 'attempts',
       header: 'Attempts',
@@ -234,6 +253,15 @@ export default function TeamMemberPage() {
       render: (r) =>
         r.pendingRetakeId ? <span className="text-xs text-amber-600">Retake pending</span> : null,
     },
+    ...(canManageException ? [{
+      key: 'exception',
+      header: 'Requirement',
+      render: (r: AssignmentRow) => r.status === 'NOT_REQUIRED'
+        ? <Button size="sm" variant="outline" onClick={() => setException({ row: r, restore: true })}>Restore requirement</Button>
+        : ['PENDING', 'DEFERRED', 'OVERDUE', 'IN_PROGRESS'].includes(r.status)
+          ? <Button size="sm" variant="outline" onClick={() => setException({ row: r, restore: false })}>Mark not required</Button>
+          : null,
+    }] : []),
   ];
 
   if (isLoading) return <PageLoader />;
@@ -242,6 +270,7 @@ export default function TeamMemberPage() {
   // Overdue + Blocked always adds up to Assigned. OVERDUE previously fell into "pending".
   const summary = (data?.assignments ?? []).reduce(
     (acc, a) => {
+      if (a.status === 'NOT_REQUIRED') return acc;
       acc.total += 1;
       if (a.isPassed || a.status === 'COMPLETED' || a.status === 'WAIVED') acc.completed += 1;
       else if (a.isBlocked || a.status === 'BLOCKED') acc.blocked += 1;
@@ -431,6 +460,15 @@ export default function TeamMemberPage() {
         onConfirm={confirmDecision}
         title={`${decision.kind === 'APPROVE' ? 'Approve' : 'Reject'} ${REQUEST_LABEL(decision.row?.requestType)} — ${decision.row?.topic ?? ''}`}
         defaultMeaning={decision.kind === 'APPROVE' ? 'Approved' : 'Rejected'}
+        requireReason
+      />
+      <ESignatureModal
+        open={!!exception}
+        onClose={() => setException(null)}
+        onConfirm={(signature) => exception ? exceptionMutation.mutateAsync({ ...exception, signature }).then(() => undefined) : Promise.resolve()}
+        title={`${exception?.restore ? 'Restore requirement' : 'Mark not required'} — ${exception?.row.topic ?? ''}`}
+        defaultMeaning="Approved"
+        hideMeaning
         requireReason
       />
     </div>

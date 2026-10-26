@@ -442,6 +442,9 @@ model TrainingAssignment {
   refresherDueDate DateTime?
   sequenceIndex    Int? // CR-29: optional order within a curriculum/sequence
   status           AssignmentStatus @default(PENDING)
+  notRequiredReason String?
+  notRequiredBy     String?
+  notRequiredAt     DateTime?
   overdueNotifiedAt        DateTime? // CR-56: set when the after-due email was sent (avoids duplicate notifications)
   requiresSupervisorApproval Boolean @default(false) // CR-56: completion past due needs supervisor sign-off
   supervisorApprovalStatus String? // CR-56: null | PENDING | APPROVED | REJECTED
@@ -490,6 +493,7 @@ enum AssignmentStatus {
   OVERDUE
   BLOCKED
   WAIVED
+  NOT_REQUIRED // individual exception; not a completion or waiver
   DEFERRED // CR-57: assign-later — not yet visible to the trainee until activated
 }
 

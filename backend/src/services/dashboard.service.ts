@@ -113,7 +113,7 @@ export async function getDashboard(user: AuthUser) {
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'PUBLISHED' } }),
       prisma.trainingTopic.count({ where: { isDeleted: false, status: 'ARCHIVED' } }),
       prisma.topicBundle.count({ where: { isDeleted: false } }),
-      prisma.trainingAssignment.count({ where: { isDeleted: false, ...currentOnly } }),
+      prisma.trainingAssignment.count({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' }, ...currentOnly } }),
       prisma.trainingAssignment.count({ where: { isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS'] }, ...currentOnly } }),
       prisma.trainingAssignment.count({ where: { isDeleted: false, status: 'COMPLETED', ...currentOnly } }),
     ]);

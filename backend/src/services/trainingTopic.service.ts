@@ -11,6 +11,7 @@ import * as storage from './storage.service';
 import { signFromRequest } from './eSignature.service';
 import { snapshotVersion } from './topicVersionHistory.service';
 import { notifyCourseRevised, notifyTrainingAssigned } from './notification.service';
+import { carryNotRequiredAssignmentsToRevision } from './assignment.service';
 import { trainingType as legacyTrainingType } from '@izlearn/shared';
 import type {
   CreateTopicInput,
@@ -645,7 +646,7 @@ async function markSignatoriesComplete(topicId: string, actorId: string) {
     for (const userId of signatoryIds) {
       const existing = await prisma.trainingAssignment.findFirst({ where: { userId, topicId, isDeleted: false } });
       if (existing) {
-        if (existing.status !== 'COMPLETED') {
+        if (existing.status !== 'COMPLETED' && existing.status !== 'NOT_REQUIRED') {
           await prisma.trainingAssignment.update({ where: { id: existing.id }, data: { status: 'COMPLETED' } });
         }
       } else {
@@ -848,10 +849,10 @@ export async function reviseTopic(id: string, req: Request) {
 
   // GMP re-training: a revised SOP/course must be re-completed on the new version.
   // Auto-assign the new version (PENDING) to every user who had the previous version
-  // (any status except WAIVED/DEFERRED). Their old, completed v1 assignment is kept
+  // (any status except WAIVED/DEFERRED/NOT_REQUIRED). Their old, completed v1 assignment is kept
   // for history; the new PENDING v2 assignment reflects the current requirement.
   const priorHolders = await prisma.trainingAssignment.findMany({
-    where: { topicId: old.id, isDeleted: false, status: { notIn: ['WAIVED', 'DEFERRED'] } },
+    where: { topicId: old.id, isDeleted: false, status: { notIn: ['WAIVED', 'DEFERRED', 'NOT_REQUIRED'] } },
     select: { userId: true },
   });
   const holderIds = Array.from(new Set(priorHolders.map((a) => a.userId)));
@@ -869,6 +870,10 @@ export async function reviseTopic(id: string, req: Request) {
       },
     });
   }
+
+  // Carry individual exceptions forward to the new topic row. Otherwise the publish-time
+  // role assignment would recreate a pending course for the exempt employee.
+  await carryNotRequiredAssignmentsToRevision(old.id, created.id, actorId);
 
   // 7.5: notify assigned trainees (and their supervisors) that the course was revised.
   await notifyCourseRevised(old.id, reason);

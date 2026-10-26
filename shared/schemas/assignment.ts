@@ -43,6 +43,12 @@ export const waiveAssignmentSchema = z.object({
 });
 export type WaiveAssignmentInput = z.infer<typeof waiveAssignmentSchema>;
 
+export const trainingExceptionSchema = z.object({ reasonForChange, signature: z.object({
+  windowsUsername: z.string().min(1),
+  signaturePassword: z.string().min(1),
+  meaning: z.string().optional(),
+}) });
+
 /** CR-56: supervisor sign-off on a completion/late assignment. */
 export const supervisorDecisionSchema = z.object({
   decision: z.enum(['APPROVE', 'REJECT']),

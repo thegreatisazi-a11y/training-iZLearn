@@ -115,6 +115,11 @@ Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters before first bootst
 `setup:audit` before applying updates to an existing database; ambiguous roles require
 operator review rather than automatic merging.
 
+For an existing installation, do **not** re-bootstrap. Run `setup:release` with the
+updated code before deployment to grant the new My Team “Manage Not-Required Training”
+permission to the system administrator and Supervisor roles. The release step is
+marker-guarded and preserves training data and other role settings.
+
 ### 5. Run the app
 
 ```bash

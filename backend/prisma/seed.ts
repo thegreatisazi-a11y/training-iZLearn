@@ -96,7 +96,7 @@ const ROLE_DEFINITIONS: { roleName: string; description: string; isSystem?: bool
       userRequests: ['view', 'approve'],
       // NOT 'all': team:view_all is the org-wide override (see the permission catalog) and
       // must stay OFF for a supervisor, who is scoped to their own direct reports.
-      team: ['view', 'create', 'edit', 'deactivate', 'approve', 'print', 'export'],
+      team: ['view', 'create', 'edit', 'deactivate', 'approve', 'mark_not_required', 'print', 'export'],
       roleManagement: ['view'],
       masterSetup: ['view'],
       courseManagement: ['view'],
@@ -275,6 +275,22 @@ async function bootstrapRolesAndConfig(): Promise<string> {
 
 /** Versioned release update; never runs as part of backend startup or bootstrap. */
 export async function runReleaseMigrations(): Promise<void> {
+  // Independent marker: existing deployments already have the bootstrap-split marker.
+  const exceptionPermissionMarker = 'migration.team_not_required_permission_v1';
+  if (!await prisma.systemConfig.findUnique({ where: { key: exceptionPermissionMarker } })) {
+    const roles = await prisma.role.findMany({ where: { isDeleted: false } });
+    for (const role of roles) {
+      if (!role.isSystem && normalizeRoleName(role.roleName) !== normalizeRoleName('Supervisor')) continue;
+      const permissions = (role.permissions ?? {}) as Record<string, Record<string, boolean>>;
+      permissions.team = permissions.team ?? {};
+      permissions.team.mark_not_required = true;
+      Object.assign(permissions.team, deriveLegacyFlags(permissions.team));
+      await prisma.role.update({ where: { id: role.id }, data: { permissions: permissions as Prisma.InputJsonValue } });
+    }
+    await prisma.systemConfig.create({
+      data: { key: exceptionPermissionMarker, value: 'done', description: 'Grant individual training-exception control to system administrator and Supervisor', updatedBy: SYSTEM },
+    });
+  }
   const markerKey = 'migration.release_2026_10_bootstrap_split_v1';
   if (await prisma.systemConfig.findUnique({ where: { key: markerKey } })) return;
   const liveRoles = await prisma.role.findMany({ where: { isDeleted: false } });

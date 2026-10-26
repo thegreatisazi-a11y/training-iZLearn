@@ -44,6 +44,7 @@ describe('permission catalog model', () => {
       expect(def.category).toBeTruthy();
     }
     expect(CATALOG_BY_MODULE.auditTrail.label).toBe('Audit Trail');
+    expect(actionsForModule('team')).toContain('mark_not_required');
   });
 
   it('enforces a limited "Audit viewer" role: view yes, export no', () => {
@@ -70,5 +71,12 @@ describe('permission catalog model', () => {
     ]);
     expect(hasPermission(merged, 'courseManagement', 'view')).toBe(true);
     expect(hasPermission(merged, 'courseManagement', 'write')).toBe(true);
+  });
+
+  it('keeps the training-exception action independent of team edit and approval', () => {
+    const perms = { team: moduleFlags(['view', 'edit', 'approve']) } as Record<string, Record<string, boolean>>;
+    expect(hasPermission(perms, 'team', 'mark_not_required')).toBe(false);
+    perms.team.mark_not_required = true;
+    expect(hasPermission(perms, 'team', 'mark_not_required')).toBe(true);
   });
 });

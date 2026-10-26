@@ -214,7 +214,7 @@ export async function assignBundle(id: string, req: Request, opts?: { dueDate?: 
   for (const userId of userIds) {
     for (const topicId of topicIds) {
       const existing = await prisma.trainingAssignment.findFirst({
-        where: { userId, topicId, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS', 'OVERDUE'] } },
+        where: { userId, topicId, isDeleted: false, status: { in: ['PENDING', 'IN_PROGRESS', 'OVERDUE', 'NOT_REQUIRED'] } },
         select: { id: true },
       });
       if (!existing) pairs.push({ userId, topicId });
@@ -280,7 +280,7 @@ export async function getBundleDetail(id: string) {
   // Live assignment status across the bundle's courses for the resolved users.
   const assignments = topicIds.length && resolvedUserIds.length
     ? await prisma.trainingAssignment.findMany({
-        where: { isDeleted: false, topicId: { in: topicIds }, userId: { in: resolvedUserIds } },
+        where: { isDeleted: false, status: { not: 'NOT_REQUIRED' }, topicId: { in: topicIds }, userId: { in: resolvedUserIds } },
         select: { status: true },
       })
     : [];

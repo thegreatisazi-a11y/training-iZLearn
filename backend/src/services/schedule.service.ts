@@ -65,7 +65,7 @@ export async function getSchedule(id: string) {
   const schedule = await prisma.trainingSchedule.findFirst({ where: { id, isDeleted: false } });
   if (!schedule) throw AppError.notFound('Training schedule not found');
   const rawTrainees = await prisma.trainingAssignment.findMany({
-    where: { scheduleId: id, isDeleted: false },
+    where: { scheduleId: id, isDeleted: false, status: { not: 'NOT_REQUIRED' } },
   });
   // Resolve trainee names/codes and the course title so the UI shows names, not raw ids.
   const userIds = Array.from(new Set(rawTrainees.map((t) => t.userId)));
@@ -270,8 +270,10 @@ async function completeAssignmentTx(
   topicId: string,
   assignedBy: string,
 ) {
+  const exception = await tx.trainingAssignment.findFirst({ where: { userId, topicId, isDeleted: false, status: 'NOT_REQUIRED' } });
+  if (exception) throw AppError.conflict('This course is marked not required for this user. Restore the requirement first.');
   const existing = await tx.trainingAssignment.findFirst({
-    where: { userId, topicId, isDeleted: false, status: { notIn: ['WAIVED'] } },
+    where: { userId, topicId, isDeleted: false, status: { notIn: ['WAIVED', 'NOT_REQUIRED'] } },
   });
   if (existing) {
     if (existing.status === 'COMPLETED') return existing;

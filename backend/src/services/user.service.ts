@@ -883,7 +883,7 @@ export async function getUserLifecycle(userId: string) {
     prisma.jobDescription.findMany({ where: { userId, isDeleted: false, status: { not: 'OBSOLETE' } }, orderBy: { version: 'desc' } }),
     prisma.curriculumVitae.findFirst({ where: { userId, isDeleted: false } }),
     prisma.tNI.findMany({ where: { userId, isDeleted: false } }),
-    prisma.trainingAssignment.findMany({ where: { userId, isDeleted: false, status: { not: 'DEFERRED' } } }),
+    prisma.trainingAssignment.findMany({ where: { userId, isDeleted: false, status: { notIn: ['DEFERRED', 'NOT_REQUIRED'] } } }),
   ]);
 
   const trainingTotal = assignments.length;
@@ -943,7 +943,7 @@ export async function listMyTeam(supervisorId: string, seeAll: boolean, q: Pagin
   if (!ids.length) return { data: [], total, page: q.page, pageSize: q.pageSize };
 
   const [assignments, jds, cvs, certs, tnis, passedAttempts] = await Promise.all([
-    prisma.trainingAssignment.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'DEFERRED' } } }),
+    prisma.trainingAssignment.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { notIn: ['DEFERRED', 'NOT_REQUIRED'] } } }),
     prisma.jobDescription.findMany({ where: { userId: { in: ids }, isDeleted: false, status: { not: 'OBSOLETE' } } }),
     prisma.curriculumVitae.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
     prisma.certificate.findMany({ where: { userId: { in: ids }, isDeleted: false }, select: { userId: true } }),
@@ -1144,6 +1144,8 @@ export async function getTeamMemberHistory(req: Request, targetUserId: string) {
         version: rowVersion,
         isSuperseded: !!t?.supersededByTopicId,
         status: effectiveStatus,
+        notRequiredReason: a.notRequiredReason,
+        notRequiredAt: a.notRequiredAt,
         dueDate: a.dueDate,
         createdAt: a.createdAt,
         maxAttempts: t?.maxAttempts ?? null,

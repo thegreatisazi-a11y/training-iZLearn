@@ -65,6 +65,7 @@ export const assignmentStatus = z.enum([
   'OVERDUE',
   'BLOCKED',
   'WAIVED',
+  'NOT_REQUIRED',
   'DEFERRED', // CR-57: assign-later — hidden from the trainee until activated
 ]);
 export type AssignmentStatus = z.infer<typeof assignmentStatus>;
@@ -130,7 +131,7 @@ export const PERMISSION_VERBS = [
 export type PermissionVerb = (typeof PERMISSION_VERBS)[number];
 
 /** All accepted permission keys: the 10 verbs plus the legacy `read`/`write` aliases. */
-export const permissionAction = z.enum([...PERMISSION_VERBS, 'read', 'write']);
+export const permissionAction = z.enum([...PERMISSION_VERBS, 'read', 'write', 'mark_not_required']);
 export type PermissionAction = z.infer<typeof permissionAction>;
 
 /** Granular verb -> legacy key, used as a fallback when reading older role matrices. */

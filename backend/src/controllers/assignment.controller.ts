@@ -22,5 +22,7 @@ export const get = asyncHandler(async (req, res) => sendSuccess(res, await svc.g
 export const create = asyncHandler(async (req, res) => sendCreated(res, await svc.createAssignment(req.body, req.user!.id), 'Assignment(s) created'));
 export const update = asyncHandler(async (req, res) => sendSuccess(res, await svc.updateAssignment(req.params.id, req.body), 'Assignment updated'));
 export const waive = asyncHandler(async (req, res) => sendSuccess(res, await svc.waiveAssignment(req.params.id, req), 'Assignment waived'));
+export const markNotRequired = asyncHandler(async (req, res) => sendSuccess(res, await svc.markNotRequired(req.params.id, req), 'Training marked not required'));
+export const restoreRequired = asyncHandler(async (req, res) => sendSuccess(res, await svc.restoreRequired(req.params.id, req), 'Training requirement restored'));
 export const activate = asyncHandler(async (req, res) => sendSuccess(res, await svc.activateAssignment(req.params.id), 'Assignment activated'));
 export const supervisorDecision = asyncHandler(async (req, res) => sendSuccess(res, await svc.supervisorDecision(req.params.id, req.body, req), 'Decision recorded'));

@@ -145,6 +145,11 @@ export async function decideTNI(id: string, input: TNIDecisionInput, req: Reques
   const tni = await getTNI(id);
   if (tni.status !== 'PENDING') throw AppError.conflict('This TNI has already been decided.');
 
+  if (input.decision === 'APPROVE') {
+    const exception = await prisma.trainingAssignment.findFirst({ where: { userId: tni.userId, topicId: tni.topicId, isDeleted: false, status: 'NOT_REQUIRED' } });
+    if (exception) throw AppError.conflict('This course is marked not required for the user. Restore it from My Team before approving the TNI.');
+  }
+
   const signatureId = await signFromRequest(req, 'TNI', id, input.decision === 'APPROVE' ? 'Approved' : 'Rejected');
   auditContext.setActionOverride(input.decision === 'APPROVE' ? 'APPROVE' : 'REJECT');
 

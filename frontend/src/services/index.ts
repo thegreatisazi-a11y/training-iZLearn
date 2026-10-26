@@ -215,6 +215,8 @@ export const svc = {
     ...createCrud('/assignments'),
     mine: () => data(api.get('/assignments/mine')),
     waive: (id: string, body: unknown) => data(api.post(`/assignments/${id}/waive`, body)),
+    markNotRequired: (id: string, body: unknown) => data(api.post(`/assignments/${id}/not-required`, body)),
+    restoreRequired: (id: string, body: unknown) => data(api.post(`/assignments/${id}/restore-required`, body)),
     activate: (id: string) => data(api.post(`/assignments/${id}/activate`, {})),
     supervisorDecision: (id: string, body: unknown) => data(api.post(`/assignments/${id}/supervisor-decision`, body)),
   },

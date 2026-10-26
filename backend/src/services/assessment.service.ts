@@ -138,6 +138,9 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
   const assignments = await prisma.trainingAssignment.findMany({
     where: { userId, topicId, isDeleted: false },
   });
+  if (assignments.some((a) => a.status === 'NOT_REQUIRED')) {
+    throw AppError.conflict('This training is not required for you. Ask your supervisor to restore it before starting.');
+  }
   if (assignments.some((a) => a.status === 'BLOCKED')) {
     throw AppError.conflict('This assessment is blocked pending coordinator review.');
   }
@@ -221,7 +224,7 @@ export async function startAttempt(userId: string, topicId: string, assignmentId
     const earlierIds = earlier.map((t) => t.id);
     if (earlierIds.length) {
       const blocking = await prisma.trainingAssignment.findFirst({
-        where: { userId, topicId: { in: earlierIds }, isDeleted: false, status: { notIn: ['COMPLETED', 'WAIVED'] } },
+        where: { userId, topicId: { in: earlierIds }, isDeleted: false, status: { notIn: ['COMPLETED', 'WAIVED', 'NOT_REQUIRED'] } },
       });
       if (blocking) {
         throw AppError.forbidden('Complete the earlier courses in your training sequence before starting this one.');
@@ -581,6 +584,8 @@ export async function completeByAcknowledgement(userId: string, topicId: string,
     throw AppError.conflict('This training is not currently published and cannot be completed.');
   }
   if (topic.requiresAssessment) throw AppError.badRequest('This training requires an assessment and cannot be completed by acknowledgement.');
+  const exception = await prisma.trainingAssignment.findFirst({ where: { userId, topicId, isDeleted: false, status: 'NOT_REQUIRED' } });
+  if (exception) throw AppError.conflict('This training is not required for you. Ask your supervisor to restore it first.');
 
   // A reading-only course IS its material: with no document attached there is nothing to read,
   // so "I have read & understood" would be meaningless and the training would be completable
@@ -907,6 +912,7 @@ export async function reviewAttempt(
 export async function unblockAssignment(assignmentId: string, req: Request) {
   const assignment = await prisma.trainingAssignment.findFirst({ where: { id: assignmentId, isDeleted: false } });
   if (!assignment) throw AppError.notFound('Assignment not found');
+  if (assignment.status === 'NOT_REQUIRED') throw AppError.conflict('This training is not required. Restore the requirement first.');
   await signFromRequest(req, 'TrainingAssignment', assignmentId, 'Approved');
   auditContext.setActionOverride('UPDATE');
   // BUG-03: simply setting PENDING isn't enough — startAttempt re-blocks immediately

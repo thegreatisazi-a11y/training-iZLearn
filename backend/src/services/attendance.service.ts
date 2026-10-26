@@ -47,7 +47,7 @@ async function upsertAttendance(
 export async function markAttendance(input: MarkAttendanceInput, markedBy: string) {
   // L-S5: only accept attendance for users actually enrolled as trainees on this schedule.
   const enrolled = new Set(
-    (await prisma.trainingAssignment.findMany({ where: { scheduleId: input.scheduleId, isDeleted: false }, select: { userId: true } })).map(
+    (await prisma.trainingAssignment.findMany({ where: { scheduleId: input.scheduleId, isDeleted: false, status: { not: 'NOT_REQUIRED' } }, select: { userId: true } })).map(
       (a) => a.userId,
     ),
   );

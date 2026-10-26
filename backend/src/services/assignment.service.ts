@@ -6,6 +6,8 @@ import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import { hasCompletedRequiredReading } from './materialView.service';
 import { startOfDay } from '../utils/dateUtils';
+import { hasOrgWideScope } from '../utils/accessScope';
+import type { PermissionMatrix } from '@izlearn/shared';
 import type { Request } from 'express';
 import type {
   CreateAssignmentInput,
@@ -86,6 +88,33 @@ export async function assignRequiredCoursesToUser(userId: string, actorId: strin
   return created;
 }
 
+/** Keep an individual exception visible and effective when a course gets a new topic row. */
+export async function carryNotRequiredAssignmentsToRevision(oldTopicId: string, newTopicId: string, actorId: string): Promise<number> {
+  const exceptions = await prisma.trainingAssignment.findMany({
+    where: { topicId: oldTopicId, isDeleted: false, status: 'NOT_REQUIRED' },
+  });
+  let carried = 0;
+  for (const exception of exceptions) {
+    const exists = await prisma.trainingAssignment.findFirst({ where: { userId: exception.userId, topicId: newTopicId, isDeleted: false } });
+    if (exists) continue;
+    await prisma.trainingAssignment.create({
+      data: {
+        userId: exception.userId,
+        topicId: newTopicId,
+        assignmentType: exception.assignmentType,
+        status: 'NOT_REQUIRED',
+        assignedBy: actorId,
+        createdBy: actorId,
+        notRequiredReason: exception.notRequiredReason,
+        notRequiredBy: exception.notRequiredBy,
+        notRequiredAt: exception.notRequiredAt,
+      },
+    });
+    carried++;
+  }
+  return carried;
+}
+
 export async function createAssignment(input: CreateAssignmentInput, assignedBy: string) {
   const targets = await resolveTargets(input);
   if (!targets.length) throw AppError.badRequest('No assignment targets could be resolved for this request.');
@@ -102,6 +131,13 @@ export async function createAssignment(input: CreateAssignmentInput, assignedBy:
   const blocked = topicIds.filter((id) => !publishedIds.has(id));
   if (blocked.length) {
     throw AppError.badRequest('One or more selected courses are not published and cannot be assigned.');
+  }
+  // An individual exception is deliberate; a manual assignment must restore it first.
+  for (const target of targets) {
+    const exception = await prisma.trainingAssignment.findFirst({
+      where: { userId: target.userId, topicId: target.topicId, isDeleted: false, status: 'NOT_REQUIRED' },
+    });
+    if (exception) throw AppError.conflict('This course is marked not required for a selected user. Restore it from My Team first.');
   }
 
   // CR-56: never stamp an already-expired due date (e.g. a user added to a
@@ -191,7 +227,7 @@ export async function getAssignment(id: string) {
 export async function listMyTrainings(userId: string) {
   const assignments = await prisma.trainingAssignment.findMany({
     // CR-57: DEFERRED assignments are not yet visible to the trainee.
-    where: { userId, isDeleted: false, status: { not: 'DEFERRED' } },
+    where: { userId, isDeleted: false, status: { notIn: ['DEFERRED', 'NOT_REQUIRED'] } },
     orderBy: { createdAt: 'desc' },
   });
   const topicIds = Array.from(new Set(assignments.map((a) => a.topicId)));
@@ -306,7 +342,10 @@ export async function listMyTrainings(userId: string) {
 }
 
 export async function updateAssignment(id: string, input: UpdateAssignmentInput) {
-  await getAssignment(id);
+  const existing = await getAssignment(id);
+  if (existing.status === 'NOT_REQUIRED' || input.status === 'NOT_REQUIRED') {
+    throw AppError.conflict('Use My Team to manage a not-required training exception.');
+  }
   return prisma.trainingAssignment.update({
     where: { id },
     data: {
@@ -348,7 +387,80 @@ export async function supervisorDecision(id: string, input: SupervisorDecisionIn
 
 /** Waiving an assignment is a controlled action — requires an e-signature + reason. */
 export async function waiveAssignment(id: string, req: Request) {
-  await getAssignment(id);
+  const existing = await getAssignment(id);
+  if (existing.status === 'NOT_REQUIRED') throw AppError.conflict('This training is not required; restore it before changing its status.');
   await signFromRequest(req, 'TrainingAssignment', id, 'Approved');
   return prisma.trainingAssignment.update({ where: { id }, data: { status: 'WAIVED' } });
+}
+
+async function scopedTeamAssignment(id: string, req: Request) {
+  const assignment = await getAssignment(id);
+  const target = await prisma.user.findFirst({ where: { id: assignment.userId, isDeleted: false }, select: { supervisorId: true } });
+  if (!target) throw AppError.notFound('User not found');
+  const orgWide = hasOrgWideScope(req.user!.permissions as PermissionMatrix, 'team');
+  if (!orgWide && target.supervisorId !== req.user!.id) {
+    throw AppError.forbidden('You may only manage training exceptions for your direct reports.');
+  }
+  return assignment;
+}
+
+/** Individual exception: not a completion or waiver; retained for re-assignment checks. */
+export async function markNotRequired(id: string, req: Request) {
+  const assignment = await scopedTeamAssignment(id, req);
+  if (!['PENDING', 'DEFERRED', 'OVERDUE', 'IN_PROGRESS'].includes(assignment.status)) {
+    throw AppError.conflict('Only incomplete training may be marked not required.');
+  }
+  const [topic, attempts, activeAssignments] = await Promise.all([
+    prisma.trainingTopic.findFirst({ where: { id: assignment.topicId, isDeleted: false }, select: { status: true, supersededByTopicId: true } }),
+    prisma.assessmentAttempt.count({ where: { userId: assignment.userId, topicId: assignment.topicId, isDeleted: false } }),
+    prisma.trainingAssignment.findMany({ where: { userId: assignment.userId, topicId: assignment.topicId, isDeleted: false, status: { in: ['PENDING', 'DEFERRED', 'OVERDUE', 'IN_PROGRESS'] } } }),
+  ]);
+  if (!topic || topic.status !== 'PUBLISHED' || topic.supersededByTopicId) throw AppError.conflict('Only a current published course can be marked not required.');
+  if (attempts) throw AppError.conflict('This training already has assessment attempts and cannot be marked not required.');
+  if (!activeAssignments.length) throw AppError.conflict('This assignment changed while you were reviewing it. Refresh and try again.');
+  const scheduledIds = activeAssignments.map((row) => row.scheduleId).filter((value): value is string => !!value);
+  if (scheduledIds.length) {
+    const attendance = await prisma.attendance.count({ where: { userId: assignment.userId, scheduleId: { in: scheduledIds }, isDeleted: false } });
+    if (attendance) throw AppError.conflict('Attendance has already been recorded for this training and cannot be marked not required.');
+  }
+  await signFromRequest(req, 'TrainingAssignment', id, 'Approved');
+  const reason = req.auditReason!;
+  const at = new Date();
+  return auditedTransaction(prisma, async (tx) => {
+    const updated = [];
+    const audits = [];
+    for (const row of activeAssignments) {
+      updated.push(await tx.trainingAssignment.update({
+        where: { id: row.id },
+        data: { status: 'NOT_REQUIRED', notRequiredReason: reason, notRequiredBy: req.user!.id, notRequiredAt: at, activateOn: null },
+      }));
+      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: { status: 'NOT_REQUIRED', notRequiredReason: reason }, reasonForChange: reason });
+    }
+    return { result: updated, audits };
+  });
+}
+
+export async function restoreRequired(id: string, req: Request) {
+  const assignment = await scopedTeamAssignment(id, req);
+  if (assignment.status !== 'NOT_REQUIRED') throw AppError.conflict('This training is not marked not required.');
+  const topic = await prisma.trainingTopic.findFirst({ where: { id: assignment.topicId, isDeleted: false }, select: { status: true, supersededByTopicId: true } });
+  if (!topic || topic.status !== 'PUBLISHED' || topic.supersededByTopicId) throw AppError.conflict('Only a current published course can be restored.');
+  const rows = await prisma.trainingAssignment.findMany({ where: { userId: assignment.userId, topicId: assignment.topicId, isDeleted: false, status: 'NOT_REQUIRED' } });
+  if (!rows.length) throw AppError.conflict('This assignment changed while you were reviewing it. Refresh and try again.');
+  await signFromRequest(req, 'TrainingAssignment', id, 'Approved');
+  const reason = req.auditReason!;
+  const restored = await auditedTransaction(prisma, async (tx) => {
+    const updated = [];
+    const audits = [];
+    for (const row of rows) {
+      updated.push(await tx.trainingAssignment.update({
+        where: { id: row.id },
+        data: { status: 'PENDING', dueDate: row.dueDate && row.dueDate < startOfDay(new Date()) ? null : row.dueDate, notRequiredReason: null, notRequiredBy: null, notRequiredAt: null },
+      }));
+      audits.push({ action: 'UPDATE', entityType: 'TrainingAssignment', entityId: row.id, oldValue: row, newValue: { status: 'PENDING' }, reasonForChange: reason });
+    }
+    return { result: updated, audits };
+  });
+  await notifyTrainingAssigned(assignment.userId, assignment.topicId, restored[0]?.dueDate ?? null).catch(() => undefined);
+  return restored;
 }

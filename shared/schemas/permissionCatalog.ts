@@ -110,6 +110,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
       A('edit', 'Edit Team Member', 'Edit a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
       A('deactivate', 'Deactivate Team Member', 'Deactivate a team member — limited to your DIRECT reports (unless you also manage users org-wide).'),
       A('approve', 'Approve / Verify Team Training', "Approve or verify your team's training records."),
+      A('mark_not_required', 'Manage Not-Required Training', 'Mark an assigned course not required for a direct report, or restore it. Also requires a reason and electronic signature. Organisation-wide only with My Team: View / Act Organisation-Wide.'),
       A('print', 'Print Team Records', 'Print team training records.'),
       A('export', 'Export Team Records', 'Download team records as CSV or Excel.'),
     ],

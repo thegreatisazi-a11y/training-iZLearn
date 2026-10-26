@@ -212,7 +212,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
     }
 
     case 'department-wise-status': {
-      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
+      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' } } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const x of a) {
         if (!userPasses(x.userId)) continue;
@@ -275,7 +275,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
     case 'role-wise-status': {
       const urs = await prisma.userRole.findMany({ where: { isActive: true, ...(f.roleId ? { roleId: f.roleId } : {}) } });
       const userIds = new Set(urs.map((u) => u.userId));
-      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, userId: { in: [...userIds] } } });
+      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' }, userId: { in: [...userIds] } } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const x of a) {
         const e = agg.get(x.userId) ?? { total: 0, completed: 0 };
@@ -312,7 +312,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
     case 'designation-wise-status': {
       const designations = await prisma.designationMaster.findMany({ where: { isDeleted: false } });
       const desigName = new Map(designations.map((d) => [d.id, d.displayName]));
-      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
+      const a = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' } } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const x of a) {
         if (!userPasses(x.userId)) continue;
@@ -557,7 +557,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       for (const b of bundles) {
         const tIds = topicsByBundle.get(b.id) ?? [];
         const assignments = tIds.length
-          ? await prisma.trainingAssignment.findMany({ where: { isDeleted: false, topicId: { in: tIds } } })
+          ? await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' }, topicId: { in: tIds } } })
           : [];
         const completed = assignments.filter((a) => a.status === 'COMPLETED').length;
         const pending = assignments.filter((a) => a.status === 'PENDING' || a.status === 'IN_PROGRESS').length;
@@ -693,7 +693,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
 
     // CR-55: assignment status aggregated by training type.
     case 'training-type-wise-status': {
-      const assignments = await prisma.trainingAssignment.findMany({ where: { isDeleted: false } });
+      const assignments = await prisma.trainingAssignment.findMany({ where: { isDeleted: false, status: { not: 'NOT_REQUIRED' } } });
       const agg = new Map<string, { total: number; completed: number }>();
       for (const a of assignments) {
         if (!userPasses(a.userId)) continue;
