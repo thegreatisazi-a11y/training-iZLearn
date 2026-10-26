@@ -6,6 +6,7 @@
 export * from './common';
 export * from './enums';
 export * from './exportNaming';
+export * from './auditLabels';
 export * from './permissionCatalog';
 export * from './notificationCatalog';
 export * from './notificationSetting';

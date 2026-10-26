@@ -14,7 +14,7 @@ function pad(n: number): string {
 }
 
 /** The calendar parts of an instant AS SEEN IN IST, regardless of the browser's zone. */
-function istParts(value: string | Date): { y: number; m: number; d: number; hh: number; mm: number } | null {
+function istParts(value: string | Date): { y: number; m: number; d: number; hh: number; mm: number; ss: number } | null {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return null;
   // 'en-GB' + explicit timeZone gives the IST wall-clock fields in a stable order.
@@ -25,10 +25,11 @@ function istParts(value: string | Date): { y: number; m: number; d: number; hh: 
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
     hour12: false,
   }).formatToParts(dt);
   const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? NaN);
-  const out = { y: get('year'), m: get('month'), d: get('day'), hh: get('hour'), mm: get('minute') };
+  const out = { y: get('year'), m: get('month'), d: get('day'), hh: get('hour'), mm: get('minute'), ss: get('second') };
   return Object.values(out).some(Number.isNaN) ? null : out;
 }
 
@@ -44,6 +45,14 @@ export function formatDateTime(value?: string | Date | null): string {
   const p = istParts(value);
   if (!p) return '—';
   return `${pad(p.d)}/${pad(p.m)}/${pad(p.y % 100)} ${pad(p.hh)}:${pad(p.mm)}`;
+}
+
+/** Audit timestamps need second-level precision while other screens keep HH:mm. */
+export function formatDateTimeSeconds(value?: string | Date | null): string {
+  if (!value) return '—';
+  const p = istParts(value);
+  if (!p) return '—';
+  return `${pad(p.d)}/${pad(p.m)}/${pad(p.y % 100)} ${pad(p.hh)}:${pad(p.mm)}:${pad(p.ss)}`;
 }
 
 /** For <input type="date"> values (yyyy-mm-dd) — the IST calendar day. */

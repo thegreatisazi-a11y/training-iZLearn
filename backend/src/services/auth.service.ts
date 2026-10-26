@@ -59,7 +59,7 @@ export async function login(
   // The account is now identified. Attribute every audited write that follows in
   // this (still-unauthenticated) request — failed-attempt counter, lastLoginAt,
   // session termination — to this user instead of the default ANONYMOUS actor.
-  auditContext.setActor({ userId: user.id, userFullName: user.fullName });
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername });
 
   if (!user.isActive) throw AppError.forbidden('Account is inactive');
 
@@ -89,7 +89,7 @@ export async function login(
       action: 'LOGIN_FAILED',
       entityType: 'User',
       entityId: user.id,
-      actor: { userId: user.id, userFullName: user.fullName },
+      actor: { userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername },
       newValue: { attempts, locked: reachedLimit },
       ipAddress: ip,
       userAgent,
@@ -138,7 +138,7 @@ export async function login(
       action: 'LOGIN_FAILED',
       entityType: 'User',
       entityId: user.id,
-      actor: { userId: user.id, userFullName: user.fullName },
+      actor: { userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername },
       newValue: { reason: 'No active role assigned' },
       ipAddress: ip,
       userAgent,
@@ -150,7 +150,7 @@ export async function login(
     action: 'LOGIN',
     entityType: 'User',
     entityId: user.id,
-    actor: { userId: user.id, userFullName: user.fullName, sessionId },
+    actor: { userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId },
     ipAddress: ip,
     userAgent,
   });
@@ -212,7 +212,7 @@ export async function unlock(
     throw new AppError(401, 'SESSION_EXPIRED', 'Your session has expired. Please log in again.');
   }
 
-  auditContext.setActor({ userId: user.id, userFullName: user.fullName, sessionId: payload.sid });
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId: payload.sid });
   if (user.lockedUntil && user.lockedUntil > new Date()) {
     throw new AppError(423, 'LOCKED', 'Account locked. Try again later.');
   }

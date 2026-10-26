@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/response';
-import { formatDate } from '../utils/dateUtils';
+import { formatDate, formatDateTimeSeconds } from '../utils/dateUtils';
 import { exportToCsv } from '../utils/csvExporter';
 import { exportToExcel } from '../utils/excelExporter';
 import { exportFilename } from '@izlearn/shared';
@@ -465,8 +465,8 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         orderBy: { timestamp: 'desc' },
       });
       const rows = logs.map((l) => ({
-        timestamp: formatDate(l.timestamp),
-        user: l.userFullName,
+        timestamp: formatDateTimeSeconds(l.timestamp),
+        user: l.userUsername || l.userFullName,
         action: l.action,
         entityType: l.entityType,
         entityId: l.entityId ?? '',
@@ -476,11 +476,11 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
         title: 'Audit Trail Report',
         columns: [
           { header: 'Timestamp', key: 'timestamp' },
-          { header: 'User', key: 'user' },
+          { header: 'Username', key: 'user' },
           { header: 'Action', key: 'action' },
           { header: 'Entity', key: 'entityType' },
           { header: 'Entity ID', key: 'entityId' },
-          { header: 'Reason', key: 'reason' },
+          { header: 'Remark', key: 'reason' },
         ],
         rows,
       };

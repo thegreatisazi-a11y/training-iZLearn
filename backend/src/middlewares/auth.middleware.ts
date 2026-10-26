@@ -64,7 +64,7 @@ function makeAuthenticate(allowLocked: boolean) {
     if (!authUser) throw AppError.unauthorized('Account is inactive or no longer exists.');
 
     req.user = authUser;
-    auditContext.setActor({ userId: authUser.id, userFullName: authUser.fullName, sessionId: authUser.sessionId });
+    auditContext.setActor({ userId: authUser.id, userFullName: authUser.fullName, userUsername: authUser.windowsUsername, sessionId: authUser.sessionId });
     auditContext.setRequestMeta({ sessionId: authUser.sessionId });
     next();
   });

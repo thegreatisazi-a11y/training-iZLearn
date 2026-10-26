@@ -118,6 +118,7 @@ function buildAuditData(store: AuditStore | undefined, e: AuditEntryInput): Pris
   return {
     userId: actor.userId,
     userFullName: actor.userFullName,
+    userUsername: actor.userUsername ?? null,
     action: e.action,
     entityType: e.entityType,
     entityId: e.entityId ?? null,

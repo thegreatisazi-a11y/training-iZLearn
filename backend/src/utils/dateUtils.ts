@@ -32,6 +32,12 @@ export function formatDateTime(date: Date | string | null | undefined, tz = APP_
   return dayjs(date).tz(tz).format('DD/MM/YY HH:mm');
 }
 
+/** Audit exports show seconds without changing timestamps elsewhere. */
+export function formatDateTimeSeconds(date: Date | string | null | undefined, tz = APP_TIMEZONE): string {
+  if (!date) return '';
+  return dayjs(date).tz(tz).format('DD/MM/YY HH:mm:ss');
+}
+
 /**
  * YYYY-MM-DD **in the display timezone**, for the CSV exports that use the ISO shape.
  * `Date#toISOString().slice(0, 10)` is UTC, so for IST (UTC+5:30) anything stored after

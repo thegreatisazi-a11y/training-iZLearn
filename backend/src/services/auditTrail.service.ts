@@ -1,7 +1,8 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type AuditTrail } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { auditContext, SYSTEM_ACTOR } from '../utils/auditContext';
 import type { AuditAction } from '@izlearn/shared';
+import { matchesAuditSearch, type AuditSearchNames } from './auditSearch';
 
 export interface RecordEventInput {
   action: AuditAction | string;
@@ -10,7 +11,7 @@ export interface RecordEventInput {
   oldValue?: unknown;
   newValue?: unknown;
   reasonForChange?: string | null;
-  actor?: { userId: string; userFullName: string; sessionId?: string };
+  actor?: { userId: string; userFullName: string; userUsername?: string; sessionId?: string };
   ipAddress?: string;
   userAgent?: string;
 }
@@ -29,6 +30,7 @@ export async function recordEvent(input: RecordEventInput): Promise<void> {
     data: {
       userId: actor.userId,
       userFullName: actor.userFullName,
+      userUsername: actor.userUsername ?? null,
       action: input.action,
       entityType: input.entityType ?? 'System',
       entityId: input.entityId ?? null,
@@ -57,40 +59,68 @@ export interface AuditQueryFilters {
 export async function queryAuditTrail(filters: AuditQueryFilters) {
   const page = filters.page ?? 1;
   const pageSize = filters.pageSize ?? 50;
+  if (filters.search?.trim()) {
+    const rows: Array<AuditTrail & { entityLabel: string | null }> = [];
+    let total = 0;
+    for await (const row of iterateAuditTrail(filters)) {
+      if (total >= (page - 1) * pageSize && rows.length < pageSize) rows.push(row);
+      total++;
+    }
+    return { data: rows, total, page, pageSize };
+  }
+  const where = auditWhere(filters);
+  const [data, total] = await Promise.all([
+    prisma.auditTrail.findMany({ where, orderBy: [{ timestamp: 'desc' }, { id: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
+    prisma.auditTrail.count({ where }),
+  ]);
+  return { data: await enrichEntityLabels(data), total, page, pageSize };
+}
+
+function auditWhere(filters: AuditQueryFilters): Prisma.AuditTrailWhereInput {
   const where: Prisma.AuditTrailWhereInput = {};
   if (filters.userId) where.userId = filters.userId;
   if (filters.action) where.action = filters.action;
   if (filters.entityType) where.entityType = filters.entityType;
   if (filters.entityId) where.entityId = filters.entityId;
-  // Free-text search across the stored, human-readable columns (the entity's resolved
-  // "Record" label is computed after the query, so it isn't part of the DB filter).
-  if (filters.search) {
-    const s = filters.search;
-    where.OR = [
-      { userFullName: { contains: s, mode: 'insensitive' } },
-      { action: { contains: s, mode: 'insensitive' } },
-      { entityType: { contains: s, mode: 'insensitive' } },
-      { reasonForChange: { contains: s, mode: 'insensitive' } },
-      { ipAddress: { contains: s, mode: 'insensitive' } },
-    ];
-  }
   if (filters.from || filters.to) {
     where.timestamp = {};
     if (filters.from) (where.timestamp as Prisma.DateTimeFilter).gte = filters.from;
     if (filters.to) (where.timestamp as Prisma.DateTimeFilter).lte = filters.to;
   }
 
-  const [data, total] = await Promise.all([
-    prisma.auditTrail.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.auditTrail.count({ where }),
-  ]);
+  return where;
+}
 
-  return { data: await enrichEntityLabels(data), total, page, pageSize };
+/** Stream matching rows once so a filtered export does not re-scan the entire log per page. */
+export async function* iterateAuditTrail(filters: AuditQueryFilters) {
+  const where = auditWhere(filters);
+  const search = filters.search?.trim();
+  const names: AuditSearchNames = { user: new Map(), department: new Map(), location: new Map() };
+  if (search) {
+    const [users, departments, locations] = await Promise.all([
+      prisma.user.findMany({ select: { id: true, fullName: true } }),
+      prisma.department.findMany({ select: { id: true, name: true } }),
+      prisma.location.findMany({ select: { id: true, name: true } }),
+    ]);
+    for (const u of users) names.user.set(u.id, u.fullName);
+    for (const d of departments) names.department.set(d.id, d.name);
+    for (const l of locations) names.location.set(l.id, l.name);
+  }
+  let cursor: string | undefined;
+  const batchSize = 200;
+  for (;;) {
+    const batch = await prisma.auditTrail.findMany({
+      where,
+      orderBy: [{ timestamp: 'desc' }, { id: 'desc' }],
+      take: batchSize,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (!batch.length) return;
+    const enriched = await enrichEntityLabels(batch);
+    for (const row of enriched) if (!search || matchesAuditSearch(row, search, names)) yield row;
+    if (batch.length < batchSize) return;
+    cursor = batch[batch.length - 1].id;
+  }
 }
 
 /**

@@ -13,12 +13,14 @@ import { svc, downloadBlob, filenameFromResponse } from '@/services';
 import { printPdfBlob } from '@/lib/print';
 import { apiError } from '@/lib/axios';
 import { toast } from '@/store/uiStore';
-import { formatDateTime } from '@/lib/format';
+import { formatDateTime, formatDateTimeSeconds } from '@/lib/format';
+import { AUDIT_ENTITY_LABELS, auditEntityLabel } from '@izlearn/shared';
 
 interface AuditEntry {
   id: string;
   timestamp: string;
   userFullName: string;
+  userUsername?: string | null;
   action: string;
   entityType: string;
   entityId: string | null;
@@ -70,42 +72,9 @@ const FIELD_LABELS: Record<string, string> = {
  * used by REPORT_LABELS on the Reports page. Anything not listed falls back to the raw value with
  * its camel case spaced out, so a newly-audited entity is still readable before it is added here.
  */
-const ENTITY_LABELS: Record<string, string> = {
-  TrainingTopic: 'Course',
-  TopicBundle: 'Course Bundle',
-  TrainingMaterial: 'Training Material',
-  TrainingAssignment: 'Training Assignment',
-  TrainingSchedule: 'Training Schedule',
-  AssessmentAttempt: 'Assessment Attempt',
-  Question: 'Question',
-  RetakeRequest: 'Retake Request',
-  Certificate: 'Certificate',
-  CertificateTemplate: 'Certificate Template',
-  CurriculumVitae: 'CV',
-  JobDescription: 'Job Description',
-  PersonalDocument: 'Personal Document',
-  OfflineTrainingRecord: 'Offline Training Record',
-  OjtRecord: 'OJT Record',
-  Attendance: 'Attendance',
-  TNI: 'Training Needs (TNI)',
-  User: 'User',
-  UserRole: 'User Role',
-  UserSession: 'User Session',
-  UserCreationRequest: 'User Creation Request',
-  Role: 'Role',
-  Module: 'Permission Check',
-  Auth: 'Authentication',
-  Network: 'Network Restriction',
-  Report: 'Report',
-  Backup: 'Backup',
-  AuditTrail: 'Audit Trail',
-};
-
-const entityLabel = (v: string): string => ENTITY_LABELS[v] ?? v.replace(/([a-z])([A-Z])/g, '$1 $2');
-
 /** Filter options, ordered by label so the list is scannable. */
-const ENTITY_TYPE_OPTIONS = Object.keys(ENTITY_LABELS)
-  .map((value) => ({ value, label: ENTITY_LABELS[value] }))
+const ENTITY_TYPE_OPTIONS = Object.keys(AUDIT_ENTITY_LABELS)
+  .map((value) => ({ value, label: AUDIT_ENTITY_LABELS[value] }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
 function fieldLabel(k: string): string {
@@ -262,9 +231,9 @@ export default function AuditTrailPage() {
   // Options for the User filter dropdown (searchable), mirroring the Reports page.
   const userOpts = useMemo(
     () =>
-      ((usersForNames.data?.data ?? []) as { id: string; fullName: string; employeeId?: string }[]).map((u) => ({
+      ((usersForNames.data?.data ?? []) as { id: string; windowsUsername: string }[]).map((u) => ({
         value: u.id,
-        label: u.employeeId ? `${u.fullName} (${u.employeeId})` : u.fullName,
+        label: u.windowsUsername,
       })),
     [usersForNames.data],
   );
@@ -371,11 +340,11 @@ export default function AuditTrailPage() {
   }
 
   const columns: Column<AuditEntry>[] = [
-    { key: 'timestamp', header: 'Timestamp', render: (r) => formatDateTime(r.timestamp) },
-    { key: 'userFullName', header: 'User' },
+    { key: 'timestamp', header: 'Timestamp', render: (r) => formatDateTimeSeconds(r.timestamp) },
+    { key: 'userUsername', header: 'Username', render: (r) => r.userUsername || r.userFullName },
     { key: 'action', header: 'Action', render: (r) => <Badge tone={r.action}>{r.action}</Badge> },
     // The stored value stays as-is; only what the user reads is mapped (see ENTITY_LABELS).
-    { key: 'entityType', header: 'Entity', render: (r) => entityLabel(r.entityType) },
+    { key: 'entityType', header: 'Entity', render: (r) => auditEntityLabel(r.entityType) },
     {
       key: 'record',
       header: 'Record',
@@ -399,7 +368,7 @@ export default function AuditTrailPage() {
       header: 'Change Details',
       render: (r) => <span className="block max-w-md whitespace-pre-wrap break-words text-xs text-slate-600">{changeSummary(r, resolvers)}</span>,
     },
-    { key: 'reasonForChange', header: 'Reason', render: (r) => r.reasonForChange ?? '—' },
+    { key: 'reasonForChange', header: 'Remark', render: (r) => r.reasonForChange ?? '—' },
   ];
 
   return (
@@ -458,7 +427,7 @@ export default function AuditTrailPage() {
                 <Input
                   value={draft.search}
                   onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
-                  placeholder="User, action, record type, reason, IP…"
+                  placeholder="Username, action, entity, record, details, remark, IP…"
                 />
               </Field>
             </div>

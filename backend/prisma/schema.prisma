@@ -920,6 +920,7 @@ model AuditTrail {
   id              String   @id @default(uuid()) @map("_id")
   userId          String
   userFullName    String // Denormalized snapshot at time of action
+  userUsername    String? // Username snapshot for new events; legacy rows retain their full-name display
   action          String // CREATE | UPDATE | DELETE | LOGIN | ...
   entityType      String
   entityId        String?

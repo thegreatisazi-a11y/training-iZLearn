@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 export interface AuditActor {
   userId: string;
   userFullName: string;
+  userUsername?: string;
   sessionId?: string;
 }
 
@@ -27,8 +28,8 @@ export interface AuditStore {
   actionOverride?: string;
 }
 
-export const SYSTEM_ACTOR: AuditActor = { userId: 'SYSTEM', userFullName: 'System' };
-export const ANON_ACTOR: AuditActor = { userId: 'ANONYMOUS', userFullName: 'Anonymous' };
+export const SYSTEM_ACTOR: AuditActor = { userId: 'SYSTEM', userFullName: 'System', userUsername: 'SYSTEM' };
+export const ANON_ACTOR: AuditActor = { userId: 'ANONYMOUS', userFullName: 'Anonymous', userUsername: 'ANONYMOUS' };
 
 const als = new AsyncLocalStorage<AuditStore>();
 
