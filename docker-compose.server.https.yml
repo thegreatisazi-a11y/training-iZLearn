@@ -1,0 +1,9 @@
+# Add this file after docker-compose.server.yml once the certificate files exist.
+# The original HTTP-only stack can still be started with its existing command.
+services:
+  frontend:
+    ports:
+      - '443:443'
+    volumes:
+      - ./frontend/nginx.https.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/ssl/izlearn:/etc/ssl/izlearn:ro
