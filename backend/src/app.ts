@@ -12,6 +12,7 @@ import { errorHandler, notFoundHandler } from './middlewares/errorHandler.middle
 import { setupSwagger } from './config/swagger';
 import { getList } from './services/systemConfig.service';
 import apiRouter from './routes';
+import { restoreMaintenanceGuard } from './services/restoreMaintenance.service';
 
 /**
  * Build the Express application. Security hardening (Module 15): Helmet with a
@@ -79,6 +80,7 @@ export async function createApp(): Promise<Express> {
     }),
   );
 
+  app.use(restoreMaintenanceGuard);
   app.use(express.json({ limit: '5mb' }));
   app.use(express.urlencoded({ extended: true }));
   app.use(cookieParser());

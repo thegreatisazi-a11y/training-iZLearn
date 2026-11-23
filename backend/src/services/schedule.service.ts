@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { validateUpload, scanFileForVirus } from '../utils/fileUtils';
-import { getNumber } from './systemConfig.service';
+import { getUploadLimitBytes } from './uploadPolicy.service';
 import * as storage from './storage.service';
 import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { recordEvent } from './auditTrail.service';
@@ -416,7 +416,7 @@ export async function attachOfflineAttendanceSheet(id: string, file: Express.Mul
   const record = await prisma.offlineTrainingRecord.findFirst({ where: { id, isDeleted: false } });
   if (!record) throw AppError.notFound('Offline training record not found');
 
-  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
+  const maxBytes = await getUploadLimitBytes();
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 

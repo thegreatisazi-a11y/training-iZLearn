@@ -7,22 +7,45 @@ import { runBackupJob } from './processors/backup.processor';
 import { auditContext } from '../utils/auditContext';
 import { getConfig, getBool } from '../services/systemConfig.service';
 import { logger } from '../config/logger';
+import { restoreMaintenanceActive } from '../services/restoreMaintenance.service';
+import { resumeRestoreJobs } from '../services/restoreJobs.service';
 
 /**
  * Register Bull processors and schedule the repeatable (cron) jobs. Job bodies
  * run inside a SYSTEM audit context so any writes they make are attributable.
  */
 export async function startJobs(): Promise<void> {
-  emailQueue.process('send', 5, async (job) => auditContext.runAsSystem(() => sendQueuedEmail(job.data as EmailJobData)));
-  refresherQueue.process(async () => auditContext.runAsSystem(() => runRefresherCheck()));
-  dueReminderQueue.process(async () => auditContext.runAsSystem(() => runDueReminderCheck()));
-  adSyncQueue.process(async () => auditContext.runAsSystem(() => runAdSync()));
-  backupQueue.process(async (job) => auditContext.runAsSystem(() => runBackupJob(job.data as { triggeredBy?: string })));
+  const maintenance = restoreMaintenanceActive();
+  if (maintenance) await Promise.all(allQueues.map((queue) => queue.pause(false)));
+  const runJob = <T>(work: () => Promise<T>) => {
+    if (restoreMaintenanceActive()) throw new Error('Background work is paused for recovery maintenance.');
+    return auditContext.runAsSystem(work);
+  };
+  emailQueue.process('send', 5, async (job) => runJob(() => sendQueuedEmail(job.data as EmailJobData)));
+  refresherQueue.process(async () => runJob(() => runRefresherCheck()));
+  dueReminderQueue.process(async () => runJob(() => runDueReminderCheck()));
+  adSyncQueue.process(async () => runJob(() => runAdSync()));
+  backupQueue.process(async (job) => runJob(() => runBackupJob(job.data as { triggeredBy?: string })));
 
   allQueues.forEach((q) =>
     q.on('failed', (job, err) => logger.error(`Job ${q.name}#${job?.id} failed`, { err: err.message })),
   );
 
+  // A persistent marker survives a crash. Leave workers paused until operator recovery.
+  if (maintenance) {
+    logger.warn('Recovery maintenance is active; background jobs remain paused.');
+    return;
+  }
+
+  try {
+    await scheduleRepeatableJobs();
+    await resumeRestoreJobs();
+  } catch (error) {
+    logger.error('Background scheduling unavailable', { err: (error as Error).message });
+  }
+}
+
+export async function scheduleRepeatableJobs() {
   try {
     const ldapCron = (await getConfig('ldap.sync_cron')) || '0 2 * * *';
     await adSyncQueue.add({}, { repeat: { cron: ldapCron }, removeOnComplete: true, removeOnFail: 50 });
@@ -36,6 +59,7 @@ export async function startJobs(): Promise<void> {
     logger.info('Background jobs registered.');
   } catch (err) {
     logger.error('Failed to schedule repeatable jobs', { err: (err as Error).message });
+    throw err;
   }
 }
 

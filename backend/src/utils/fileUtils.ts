@@ -80,7 +80,7 @@ export function validateUpload(file: UploadCandidate, maxSizeBytes: number): { e
   }
   // maxSizeBytes <= 0 means "no limit" (System Config `upload.max_size_mb` set to 0/blank).
   if (maxSizeBytes > 0 && file.size > maxSizeBytes) {
-    throw AppError.badRequest(`File exceeds the maximum size of ${Math.round(maxSizeBytes / (1024 * 1024))} MB.`);
+    throw AppError.badRequest(`File exceeds the maximum size of ${maxSizeBytes / (1024 * 1024)} MB.`);
   }
   return { ext };
 }

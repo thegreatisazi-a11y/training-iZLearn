@@ -54,6 +54,8 @@ async function main() {
 
   const app = await createApp();
   const server = http.createServer(app);
+  // Allow large recovery bundles to upload over slow intranet connections.
+  server.requestTimeout = 60 * 60 * 1000;
 
   server.listen(env.port, () => {
     logger.info(`izLearn API listening on http://localhost:${env.port}`);

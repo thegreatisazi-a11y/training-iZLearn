@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import { nonEmptyString, reasonForChange } from './common';
 
+/** Per-file policy in MiB; zero deliberately means unlimited. */
+export function parseUploadLimitBytes(value: string): number {
+  const mb = Number(value.trim());
+  const bytes = Math.floor(mb * 1024 * 1024);
+  if (!value.trim() || !Number.isFinite(mb) || mb < 0 || !Number.isSafeInteger(bytes) || (mb > 0 && bytes < 1)) {
+    throw new Error('Upload size must be a non-negative number in MB. Use 0 for no limit.');
+  }
+  return bytes;
+}
+
 export const updateConfigSchema = z.object({
   value: z.string(),
   reasonForChange,
@@ -8,7 +18,11 @@ export const updateConfigSchema = z.object({
 export type UpdateConfigInput = z.infer<typeof updateConfigSchema>;
 
 export const bulkUpdateConfigSchema = z.object({
-  items: z.array(z.object({ key: nonEmptyString, value: z.string() })).min(1),
+  items: z.array(z.object({ key: nonEmptyString, value: z.string() }).superRefine((item, ctx) => {
+    if (item.key !== 'upload.max_size_mb') return;
+    try { parseUploadLimitBytes(item.value); }
+    catch (error) { ctx.addIssue({ code: 'custom', path: ['value'], message: (error as Error).message }); }
+  })).min(1),
   reasonForChange,
 });
 export type BulkUpdateConfigInput = z.infer<typeof bulkUpdateConfigSchema>;
@@ -41,7 +55,7 @@ export const DEFAULT_SYSTEM_CONFIG: Record<string, { value: string; description:
   'backup.auto_enabled': { value: 'true', description: 'Enable scheduled database backups' },
   'backup.cron_expression': { value: '0 1 * * *', description: 'Cron for automatic backups' },
   'backup.destination_path': { value: '/app/backups', description: 'Legacy setting; complete backup destination is configured by BACKUP_DESTINATION' },
-  'upload.max_size_mb': { value: '0', description: 'Maximum upload size in MB. 0 = no limit.' },
+  'upload.max_size_mb': { value: '0', description: 'Maximum size per uploaded file in MB, including documents, materials, Excel imports and backup bundles. 0 = no limit.' },
   'security.allowed_origins': { value: 'http://localhost:5173', description: 'Comma-separated CORS whitelist' },
   'security.allowed_ip_ranges': { value: '', description: 'UR-80: comma-separated client IP prefixes allowed to access the app (empty = no restriction)' },
   'assessment.default_question_count': { value: '10', description: 'Default number of questions per assessment' },

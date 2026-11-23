@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { asyncHandler, sendSuccess, AppError } from '../utils/response';
-import { listBackups, verifyBackup, restoreBackup, openBackupArchive } from '../services/backup.service';
+import { listBackups, verifyBackup, restoreBackup, openBackupArchive, importBackup, inspectBackup } from '../services/backup.service';
 import { signFromRequest } from '../services/eSignature.service';
 import { recordEvent } from '../services/auditTrail.service';
 import { storageDriver } from '../services/storage.service';
@@ -28,7 +28,7 @@ export const backups = asyncHandler(async (_req, res) => {
     }))),
     fileStorage: storageDriver(),
     backupStorage: process.env.BACKUP_STORAGE_DRIVER || (env.r2.enabled ? 'r2' : 'local'),
-    restoreEnabled: process.env.BACKUP_RESTORE_ENABLED === 'true',
+    restoreEnabled: true,
   });
 });
 
@@ -50,13 +50,24 @@ export const download = asyncHandler(async (req: Request, res: Response) => {
   archive.stream.pipe(res);
 });
 
-/** Restore all website data — backup:approve permission, e-signed, maintenance-only. */
+export const upload = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.file) throw AppError.badRequest('Select a backup bundle to upload.');
+  sendSuccess(res, await importBackup(req.file.path, req.user!.id), 'Backup uploaded and verified. No live data was changed.');
+});
+
+export const inspect = asyncHandler(async (req: Request, res: Response) => {
+  const file = typeof req.body?.file === 'string' ? req.body.file : '';
+  if (!file) throw AppError.badRequest('Select a backup.');
+  sendSuccess(res, await inspectBackup(file));
+});
+
+/** Restore all website data — permission, typed confirmation and electronic signature. */
 export const restore = asyncHandler(async (req: Request, res: Response) => {
   const file = (req.body?.file ?? '').toString();
   if (!file) throw AppError.badRequest('A backup file name is required.');
-  if (process.env.BACKUP_RESTORE_ENABLED !== 'true') throw AppError.forbidden('Restore is disabled outside a maintenance window.');
+  if (req.body?.confirmation !== 'RESTORE') throw AppError.badRequest('Type RESTORE to confirm replacement of live data.');
   const signatureId = await signFromRequest(req, 'Backup', file, 'Performed');
   const signature = await prisma.electronicSignature.findUniqueOrThrow({ where: { id: signatureId } });
-  const result = await restoreBackup(file, req.user!.id, signature);
-  sendSuccess(res, result, 'Database restored from backup');
+  const result = await restoreBackup(file, req.user!.id, signature, req);
+  sendSuccess(res, result, 'Database and uploaded files restored from backup');
 });

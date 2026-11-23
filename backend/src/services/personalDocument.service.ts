@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
 import { validateUpload, scanFileForVirus } from '../utils/fileUtils';
-import { getNumber } from './systemConfig.service';
+import { getUploadLimitBytes } from './uploadPolicy.service';
 import * as storage from './storage.service';
 import { recordEvent } from './auditTrail.service';
 
@@ -23,7 +23,7 @@ export async function uploadPersonalDoc(
   file: Express.Multer.File,
   createdBy: string,
 ) {
-  const maxBytes = (await getNumber('upload.max_size_mb', 0)) * 1024 * 1024;
+  const maxBytes = await getUploadLimitBytes();
   validateUpload({ originalname: file.originalname, mimetype: file.mimetype, size: file.size }, maxBytes);
   await scanFileForVirus(file.path);
 

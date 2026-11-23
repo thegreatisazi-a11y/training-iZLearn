@@ -397,7 +397,13 @@ export const svc = {
     triggerBackup: (signature: unknown) => data(api.post('/admin/backup/trigger', { signature })),
     backups: () => data(api.get('/admin/backups')),
     verifyBackup: (file: string) => data(api.post('/admin/backup/verify', { file })),
-    restoreBackup: (file: string, signature: unknown) => data(api.post('/admin/backup/restore', { file, signature })),
+    restoreBackup: (file: string, signature: unknown, confirmation: string) => data(api.post('/admin/backup/restore', { file, signature, confirmation })),
+    inspectBackup: (file: string) => data(api.post('/admin/backup/inspect', { file })),
+    uploadBackup: (file: File, onProgress?: (pct: number) => void) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post('/admin/backup/upload', form, upCfg(onProgress)).then((r) => r.data.data);
+    },
     downloadBackup: (file: string) => downloadAuthed(`/admin/backup/download/${encodeURIComponent(file)}`, file),
   },
 

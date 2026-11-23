@@ -14,8 +14,18 @@ import { storageDriver } from './storage.service';
 import { logger } from '../config/logger';
 import { prisma } from '../config/prisma';
 import type { ElectronicSignature } from '@prisma/client';
+import type { Request } from 'express';
+import { AppError } from '../utils/response';
+import { extractBackupTar, verifyDatabaseGzip } from '../utils/backupArchive';
+import { acquireRestoreMaintenance, drainWebsiteRequests, restoreMaintenanceActive } from './restoreMaintenance.service';
+import { pauseRestoreJobs, resumeRestoreJobs, clearPreRestoreJobs, restoreJobCommand } from './restoreJobs.service';
+import { invalidateConfigCache } from './systemConfig.service';
 
 const run = promisify(execFile);
+async function runMongo(binary: string, args: string[]) {
+  try { return await run(binary, args); }
+  catch { throw new Error('MongoDB backup/recovery tool failed. Check tool availability, database access and the server logs.'); }
+}
 const PREFIX = 'backups/';
 const NAME = /^izlearn-full-\d{8}T\d{6}-[a-f0-9]{8}\.tar\.gz$/;
 const PARTS = ['manifest.json', 'database.archive.gz', 'files.tar.gz'];
@@ -141,18 +151,65 @@ export async function openBackupArchive(name: string): Promise<{ stream: Readabl
   return { stream: result.Body as Readable, size: result.ContentLength ?? 0 };
 }
 async function unpack(file: string, dir: string): Promise<Manifest> {
-  const stdout = await new Promise<string>((resolve, reject) =>
-    execFile('tar', ['-tzf', file], { maxBuffer: 64 * 1024 * 1024 }, (error, output) => error ? reject(error) : resolve(output)));
-  const entries = stdout.trim().split(/\r?\n/);
-  if (entries.length !== PARTS.length || entries.some((entry) => !PARTS.includes(entry))) {
-    throw new Error('Backup has unexpected archive paths.');
-  }
-  await run('tar', ['-xzf', file, '-C', dir]);
+  await extractBackupTar(file, dir, PARTS);
   const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')) as Manifest;
   if (manifest.format !== 1 || manifest.scope !== 'database-and-uploads') throw new Error('Unsupported backup format.');
+  if (!['local', 'r2', 'mongo'].includes(manifest.storageDriver) || !Number.isSafeInteger(manifest.filesCount) || manifest.filesCount < 0 ||
+      typeof manifest.createdAt !== 'string' || !Number.isFinite(Date.parse(manifest.createdAt)) || typeof manifest.appVersion !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(manifest.databaseSha256) || !/^[a-f0-9]{64}$/.test(manifest.filesSha256)) throw new Error('Invalid backup manifest.');
   if (await sha256(path.join(dir, 'database.archive.gz')) !== manifest.databaseSha256 ||
       await sha256(path.join(dir, 'files.tar.gz')) !== manifest.filesSha256) throw new Error('Backup checksum mismatch.');
   return manifest;
+}
+
+async function validateContents(dir: string, manifest: Manifest): Promise<string> {
+  const files = path.join(dir, 'restored-files');
+  ensureDir(files);
+  const count = await extractBackupTar(path.join(dir, PARTS[2]), files);
+  if (count !== manifest.filesCount) throw new Error('Backup file count does not match its manifest.');
+  const sourceDatabase = await verifyDatabaseGzip(path.join(dir, PARTS[1]));
+  if (sourceDatabase !== databaseName()) throw new Error('Backup database name differs from the configured application database.');
+  return files;
+}
+
+function databaseName() {
+  const name = decodeURIComponent(env.databaseUrl.replace(/^mongodb(?:\+srv)?:\/\/[^/]+\//, '').split('?')[0]);
+  if (!name || /[\/\\.\s$*]/.test(name) || name.includes(':')) throw new Error('Configure an explicit valid application database name.');
+  return name;
+}
+
+function newBackupName() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '');
+  return `izlearn-full-${stamp}-${crypto.randomBytes(4).toString('hex')}.tar.gz`;
+}
+
+/** Imported bundles get a new server-generated name; never overwrite an existing snapshot. */
+export async function importBackup(uploadPath: string, triggeredBy: string) {
+  if (busy || restoreMaintenanceActive()) throw AppError.conflict('A backup or restore is already running.');
+  busy = true;
+  try {
+    return await withWork(async (dir) => {
+      let manifest: Manifest;
+      try { manifest = await unpack(uploadPath, dir); await validateContents(dir, manifest); }
+      catch { throw AppError.badRequest('Invalid backup bundle: check its format, paths, file count, checksums and application database name.'); }
+      const file = newBackupName();
+      await putArchive(uploadPath, file);
+      await recordEvent({ action: 'BACKUP_UPLOADED', entityType: 'Backup', entityId: file,
+        newValue: { triggeredBy, createdAt: manifest.createdAt, appVersion: manifest.appVersion, filesCount: manifest.filesCount } });
+      return { file, manifest, valid: true };
+    });
+  } finally { busy = false; }
+}
+
+export async function inspectBackup(fileName: string) {
+  return withWork(async (dir) => {
+    const archive = path.join(dir, 'bundle.tar.gz');
+    await getArchive(fileName, archive);
+    const manifest = await unpack(archive, dir);
+    await validateContents(dir, manifest);
+    return { file: fileName, valid: true, manifest,
+      compatible: (manifest.storageDriver === 'mongo') === (storageDriver() === 'mongo') };
+  });
 }
 
 async function createBackup(triggeredBy: string) {
@@ -163,7 +220,7 @@ async function createBackup(triggeredBy: string) {
       const uploads = path.join(dir, 'uploads');
       const files = path.join(dir, PARTS[2]);
       const archive = path.join(dir, name);
-      await run(env.mongo.dumpBin, [`--uri=${env.databaseUrl}`, `--archive=${database}`, '--gzip']);
+      await runMongo(env.mongo.dumpBin, [`--uri=${env.databaseUrl}`, `--archive=${database}`, '--gzip']);
       const filesCount = await copyUploads(uploads);
       await run('tar', ['-czf', files, '-C', uploads, '.']);
       const manifest: Manifest = { format: 1, createdAt: new Date().toISOString(),
@@ -182,7 +239,7 @@ async function createBackup(triggeredBy: string) {
 }
 
 export async function runBackup(triggeredBy: string) {
-  if (busy) throw new Error('A backup or restore is already running.');
+  if (busy || restoreMaintenanceActive()) throw new Error('A backup or restore is already running.');
   busy = true;
   try { return await createBackup(triggeredBy); }
   finally { busy = false; }
@@ -209,42 +266,56 @@ export async function listBackups() {
 }
 
 export async function verifyBackup(fileName: string) {
-  return withWork(async (dir) => {
-    const archive = path.join(dir, 'bundle.tar.gz');
-    await getArchive(fileName, archive);
-    const manifest = await unpack(archive, dir);
+    const result = await inspectBackup(fileName);
     await recordEvent({ action: 'BACKUP_VERIFIED', entityType: 'Backup', entityId: fileName,
-      newValue: { valid: true, filesCount: manifest.filesCount } });
-    return { file: fileName, valid: true, manifest };
-  });
+      newValue: { valid: true, filesCount: result.manifest.filesCount } });
+    return result;
 }
 
-/** Destructive restore: permitted only during an operator-controlled maintenance window. */
-export async function restoreBackup(fileName: string, triggeredBy: string, signature: ElectronicSignature) {
-  if (process.env.BACKUP_RESTORE_ENABLED !== 'true') throw new Error('Enable BACKUP_RESTORE_ENABLED only during a maintenance window.');
-  if (busy) throw new Error('A backup or restore is already running.');
+/** Destructive restore: permission + e-signature at the route; automatic maintenance here. */
+export async function restoreBackup(fileName: string, triggeredBy: string, signature: ElectronicSignature | null, request?: Request) {
+  if (!signature && process.env.BACKUP_OFFLINE_RECOVERY !== 'true') throw AppError.forbidden('An electronic signature is required.');
+  if (busy || restoreMaintenanceActive()) throw AppError.conflict('A backup or restore is already running.');
   busy = true;
+  let maintenance: ReturnType<typeof acquireRestoreMaintenance> | undefined;
+  let destructiveStarted = false;
+  let safetyFile: string | undefined;
   try {
     return await withWork(async (dir) => {
       const archive = path.join(dir, 'bundle.tar.gz');
       await getArchive(fileName, archive);
       const manifest = await unpack(archive, dir);
-      const files = path.join(dir, 'restored-files');
-      ensureDir(files);
-      const fileArchive = path.join(dir, PARTS[2]);
-      const stdout = await new Promise<string>((resolve, reject) =>
-        execFile('tar', ['-tzf', fileArchive], { maxBuffer: 64 * 1024 * 1024 }, (error, output) => error ? reject(error) : resolve(output)));
-      for (const entry of stdout.split(/\r?\n/).filter(Boolean)) {
-        const relative = entry.replace(/^\.\//, '').replace(/\/$/, '');
-        if (relative && !safeKey(relative)) throw new Error('File archive contains an unsafe path.');
-      }
-      await run('tar', ['-xzf', fileArchive, '-C', files]);
+      const files = await validateContents(dir, manifest);
       if ((manifest.storageDriver === 'mongo') !== (storageDriver() === 'mongo')) {
         throw new Error('File storage mode differs from the backup. Configure the matching storage mode before restore.');
       }
+      if (storageDriver() === 'local') {
+        const root = path.resolve(env.storage.root);
+        if (root === path.parse(root).root || root === path.resolve('.')) throw new Error('Unsafe storage root.');
+        const protectedPaths = [path.resolve(env.storage.tmp), path.resolve(localDirectory())];
+        const check = (folder: string, relative = '') => {
+          for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+            const rel = path.join(relative, entry.name);
+            const target = path.join(root, rel);
+            if (protectedPaths.some((p) => target === p || target.startsWith(`${p}${path.sep}`))) throw new Error('Backup includes reserved storage paths.');
+            if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new Error('Live storage contains a symbolic link.');
+            if (entry.isDirectory()) check(path.join(folder, entry.name), rel);
+          }
+        };
+        check(files);
+      }
+      maintenance = acquireRestoreMaintenance(fileName);
+      await drainWebsiteRequests(request);
+      await pauseRestoreJobs();
       const safety = await createBackup(`PRE_RESTORE:${triggeredBy}`);
+      safetyFile = safety.file;
+      maintenance.update('restoring', safetyFile);
       logger.warn(`Pre-restore safety backup created: ${safety.file}`);
-      await run(env.mongo.restoreBin, [`--uri=${env.databaseUrl}`, `--archive=${path.join(dir, PARTS[1])}`, '--gzip', '--drop']);
+      destructiveStarted = true;
+      // --drop alone only replaces collections present in the archive. Remove the
+      // dedicated application database so newer, absent collections cannot survive.
+      await prisma.$runCommandRaw({ dropDatabase: 1 });
+      await runMongo(env.mongo.restoreBin, [`--uri=${env.databaseUrl}`, `--archive=${path.join(dir, PARTS[1])}`, '--gzip', '--drop', `--nsInclude=${databaseName()}.*`, '--stopOnError']);
       if (storageDriver() === 'local') {
         const root = path.resolve(env.storage.root);
         if (root === path.parse(root).root || root === path.resolve('.')) throw new Error('Unsafe storage root.');
@@ -299,11 +370,31 @@ export async function restoreBackup(fileName: string, triggeredBy: string, signa
       await prisma.userSession.updateMany({ data: { isActive: false } });
       // The pre-restore e-signature is lost when MongoDB is replaced; preserve that
       // verified record in the restored database before logging completion.
-      await prisma.electronicSignature.create({ data: signature });
+      if (signature) await prisma.electronicSignature.create({ data: signature });
       await recordEvent({ action: 'BACKUP_RESTORED', entityType: 'Backup', entityId: fileName,
-        newValue: { triggeredBy, filesCount: manifest.filesCount, safetyBackup: safety.file, signatureId: signature.id } });
+        newValue: { triggeredBy, filesCount: manifest.filesCount, safetyBackup: safety.file, signatureId: signature?.id,
+          recoveryMode: signature ? 'website' : 'offline-operator' } });
       logger.warn(`Full backup restored: ${fileName} (by ${triggeredBy})`);
+      invalidateConfigCache();
+      await clearPreRestoreJobs();
+      const { scheduleRepeatableJobs } = await import('../jobs');
+      await restoreJobCommand(scheduleRepeatableJobs(), 60000);
+      await resumeRestoreJobs();
+      maintenance.release();
+      maintenance = undefined;
       return { file: fileName, restoredAt: new Date().toISOString(), filesCount: manifest.filesCount };
     });
+  } catch (error) {
+    if (maintenance) {
+      if (destructiveStarted) {
+        maintenance.update('failed', safetyFile);
+        await pauseRestoreJobs().catch(() => undefined);
+        logger.error('Restore failed after replacement began; maintenance and paused jobs remain active.');
+        throw new AppError(503, 'RESTORE_RECOVERY_REQUIRED', 'Restore did not finish. The website remains in maintenance mode; an operator must recover it using the safety backup.');
+      }
+      await resumeRestoreJobs().catch(() => logger.warn('Background jobs could not resume; restart the backend after Redis recovers.'));
+      maintenance.release();
+    }
+    throw error;
   } finally { busy = false; }
 }

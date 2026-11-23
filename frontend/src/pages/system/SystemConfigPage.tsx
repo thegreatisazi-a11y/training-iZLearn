@@ -272,7 +272,9 @@ function SettingField({ item, value, disabled, onChange }: { item: ConfigItem; v
       </div>
       {!isBool && (
         <Input
-          type={isNum ? 'number' : 'text'}
+          type={isNum || item.key === 'upload.max_size_mb' ? 'number' : 'text'}
+          min={item.key === 'upload.max_size_mb' ? 0 : undefined}
+          step={item.key === 'upload.max_size_mb' ? 'any' : undefined}
           className="mt-2"
           value={v}
           disabled={disabled}

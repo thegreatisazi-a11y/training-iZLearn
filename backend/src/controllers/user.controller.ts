@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { readUploadBuffer } from '../middlewares/upload.middleware';
 import { parseTableFormat, sendTableExport } from '../utils/exportTable';
 import { getOrgInfo } from '../services/systemConfig.service';
 import { asyncHandler, sendSuccess, sendCreated, sendPaginated, AppError } from '../utils/response';
@@ -177,7 +178,7 @@ export const setReleaseStage = asyncHandler(async (req: Request, res: Response) 
 
 export const bulkPreview = asyncHandler(async (req: Request, res: Response) => {
   if (!req.file) throw AppError.badRequest('An Excel file is required.');
-  sendSuccess(res, await svc.bulkPreview(req.file.buffer));
+  sendSuccess(res, await svc.bulkPreview(await readUploadBuffer(req.file)));
 });
 
 export const bulkCommit = asyncHandler(async (req: Request, res: Response) => {

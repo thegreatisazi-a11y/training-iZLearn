@@ -254,7 +254,7 @@ docker compose -f docker-compose.server.yml up -d --build   # rebuild the change
 
 ## Part 10 — Complete backups
 The backend schedules complete database-plus-files bundles. Admins can trigger,
-verify, download, and (during a controlled maintenance window) restore them from
+verify, download, upload, and restore them with automatic maintenance protection from
 **Backup & Restore**. Configure `BACKUP_STORAGE_DRIVER` in `.env` to use local
 storage or a private R2 bucket. If backups are local, copy them **off the physical
 server**. Protect a separate copy of `.env` and deployment configuration; those

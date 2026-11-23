@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { readUploadBuffer } from '../middlewares/upload.middleware';
 import { asyncHandler, sendSuccess, AppError } from '../utils/response';
 import * as svc from '../services/attendance.service';
 
@@ -12,12 +13,14 @@ export const mark = asyncHandler(async (req, res) =>
 
 export const uploadPreview = asyncHandler(async (req, res) => {
   if (!req.file) throw AppError.badRequest('An Excel file is required.');
-  sendSuccess(res, await svc.previewAttendanceExcel(req.file.buffer));
+  const preview = await svc.previewAttendanceExcel(await readUploadBuffer(req.file));
+  sendSuccess(res, preview);
 });
 
 export const uploadCommit = asyncHandler(async (req, res) => {
   if (!req.file) throw AppError.badRequest('An Excel file is required.');
   const scheduleId = req.body.scheduleId as string;
   if (!scheduleId) throw AppError.badRequest('scheduleId is required.');
-  sendSuccess(res, await svc.commitAttendanceExcel(scheduleId, req.file.buffer, req.user!.id), 'Attendance uploaded');
+  const buffer = await readUploadBuffer(req.file);
+  sendSuccess(res, await svc.commitAttendanceExcel(scheduleId, buffer, req.user!.id), 'Attendance uploaded');
 });

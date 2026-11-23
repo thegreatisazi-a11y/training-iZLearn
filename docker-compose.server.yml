@@ -87,7 +87,6 @@ services:
       BACKUP_DESTINATION: /app/backups
       BACKUP_STORAGE_DRIVER: ${BACKUP_STORAGE_DRIVER:-local}
       BACKUP_R2_BUCKET: ${BACKUP_R2_BUCKET:-}
-      BACKUP_RESTORE_ENABLED: ${BACKUP_RESTORE_ENABLED:-false}
       APP_VERSION: ${APP_VERSION:-unknown}
       # Optional R2 credentials for off-site backups while live files remain local.
       R2_BUCKET: ${R2_BUCKET:-}

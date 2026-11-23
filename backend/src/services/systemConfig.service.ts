@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { APP_TIMEZONE } from '../utils/dateUtils';
-import { DEFAULT_SYSTEM_CONFIG } from '@izlearn/shared';
+import { DEFAULT_SYSTEM_CONFIG, parseUploadLimitBytes } from '@izlearn/shared';
+import { AppError } from '../utils/response';
 
 /** In-memory cache of config values (invalidated on every write). */
 let cache: Map<string, string> | null = null;
@@ -42,7 +43,9 @@ export async function getList(key: string): Promise<string[]> {
 }
 
 export async function listConfig() {
-  return prisma.systemConfig.findMany({ orderBy: { key: 'asc' } });
+  const rows = await prisma.systemConfig.findMany({ orderBy: { key: 'asc' } });
+  return rows.map((row) => row.key === 'upload.max_size_mb'
+    ? { ...row, description: DEFAULT_SYSTEM_CONFIG[row.key].description } : row);
 }
 
 /**
@@ -51,6 +54,12 @@ export async function listConfig() {
  * the reasonForChange in the audit context).
  */
 export async function updateConfig(items: Array<{ key: string; value: string }>, updatedBy: string) {
+  for (const item of items) {
+    if (item.key === 'upload.max_size_mb') {
+      try { parseUploadLimitBytes(item.value); }
+      catch (error) { throw AppError.badRequest((error as Error).message); }
+    }
+  }
   for (const { key, value } of items) {
     await prisma.systemConfig.upsert({
       where: { key },

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Database, Download, RotateCcw, ShieldCheck } from 'lucide-react';
+import { Database, Download, RotateCcw, ShieldCheck, Upload } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { ESignatureModal, type ESignaturePayload } from '@/components/common/ESignatureModal';
 import { Card, CardContent } from '@/components/ui/card';
@@ -13,6 +13,7 @@ import { toast } from '@/store/uiStore';
 import { apiError } from '@/lib/axios';
 import { formatDateTime } from '@/lib/format';
 import { svc } from '@/services';
+import { tokenStore } from '@/lib/axios';
 
 interface BackupItem {
   file: string;
@@ -25,7 +26,10 @@ interface BackupInfo {
   jobs: Array<{ id: string | number; status: string; failedReason: string | null; timestamp: number; finishedOn: number | null }>;
   fileStorage: 'local' | 'r2' | 'mongo';
   backupStorage: 'local' | 'r2';
-  restoreEnabled: boolean;
+}
+interface BackupInspection {
+  compatible: boolean;
+  manifest: { createdAt: string; appVersion: string; storageDriver: string; filesCount: number };
 }
 
 function size(bytes: number) {
@@ -43,6 +47,9 @@ export default function BackupsPage() {
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [downloading, setDownloading] = useState<string | null>(null);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [inspection, setInspection] = useState<BackupInspection | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['backups'], queryFn: () => svc.admin.backups() as Promise<BackupInfo>, refetchInterval: 30000,
@@ -53,13 +60,37 @@ export default function BackupsPage() {
   });
   const verify = useMutation({
     mutationFn: (file: string) => svc.admin.verifyBackup(file),
-    onSuccess: () => toast.success('Database and files passed checksum verification.'),
+    onSuccess: () => toast.success('Backup format, database, uploaded files and checksums verified.'),
     onError: (e) => toast.error(apiError(e)),
   });
   const restore = useMutation({
-    mutationFn: ({ file, signature }: { file: string; signature: ESignaturePayload }) => svc.admin.restoreBackup(file, signature),
-    onSuccess: () => { toast.success('Database and uploaded files restored. Reloading…'); window.setTimeout(() => window.location.reload(), 1500); },
+    mutationFn: ({ file, signature }: { file: string; signature: ESignaturePayload }) => svc.admin.restoreBackup(file, signature, confirmation),
+    onSuccess: () => {
+      toast.success('Website data restored. Sign in with an account from the restored backup.');
+      tokenStore.clear();
+      useAuthStore.getState().setUser(null);
+      window.location.assign('/login');
+    },
+    onError: (e) => toast.error(apiError(e)),
   });
+  const upload = useMutation({
+    mutationFn: (file: File) => svc.admin.uploadBackup(file, setUploadProgress),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['backups'] }); toast.success('Backup uploaded and verified. It is ready to select; no live data was changed.'); },
+    onError: (e) => toast.error(apiError(e)),
+  });
+  const inspect = useMutation({
+    mutationFn: (file: string) => svc.admin.inspectBackup(file) as Promise<BackupInspection>,
+    onSuccess: (result) => { setInspection(result); setConfirmation(''); setRestoreConfirmOpen(true); },
+    onError: (e) => { setRestoreFile(null); toast.error(apiError(e)); },
+  });
+  const working = upload.isPending || inspect.isPending || restore.isPending || trigger.isPending || verify.isPending;
+
+  function selectUpload(file?: File) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.tar.gz')) return toast.error('Select an izLearn .tar.gz backup bundle.');
+    setUploadProgress(0);
+    upload.mutate(file);
+  }
 
   async function signed(signature: ESignaturePayload) {
     if (signAction === 'backup') await trigger.mutateAsync(signature);
@@ -78,13 +109,24 @@ export default function BackupsPage() {
   return (
     <div>
       <PageHeader title="Backup & Restore" description="Manage complete recovery bundles for the database and uploaded files."
-        actions={canCreate && <Button onClick={() => setSignAction('backup')}>Create backup</Button>} />
+        actions={<div className="flex gap-2">
+          {canRestore && <>
+            <input ref={uploadInput} type="file" accept=".tar.gz" className="hidden" onChange={(e) => {
+              selectUpload(e.target.files?.[0]); e.target.value = '';
+            }} />
+            <Button variant="outline" disabled={working} onClick={() => uploadInput.current?.click()}>
+              <Upload className="h-4 w-4" /> {upload.isPending ? (uploadProgress < 100 ? `Uploading… ${uploadProgress}%` : 'Validating backup…') : 'Upload backup'}
+            </Button>
+          </>}
+          {canCreate && <Button disabled={working} onClick={() => setSignAction('backup')}>Create backup</Button>}
+        </div>} />
       <Card>
         <CardContent>
           <div className="space-y-2 py-2 text-sm text-slate-700">
             <p><strong>Live file storage:</strong> {data?.fileStorage ?? '—'} · <strong>Backup destination:</strong> {data?.backupStorage ?? '—'}</p>
             <p>Each bundle contains a MongoDB archive, uploaded files (or MongoDB FileBlob records), checksums, and an app-version manifest. Deployment code and secrets are restored separately.</p>
             <p className="text-amber-700">A backup stored only on the same server is not disaster recovery. Copy it to separate storage and test a full restore regularly.</p>
+            {canRestore && <p>Upload an izLearn .tar.gz bundle to validate and add it to this list. Uploading does not restore data. Restore temporarily blocks website access and background jobs, and signs everyone out afterwards.</p>}
           </div>
         </CardContent>
       </Card>
@@ -128,9 +170,9 @@ export default function BackupsPage() {
                   {canRestore && <Button size="sm" variant="outline" disabled={downloading === backup.file} onClick={() => download(backup.file)}>
                     <Download className="h-4 w-4" /> Download
                   </Button>}
-                  {canRestore && data.restoreEnabled && (
-                    <Button size="sm" variant="outline" onClick={() => { setRestoreFile(backup.file); setConfirmation(''); setRestoreConfirmOpen(true); }}>
-                      <RotateCcw className="h-4 w-4" /> Restore
+                  {canRestore && (
+                    <Button size="sm" variant="outline" disabled={working} onClick={() => { setRestoreFile(backup.file); setInspection(null); inspect.mutate(backup.file); }}>
+                      <RotateCcw className="h-4 w-4" /> {inspect.isPending && restoreFile === backup.file ? 'Checking…' : 'Restore'}
                     </Button>
                   )}
                 </div>
@@ -140,22 +182,28 @@ export default function BackupsPage() {
         ))}
       </div>
 
-      {canRestore && data && !data.restoreEnabled && (
-        <p className="mt-5 text-sm text-slate-600">Restore is disabled. An operator must enable it temporarily during a maintenance window after taking a current backup.</p>
-      )}
-
       <Dialog open={restoreConfirmOpen} onClose={() => { setRestoreConfirmOpen(false); setRestoreFile(null); }} title="Restore complete website data"
         footer={<>
           <Button variant="outline" onClick={() => { setRestoreConfirmOpen(false); setRestoreFile(null); }}>Cancel</Button>
-          <Button disabled={confirmation !== 'RESTORE'} onClick={() => { setRestoreConfirmOpen(false); setSignAction('restore'); }}>Continue to signature</Button>
+          <Button disabled={confirmation !== 'RESTORE' || !inspection?.compatible} onClick={() => { setRestoreConfirmOpen(false); setSignAction('restore'); }}>Continue to signature</Button>
         </>}>
-        <p className="mb-4 text-sm text-red-700">This replaces the live database and uploaded files with the selected snapshot. Users must be kept out of the site during the restore. Confirm that a current safety backup exists.</p>
+        <p className="mb-4 text-sm text-red-700">This replaces the live database and uploaded files with the selected snapshot. The website will enter maintenance mode and create a current safety backup before replacement begins. Everyone must sign in again afterwards.</p>
         <p className="mb-3 break-all text-xs text-slate-600">{restoreFile}</p>
+        {inspection && <div className="mb-4 space-y-1 text-sm">
+          <p>Snapshot date: {formatDateTime(inspection.manifest.createdAt)}</p>
+          <p>Application version: {inspection.manifest.appVersion}</p>
+          <p>File storage: {inspection.manifest.storageDriver} · Files: {inspection.manifest.filesCount}</p>
+          {!inspection.compatible && <p className="text-red-700">This backup uses an incompatible file-storage mode. An operator must configure the matching storage mode before restoring it.</p>}
+          <p className="text-amber-700">Use a backup compatible with the deployed application version. Deployment code and secrets are not replaced.</p>
+        </div>}
         <Field label="Type RESTORE to continue"><Input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} /></Field>
       </Dialog>
       <ESignatureModal open={!!signAction} onClose={() => { setSignAction(null); setRestoreFile(null); }} onConfirm={signed}
         title={signAction === 'restore' ? 'Sign complete restore' : 'Sign manual backup'}
         defaultMeaning="Performed" hideMeaning />
+      {restore.isPending && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 p-6 text-center text-white" role="status">
+        Restoring website data… Keep this page open. Other requests and background jobs are paused until recovery finishes.
+      </div>}
     </div>
   );
 }
