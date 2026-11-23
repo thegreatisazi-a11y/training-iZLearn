@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES = [
   'assessmentBlocked',
   'userRequestSubmitted',
   'userRequestDecision',
+  'accountCreated',
   'passwordReset',
   'jdPendingApproval',
   'jdDecision',
@@ -45,11 +46,11 @@ const COMMON = ['orgName', 'userName'];
 
 export const NOTIFICATION_CATALOG: NotificationDef[] = [
   // ---- Training / Assignments ----
-  { type: 'trainingAssigned', module: 'trainingAssignment', moduleLabel: 'Training Assignments', label: 'Training Assigned', description: 'Sent to a trainee when a training/course is assigned to them.', defaultSubject: 'New training assigned: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'dueDate'] },
+  { type: 'trainingAssigned', module: 'trainingAssignment', moduleLabel: 'Training Assignments', label: 'Training Assigned', description: 'Sent to a trainee when a training/course is assigned to them.', defaultSubject: 'New training assigned: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'topicCode', 'dueDate'] },
   { type: 'trainingDue', module: 'trainingAssignment', moduleLabel: 'Training Assignments', label: 'Training Due Reminder', description: 'Reminder sent to a trainee as a training due date approaches.', defaultSubject: 'Reminder: training due — {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'dueDate'] },
   { type: 'trainingOverdue', module: 'trainingAssignment', moduleLabel: 'Training Assignments', label: 'Training Overdue', description: 'Sent when a training assignment passes its due date.', defaultSubject: 'OVERDUE: training — {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'dueDate'] },
   { type: 'refresherDue', module: 'trainingAssignment', moduleLabel: 'Training Assignments', label: 'Refresher Due', description: 'Sent when a periodic refresher for a course becomes due.', defaultSubject: 'Refresher due: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'dueDate'] },
-  { type: 'courseRevised', module: 'courseManagement', moduleLabel: 'Courses', label: 'Course Revised', description: 'Sent to assigned trainees when a course is revised to a new version.', defaultSubject: 'Training course revised: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'reason'] },
+  { type: 'courseRevised', module: 'courseManagement', moduleLabel: 'Courses', label: 'Course Revised', description: 'Sent to assigned trainees when a course is revised to a new version.', defaultSubject: 'Training course revised: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'topicCode', 'reason'] },
   { type: 'scheduleCreated', module: 'scheduling', moduleLabel: 'Scheduling', label: 'Training Scheduled', description: 'Sent to trainees when a classroom/OJT session is scheduled.', defaultSubject: 'Training scheduled: {{topicTitle}}', variables: [...COMMON, 'topicTitle', 'scheduledDate', 'venue'] },
 
   // ---- Assessments ----
@@ -63,7 +64,8 @@ export const NOTIFICATION_CATALOG: NotificationDef[] = [
 
   // ---- Users & Access ----
   { type: 'userRequestSubmitted', module: 'userManagement', moduleLabel: 'Users', label: 'User Request Submitted', description: 'Sent to approvers when a new user-creation request is submitted.', defaultSubject: 'New user creation request awaiting approval', variables: [...COMMON, 'fullName', 'employeeId', 'requestedBy'] },
-  { type: 'userRequestDecision', module: 'userManagement', moduleLabel: 'Users', label: 'User Request Decision', description: 'Sent when a user-creation request is approved/rejected.', defaultSubject: 'Your user request was {{decision}}', variables: [...COMMON, 'decision'] },
+  { type: 'userRequestDecision', module: 'userManagement', moduleLabel: 'Users', label: 'User Request Decision', description: 'Sent to the requester when their user-creation request is approved or rejected. Does not include account credentials.', defaultSubject: 'Your user request was {{decision}}', variables: [...COMMON, 'decision', 'remarks'] },
+  { type: 'accountCreated', module: 'userManagement', moduleLabel: 'Users', label: 'New User Account Created', description: 'Sent only to the new user after approval, with their username and temporary password. Controlled separately from the requester’s decision email.', defaultSubject: 'Your {{orgName}} account is ready', variables: [...COMMON, 'username', 'tempPassword'] },
   { type: 'passwordReset', module: 'userManagement', moduleLabel: 'Users', label: 'Password Reset', description: 'Sent to a user when their password is reset by an administrator.', defaultSubject: 'Your izLearn password has been reset', variables: [...COMMON, 'tempPassword'] },
   { type: 'sessionTerminated', module: 'userManagement', moduleLabel: 'Users', label: 'Session Terminated', description: 'Sent when an existing session is terminated by a new device login.', defaultSubject: 'Your izLearn session was terminated on another device', variables: [...COMMON, 'deviceInfo'] },
 
@@ -72,7 +74,7 @@ export const NOTIFICATION_CATALOG: NotificationDef[] = [
   { type: 'jdDecision', module: 'jobDescription', moduleLabel: 'Job Descriptions', label: 'JD Decision / Assignment', description: 'Sent to a user when their JD is approved, assigned, deactivated, etc.', defaultSubject: 'Job description {{decision}}: {{title}}', variables: [...COMMON, 'title', 'decision'] },
 
   // ---- Announcements ----
-  { type: 'announcement', module: 'announcements', moduleLabel: 'Announcements', label: 'Announcement', description: 'Sent to targeted users when an announcement is published.', defaultSubject: 'Announcement: {{title}}', variables: [...COMMON, 'title'] },
+  { type: 'announcement', module: 'announcements', moduleLabel: 'Announcements', label: 'Announcement', description: 'Sent to targeted users when an announcement is published.', defaultSubject: 'Announcement: {{title}}', variables: [...COMMON, 'title', 'content'] },
 ];
 
 export const NOTIFICATION_BY_TYPE: Record<string, NotificationDef> = Object.fromEntries(

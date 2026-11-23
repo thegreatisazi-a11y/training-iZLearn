@@ -9,6 +9,7 @@ export type EmailType =
   | 'assessmentBlocked'
   | 'userRequestSubmitted'
   | 'userRequestDecision'
+  | 'accountCreated'
   | 'passwordReset'
   | 'jdPendingApproval'
   | 'jdDecision'
@@ -29,8 +30,8 @@ export interface RenderedEmail {
 type Data = Record<string, string | undefined>;
 
 /** Build the subject + HTML body for a notification type. */
-export function renderEmail(type: EmailType, orgName: string, data: Data): RenderedEmail {
-  const layout = (title: string, body: string) => baseLayout({ orgName, title, bodyHtml: body });
+export function renderEmail(type: EmailType, orgName: string, data: Data, bodyOnly = false): RenderedEmail {
+  const layout = (title: string, body: string) => bodyOnly ? body : baseLayout({ orgName, title, bodyHtml: body });
 
   switch (type) {
     case 'trainingAssigned':
@@ -92,17 +93,22 @@ export function renderEmail(type: EmailType, orgName: string, data: Data): Rende
             ]),
         ),
       };
+    case 'accountCreated':
+      return {
+        subject: `Your ${orgName} account is ready`,
+        html: layout('Your Account Is Ready',
+          paragraph(`Dear ${escape(data.userName)},`) +
+          paragraph('Your account has been created. Use the following credentials to sign in:') +
+          infoTable([['Username', data.username ?? ''], ['Temporary Password', data.tempPassword ?? '']]) +
+          paragraph('You will be required to change this password on your first login.')),
+      };
     case 'userRequestDecision':
       return {
         subject: `Your user request was ${data.decision ?? 'processed'}`,
         html: layout(
           'User Request Decision',
           paragraph(`Your user creation request has been ${escape(data.decision)}.`) +
-            (data.remarks ? paragraph(`Remarks: ${escape(data.remarks)}`) : '') +
-            (data.tempPassword
-              ? infoTable([['Temporary Password', data.tempPassword]]) +
-                paragraph('You will be required to change this password on your first login.')
-              : ''),
+            (data.remarks ? paragraph(`Remarks: ${escape(data.remarks)}`) : ''),
         ),
       };
     case 'passwordReset':

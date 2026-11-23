@@ -33,6 +33,7 @@ interface NotifSetting {
   label: string;
   description: string;
   defaultSubject: string;
+  defaultBodyHtml: string;
   variables: string[];
   enabled: boolean;
   subject: string | null;
@@ -43,13 +44,14 @@ interface NotifSetting {
  * Module 10: per-notification controls — enable/disable each templated email and
  * override its subject/body (with {{variables}}) per module. Catalog-driven.
  */
-function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
+export function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['notif-settings'],
     queryFn: () => svc.systemConfig.listNotifications() as unknown as Promise<NotifSetting[]>,
   });
   const [editing, setEditing] = useState<NotifSetting | null>(null);
+  const [viewing, setViewing] = useState<NotifSetting | null>(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
@@ -73,8 +75,8 @@ function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
 
   function openEdit(n: NotifSetting) {
     setEditing(n);
-    setSubject(n.subject ?? '');
-    setBody(n.bodyHtml ?? '');
+    setSubject(n.subject ?? n.defaultSubject);
+    setBody(n.bodyHtml ?? n.defaultBodyHtml);
   }
 
   if (isLoading) return <PageLoader />;
@@ -112,9 +114,8 @@ function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
                         Enabled
                       </label>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => openEdit(n)}>
-                      {canWrite ? 'Edit template' : 'View template'}
-                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setViewing(n)}>View template</Button>
+                    {canWrite && <Button size="sm" variant="outline" onClick={() => openEdit(n)}>Edit template</Button>}
                   </div>
                 </div>
               ))}
@@ -122,6 +123,17 @@ function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
           </CardContent>
         </Card>
       ))}
+
+      <Dialog open={!!viewing} onClose={() => setViewing(null)} className="max-w-3xl"
+        title={viewing ? `Email Preview — ${viewing.label}` : 'Email Preview'}
+        footer={<Button variant="outline" onClick={() => setViewing(null)}>Close</Button>}>
+        {viewing && <div className="space-y-3">
+          <p className="text-sm"><strong>Subject:</strong> {viewing.subject ?? viewing.defaultSubject}</p>
+          <p className="text-xs text-slate-500">Placeholders are replaced with the recipient’s details when the email is sent.</p>
+          <div className="prose-sm rounded-md border border-slate-200 p-4 text-sm"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewing.bodyHtml ?? viewing.defaultBodyHtml) }} />
+        </div>}
+      </Dialog>
 
       <Dialog
         open={!!editing}
@@ -131,10 +143,17 @@ function NotificationSettingsTab({ canWrite }: { canWrite: boolean }) {
         footer={
           <>
             <Button variant="outline" onClick={() => setEditing(null)}>Close</Button>
+            {canWrite && editing && <Button variant="outline" onClick={() => {
+              setSubject(editing.defaultSubject);
+              setBody(editing.defaultBodyHtml);
+            }}>Load default template</Button>}
             {canWrite && editing && (
               <Button
                 disabled={mut.isPending}
-                onClick={() => mut.mutate({ type: editing.type, payload: { subject: subject.trim() || null, bodyHtml: body.trim() || null } }, { onSuccess: () => setEditing(null) })}
+                onClick={() => mut.mutate({ type: editing.type, payload: {
+                  subject: subject.trim() === editing.defaultSubject.trim() ? null : subject.trim() || null,
+                  bodyHtml: body.trim() === editing.defaultBodyHtml.trim() ? null : body.trim() || null,
+                } }, { onSuccess: () => setEditing(null) })}
               >
                 {mut.isPending ? 'Saving…' : 'Save Template'}
               </Button>

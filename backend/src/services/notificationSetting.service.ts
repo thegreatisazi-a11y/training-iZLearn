@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { NOTIFICATION_CATALOG, type UpdateNotificationSettingInput } from '@izlearn/shared';
+import { renderEmail } from '../utils/emailTemplates';
 
 /**
  * Module 10: per-notification settings (enable/disable + subject/body overrides).
@@ -14,6 +15,7 @@ export interface ResolvedNotificationSetting {
   label: string;
   description: string;
   defaultSubject: string;
+  defaultBodyHtml: string;
   variables: string[];
   enabled: boolean;
   subject: string | null;
@@ -33,7 +35,8 @@ export async function listSettings(): Promise<ResolvedNotificationSetting[]> {
       moduleLabel: def.moduleLabel,
       label: def.label,
       description: def.description,
-      defaultSubject: def.defaultSubject,
+      defaultSubject: renderEmail(def.type, '{{orgName}}', Object.fromEntries(def.variables.map((v) => [v, `{{${v}}}`])), true).subject,
+      defaultBodyHtml: renderEmail(def.type, '{{orgName}}', Object.fromEntries(def.variables.map((v) => [v, `{{${v}}}`])), true).html,
       variables: def.variables,
       enabled: row?.enabled ?? true,
       subject: row?.subject ?? null,

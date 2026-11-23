@@ -4,13 +4,13 @@ import type { PermissionMatrix, PermissionAction } from '@izlearn/shared';
 import { getConfig } from './systemConfig.service';
 import { queueEmail } from './email.service';
 import { renderEmail, EmailType } from '../utils/emailTemplates';
-import { baseLayout } from '../utils/emailTemplates/base';
+import { baseLayout, escape } from '../utils/emailTemplates/base';
 import { getSetting } from './notificationSetting.service';
 import { formatDate } from '../utils/dateUtils';
 
 /** Replace {{var}} placeholders in a template string from the data map. */
-function interpolate(tpl: string, data: Record<string, string | undefined>): string {
-  return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) => data[k] ?? '');
+function interpolate(tpl: string, data: Record<string, string | undefined>, html = false): string {
+  return tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) => html ? escape(data[k]) : data[k] ?? '');
 }
 
 /**
@@ -79,7 +79,7 @@ async function send(type: EmailType, recipient: Recipient | null, data: Record<s
     // Subject/body overrides (with {{variable}} interpolation); fall back to defaults.
     const subject = setting?.subject ? interpolate(setting.subject, full) : def.subject;
     const html = setting?.bodyHtml
-      ? baseLayout({ orgName, title: subject, bodyHtml: interpolate(setting.bodyHtml, full) })
+      ? baseLayout({ orgName, title: subject, bodyHtml: interpolate(setting.bodyHtml, full, true) })
       : def.html;
     await queueEmail({ userId: recipient.id, toEmail: recipient.email, type, subject, html });
   } catch (e) {
@@ -216,17 +216,19 @@ export async function notifyUserRequestDecision(
   requestedByUserId?: string | null,
   tempPassword?: string,
 ) {
-  // UR-90: notify the subject of the request (the user the request was generated for).
-  // When userId is provided but has no email in DB (new user), fall back to the email on the request form.
+  // The approved user's welcome email has its own setting; never send credentials
+  // through the requester's decision notification.
   let r: Recipient | null = userId ? await userRecipient(userId) : null;
   if (!r && email) r = { fullName: 'User', email };
-  await send('userRequestDecision', r, { decision, remarks, tempPassword });
+  if (decision === 'APPROVE' && userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { windowsUsername: true } });
+    await send('accountCreated', r, { username: user?.windowsUsername, tempPassword });
+  }
 
-  // UR-91: also notify the person who generated the request (esp. on rejection,
-  // where there may be no subject account yet). Skip if it's the same mailbox.
+  // The requester's decision is independent, including when both mailboxes match.
   if (requestedByUserId) {
     const requestor = await userRecipient(requestedByUserId);
-    if (requestor && requestor.email !== r?.email) {
+    if (requestor) {
       await send('userRequestDecision', requestor, { decision, remarks });
     }
   }

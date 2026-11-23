@@ -62,7 +62,8 @@ async function getTransporter(): Promise<Transporter> {
   const port = await getNumber('smtp.port', 587);
   const user = await getConfig('smtp.user');
   const pass = await getConfig('smtp.password');
-  const key = `${host}:${port}:${user}`;
+  // Recreate the transport after a password change as well as a host/user change.
+  const key = JSON.stringify([host, port, user, pass]);
   if (transporter && key === transporterKey) return transporter;
   transporter = nodemailer.createTransport({
     host,
