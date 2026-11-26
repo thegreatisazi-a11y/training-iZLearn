@@ -432,7 +432,7 @@ export default function UsersPage() {
               Edit
             </Button>
           )}
-          {canAct &&
+          {canApprove &&
             (r.isActive ? (
               <Button size="sm" variant="outline" onClick={() => openAction('deactivate', r)}>
                 Deactivate

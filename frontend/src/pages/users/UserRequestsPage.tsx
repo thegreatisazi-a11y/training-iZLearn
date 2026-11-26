@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useOnEscape } from '@/hooks/useOnEscape';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -36,6 +36,8 @@ export default function UserRequestsPage() {
   const [search, setSearch] = useState('');
   const [decision, setDecision] = useState<{ open: boolean; kind: Decision; req?: RequestRow }>({ open: false, kind: 'APPROVE' });
   const [createdUser, setCreatedUser] = useState<{ username: string; tempPassword: string } | null>(null);
+  const [checkingDecision, setCheckingDecision] = useState(false);
+  const decisionCheckInFlight = useRef(false);
   useOnEscape(!!createdUser, () => setCreatedUser(null));
 
   const params = { page, pageSize: 50, search: search || undefined };
@@ -55,6 +57,21 @@ export default function UserRequestsPage() {
     },
     onError: (e) => toast.error(apiError(e)),
   });
+
+  async function beginDecision(kind: Decision, request: RequestRow) {
+    if (decisionCheckInFlight.current) return;
+    decisionCheckInFlight.current = true;
+    setCheckingDecision(true);
+    try {
+      await svc.users.checkRequestDecision(request.id, kind);
+      setDecision({ open: true, kind, req: request });
+    } catch (error) {
+      toast.error(apiError(error));
+    } finally {
+      decisionCheckInFlight.current = false;
+      setCheckingDecision(false);
+    }
+  }
 
   async function confirmDecision(signature: ESignaturePayload) {
     if (!decision.req) return;
@@ -77,10 +94,10 @@ export default function UserRequestsPage() {
       render: (r) =>
         canApprove && r.status === 'PENDING_APPROVAL' ? (
           <div className="flex gap-1">
-            <Button size="sm" onClick={() => setDecision({ open: true, kind: 'APPROVE', req: r })}>
+            <Button size="sm" disabled={checkingDecision} onClick={() => void beginDecision('APPROVE', r)}>
               Approve
             </Button>
-            <Button size="sm" variant="danger" onClick={() => setDecision({ open: true, kind: 'REJECT', req: r })}>
+            <Button size="sm" variant="danger" disabled={checkingDecision} onClick={() => void beginDecision('REJECT', r)}>
               Reject
             </Button>
           </div>

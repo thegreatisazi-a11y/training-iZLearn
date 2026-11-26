@@ -7,6 +7,7 @@ import { renderEmail, EmailType } from '../utils/emailTemplates';
 import { baseLayout, escape } from '../utils/emailTemplates/base';
 import { getSetting } from './notificationSetting.service';
 import { formatDate } from '../utils/dateUtils';
+import { eligibleUserRequestApprovers } from './userRequestEligibility.service';
 
 /** Replace {{var}} placeholders in a template string from the data map. */
 function interpolate(tpl: string, data: Record<string, string | undefined>, html = false): string {
@@ -202,9 +203,19 @@ export async function notifyCvReviewed(ownerUserId: string, approved: boolean, c
   await send('cvReviewed', owner, { decision: approved ? 'approved' : 'rejected', remarks: comment ?? undefined });
 }
 
-export async function notifyUserRequestSubmitted(fullName: string, employeeId: string, requestedBy: string) {
-  for (const r of await usersWithPermission('userManagement', 'approve')) {
-    await send('userRequestSubmitted', r, { fullName, employeeId, requestedBy });
+export async function notifyUserRequestSubmitted(fullName: string, employeeId: string, requestedById: string, roleIds: string[]) {
+  try {
+    const requester = requestedById === 'SYSTEM' ? null : await prisma.user.findUnique({
+      where: { id: requestedById }, select: { fullName: true, windowsUsername: true },
+    });
+    const requestedBy = requestedById === 'SYSTEM' ? 'System' : requester?.fullName?.trim() || requester?.windowsUsername || 'Unknown requester';
+    const recipients = await eligibleUserRequestApprovers(roleIds);
+    if (!recipients.length) logger.warn('User request submitted without an eligible approver email recipient. Review active approver permissions and email addresses.');
+    for (const recipient of recipients) {
+      await send('userRequestSubmitted', recipient, { fullName, employeeId, requestedBy });
+    }
+  } catch (error) {
+    logger.error('User request submitted notification failed', { error: (error as Error).message });
   }
 }
 

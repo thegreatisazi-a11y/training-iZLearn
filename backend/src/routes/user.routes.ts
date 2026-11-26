@@ -69,6 +69,7 @@ router.post(
   requireReasonForChange,
   c.deactivateTeamMember,
 );
+router.post('/requests/:id/decision-check', requirePermission('userRequests', 'approve'), c.checkRequestDecision);
 router.post(
   '/requests/:id/decision',
   requirePermission('userRequests', 'approve'),

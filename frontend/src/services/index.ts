@@ -92,6 +92,7 @@ export const svc = {
     /** S5: edit / deactivate a team member from My Team (hierarchy-scoped server-side). */
     updateTeamMember: (id: string, body: unknown) => data(api.patch(`/users/team-member/${id}`, body)),
     deactivateTeamMember: (id: string, body: unknown) => data(api.post(`/users/team-member/${id}/deactivate`, body)),
+    checkRequestDecision: (id: string, decision: 'APPROVE' | 'REJECT') => data(api.post(`/users/requests/${id}/decision-check`, { decision })),
     decideRequest: (id: string, body: unknown) => data(api.post(`/users/requests/${id}/decision`, body)),
     activate: (id: string, body: unknown) => data(api.post(`/users/${id}/activate`, body)),
     deactivate: (id: string, body: unknown) => data(api.post(`/users/${id}/deactivate`, body)),

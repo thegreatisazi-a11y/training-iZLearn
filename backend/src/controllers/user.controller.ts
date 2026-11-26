@@ -98,6 +98,11 @@ export const decideRequest = asyncHandler(async (req: Request, res: Response) =>
   sendSuccess(res, r, `Request ${input.decision === 'APPROVE' ? 'approved' : 'rejected'}`);
 });
 
+export const checkRequestDecision = asyncHandler(async (req: Request, res: Response) => {
+  const { decision } = userRequestDecisionSchema.pick({ decision: true }).parse(req.body);
+  sendSuccess(res, await svc.checkRequestDecision(req.params.id, decision, req));
+});
+
 export const get = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, await svc.getUser(req.params.id));
 });

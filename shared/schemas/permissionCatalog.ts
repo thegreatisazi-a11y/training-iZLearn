@@ -92,7 +92,7 @@ export const PERMISSION_CATALOG: PermModuleDef[] = [
     category: 'userAccess',
     actions: [
       A('view', 'View User Requests', 'Open the queue of pending new-user requests.'),
-      A('approve', 'Approve / Reject User Request', 'Approve or reject a pending new-user request (e-signed). You cannot grant roles beyond your own.'),
+      A('approve', 'Approve / Reject User Request', 'Approve or reject a pending new-user request (e-signed). Both decisions require the requested roles to stay within your own permissions.'),
     ],
   },
   {

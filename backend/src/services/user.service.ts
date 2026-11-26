@@ -15,17 +15,17 @@ import {
 } from './notification.service';
 import { hashPassword } from '../utils/passwordUtils';
 import { parseExcel } from '../utils/excelExporter';
-import { hasPermission, mergePermissions } from '../utils/permissions';
+import { canGrantRolePermissions } from '../utils/roleGrant';
+import { assertCanDecideUserRequest } from './userRequestEligibility.service';
 import { isOrgWideUserManager, hasOrgWideScope, holdsSystemRole } from '../utils/accessScope';
 import { normalizeRoleName } from '../utils/roleIdentity';
-import { createUserSchema, PERMISSION_CATALOG } from '@izlearn/shared';
+import { createUserSchema } from '@izlearn/shared';
 import type {
   CreateUserInput,
   UpdateUserInput,
   UserRequestDecisionInput,
   PaginationQuery,
   PermissionMatrix,
-  PermissionAction,
 } from '@izlearn/shared';
 
 /**
@@ -57,57 +57,13 @@ async function assertRolesActive(roleIds: string[]): Promise<void> {
   }
 }
 
-/** Modules the current permission catalog defines — the authority on what a role can grant. */
-const CATALOG_MODULES = new Set(PERMISSION_CATALOG.map((m) => m.module));
-
-/**
- * Action keys the CURRENT catalog defines, per module, plus the five derived legacy keys.
- * Anything else on a stored matrix is a RETIRED action and must be ignored when comparing
- * two roles — see assertCanGrantRoles.
- *
- * The legacy keys are kept in the comparison on purpose: a role saved under the old
- * 5-flag model may carry only read/write/approve/print/export, and skipping those would
- * make such a role grantable by anyone.
- */
-const LEGACY_KEYS = ['read', 'write', 'approve', 'print', 'export'];
-const CATALOG_ACTIONS = new Map(
-  PERMISSION_CATALOG.map((m) => [m.module, new Set([...m.actions.map((a) => a.key), ...LEGACY_KEYS])]),
-);
-
-/**
- * SECURITY (RBAC-2): no privilege escalation — a granter can only assign roles whose
- * combined permissions are a subset of their own. This is fully permission-driven (no
- * role names), so it holds for any custom role: e.g. a holder of the lesser
- * `userRequests:approve` cannot provision a user carrying SUPER_ADMIN (or any permission
- * the granter themselves lacks), whether via request approval, role change, or bulk upload.
- */
+/** Shared permission-superset policy also used by user-request decisions and email routing. */
 async function assertCanGrantRoles(granterPerms: PermissionMatrix | undefined, roleIds: string[]): Promise<void> {
   const ids = Array.from(new Set(roleIds.filter(Boolean)));
   if (!ids.length) return;
   const roles = await prisma.role.findMany({ where: { id: { in: ids } }, select: { permissions: true } });
-  const granted = mergePermissions(roles.map((r) => r.permissions as PermissionMatrix)) as unknown as Record<string, Record<string, boolean>>;
-  for (const [module, actions] of Object.entries(granted)) {
-    // Only compare modules the CURRENT catalog defines. A role row can still carry keys for a
-    // module that has since been retired (Bundles was superseded by TNI, leaving
-    // `bundleManagement` on some roles). Those keys grant nothing — the catalog drives both the
-    // Roles UI and every permission check — but comparing them made a role permanently
-    // ungrantable: even SUPER_ADMIN, whose matrix matches the catalog exactly, "lacked" them,
-    // and no one could clear them because the Roles screen never renders a retired module.
-    if (!CATALOG_MODULES.has(module)) continue;
-    const known = CATALOG_ACTIONS.get(module);
-    for (const [action, on] of Object.entries(actions)) {
-      // Skip RETIRED ACTIONS for the same reason retired modules are skipped above. A key
-      // the catalog no longer defines (e.g. dashboard.configure_widgets) grants nothing —
-      // nothing checks it and the Roles screen never renders it — but comparing it made
-      // the role permanently ungrantable: roles created while the action existed carry
-      // `true`, roles created before it never had the key at all, so even the built-in
-      // administrator "lacked" it and no admin could clear it from the UI. That is exactly
-      // what made IT Admin and Training Coordinator ungrantable by anyone.
-      if (known && !known.has(action)) continue;
-      if (on && !hasPermission(granterPerms, module, action as PermissionAction)) {
-        throw AppError.forbidden('You cannot grant a role that carries permissions beyond your own.');
-      }
-    }
+  if (!canGrantRolePermissions(granterPerms, roles.map((role) => role.permissions as PermissionMatrix))) {
+    throw AppError.forbidden('You cannot grant a role that carries permissions beyond your own.');
   }
 }
 
@@ -249,7 +205,7 @@ export async function createUserRequest(input: CreateUserInput, createdBy: strin
     },
   });
 
-  await notifyUserRequestSubmitted(input.fullName, input.employeeId, createdBy);
+  await notifyUserRequestSubmitted(request.fullName, request.employeeId, createdBy, request.roleIds as string[]);
   return request;
 }
 
@@ -291,9 +247,9 @@ export async function getRequest(id: string) {
   return req;
 }
 
-export async function decideRequest(
+async function requestDecisionContext(
   requestId: string,
-  input: UserRequestDecisionInput,
+  decision: UserRequestDecisionInput['decision'],
   req: Request,
 ) {
   const request = await getRequest(requestId);
@@ -301,6 +257,25 @@ export async function decideRequest(
     throw AppError.conflict('This request has already been decided.');
   }
 
+  const roleIds = Array.isArray(request.roleIds) ? request.roleIds.filter((id): id is string => typeof id === 'string') : [];
+  // Authorize BOTH decisions before creating a signature or changing the request.
+  await assertCanDecideUserRequest(req.user?.permissions, roleIds);
+  if (decision === 'APPROVE') await assertRolesActive(roleIds);
+  return { request, roleIds };
+}
+
+/** Read-only preflight; final submission repeats the checks against current data. */
+export async function checkRequestDecision(requestId: string, decision: UserRequestDecisionInput['decision'], req: Request) {
+  await requestDecisionContext(requestId, decision, req);
+  return { eligible: true };
+}
+
+export async function decideRequest(
+  requestId: string,
+  input: UserRequestDecisionInput,
+  req: Request,
+) {
+  const { request, roleIds } = await requestDecisionContext(requestId, input.decision, req);
   const isApprove = input.decision === 'APPROVE';
   const signatureId = await signFromRequest(
     req,
@@ -325,11 +300,6 @@ export async function decideRequest(
     return updated;
   }
 
-  const roleIds = (request.roleIds as string[]) ?? [];
-  // CR-1(c): never provision a user against an inactive/deleted role.
-  await assertRolesActive(roleIds);
-  // RBAC-2: the approver cannot grant roles more powerful than their own.
-  await assertCanGrantRoles(req.user!.permissions as PermissionMatrix, roleIds);
   const plainPassword = tempPassword();
   const passwordHash = await hashPassword(plainPassword);
 
