@@ -6,6 +6,7 @@ import { signFromRequest } from './eSignature.service';
 import { notifyTrainingAssigned } from './notification.service';
 import { hasCompletedRequiredReading } from './materialView.service';
 import { startOfDay } from '../utils/dateUtils';
+import { isVisiblePersonalTraining } from '../utils/personalTrainingVisibility';
 import { hasOrgWideScope } from '../utils/accessScope';
 import type { PermissionMatrix } from '@izlearn/shared';
 import type { Request } from 'express';
@@ -234,7 +235,7 @@ export async function listMyTrainings(userId: string) {
   const [topics, attempts] = await Promise.all([
     topicIds.length
       ? prisma.trainingTopic.findMany({
-          where: { id: { in: topicIds } },
+          where: { id: { in: topicIds }, isDeleted: false },
           // trainingTypes: a course can carry several types (D6); the singular trainingType is
           // kept as the legacy/primary value so older callers keep working.
           select: { id: true, title: true, topicNumber: true, topicCode: true, currentVersion: true, status: true, trainingType: true, trainingTypes: true, durationMinutes: true, materialViewSeconds: true, requiresAssessment: true, supersededByTopicId: true },
@@ -282,14 +283,7 @@ export async function listMyTrainings(userId: string) {
   // the course but "Continue to assessment" is refused. Already-COMPLETED/WAIVED rows are
   // kept as the user's training history (their certificate stands); a pending row simply
   // disappears and reappears if the course is re-published.
-  const visible = assignments.filter((a) => {
-    const topic = topicMap.get(a.topicId);
-    if (!topic) return true;
-    if (topic.supersededByTopicId) return false;
-    const done = a.status === 'COMPLETED' || a.status === 'WAIVED';
-    if (topic.status !== 'PUBLISHED' && !done) return false;
-    return true;
-  });
+  const visible = assignments.filter((a) => isVisiblePersonalTraining(a.status, topicMap.get(a.topicId)));
 
   // Item B: compute reading completion for ACTIONABLE assignments so the Assessments page
   // can offer only courses whose materials are fully read and only the assessment remains.

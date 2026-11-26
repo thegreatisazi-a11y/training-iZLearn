@@ -70,7 +70,7 @@ export async function createQuestion(input: CreateQuestionInput, createdBy: stri
       explanation: input.explanation ?? null,
       helpText: input.helpText ?? null,
       isMandatory: input.isMandatory,
-      shuffleOptions: input.shuffleOptions ?? true,
+      shuffleOptions: false,
       isStaged: staged,
       createdBy,
     },

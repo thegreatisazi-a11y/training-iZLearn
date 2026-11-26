@@ -27,6 +27,7 @@ router.use(authenticate);
 // only PUBLISHED, current content. Export + version history stay manager-only.
 // (/export and /reading-style paths precede /:id so they aren't captured as an id.)
 router.get('/', c.list);
+router.get('/form-lookups', c.formLookups);
 router.get('/export', requirePermission('courseManagement', 'export'), c.exportCsv);
 router.get('/:id', c.get);
 // Course version history is gated on its OWN permission (the "Version History" module in

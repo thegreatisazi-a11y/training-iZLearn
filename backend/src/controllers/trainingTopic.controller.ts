@@ -7,6 +7,15 @@ import { hasPermission } from '../utils/permissions';
 import { recordEvent } from '../services/auditTrail.service';
 import * as svc from '../services/trainingTopic.service';
 import * as historySvc from '../services/topicVersionHistory.service';
+import { getCourseFormLookups } from '../services/courseLookup.service';
+
+export const formLookups = asyncHandler(async (req: Request, res: Response) => {
+  if (!hasPermission(req.user?.permissions, 'courseManagement', 'create') &&
+      !hasPermission(req.user?.permissions, 'courseManagement', 'edit')) {
+    throw AppError.forbidden('Create or Edit Course permission is required.');
+  }
+  sendSuccess(res, await getCourseFormLookups());
+});
 
 /** Course managers (courseManagement:write) see drafts; everyone else only PUBLISHED (4.3). */
 function canManageCourses(req: Request): boolean {

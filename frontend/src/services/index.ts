@@ -115,6 +115,11 @@ export const svc = {
   departments: createCrud('/departments'),
 
   topics: {
+    formLookups: () => data<{
+      functionalRoles: { id: string; displayName: string }[];
+      trainingTypes: { code: string; displayName: string }[];
+      signatories: { id: string; fullName: string; employeeId: string }[];
+    }>(api.get('/topics/form-lookups')),
     ...createCrud('/topics'),
     revise: (id: string, body: unknown) => data(api.post(`/topics/${id}/revise`, body)),
     publishDraft: (id: string, body: unknown) => data(api.post(`/topics/${id}/publish-draft`, body)),

@@ -35,9 +35,8 @@ export const createQuestionSchema = z
     helpText: optionalString,
     isMandatory: z.boolean().default(false),
     /**
-     * Whether this question's answer options may be shuffled. Defaults to true (the previous
-     * behaviour); set false for options that are only correct in their authored order, such as
-     * "All of the above". Ignored entirely when the course does not randomize.
+     * Legacy field accepted for compatibility. Assessment answer options always retain
+     * their authored order; course randomization affects questions only.
      */
     shuffleOptions: z.boolean().optional(),
   })

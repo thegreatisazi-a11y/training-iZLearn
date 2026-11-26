@@ -68,8 +68,6 @@ interface Question {
   explanation?: string;
   helpText?: string;
   isMandatory: boolean;
-  /** False pins the answer options in their authored order; absent means shuffle. */
-  shuffleOptions?: boolean;
   isStaged?: boolean;
   pendingRemoval?: boolean;
 }
@@ -89,7 +87,6 @@ interface QuestionForm {
   explanation: string;
   helpText: string;
   isMandatory: boolean;
-  shuffleOptions: boolean;
 }
 
 /** CR-35: a correct answer must be chosen before a question can be saved. */
@@ -128,7 +125,6 @@ function blankQuestionForm(): QuestionForm {
     explanation: '',
     helpText: '',
     isMandatory: false,
-    shuffleOptions: true,
   };
 }
 
@@ -167,8 +163,6 @@ function formFromQuestion(q: Question): QuestionForm {
     explanation: q.explanation ?? '',
     helpText: q.helpText ?? '',
     isMandatory: q.isMandatory,
-    // Absent on questions written before the field existed → shuffling, the previous behaviour.
-    shuffleOptions: q.shuffleOptions !== false,
   };
 }
 
@@ -187,8 +181,7 @@ function questionBody(f: QuestionForm, topicId: string) {
     case 'MULTIPLE_CHOICE_MULTI':
       base.options = f.options;
       base.correctAnswer = f.correctIds;
-      // Only multiple-choice questions have answer options to shuffle.
-      base.shuffleOptions = f.shuffleOptions;
+      base.shuffleOptions = false;
       break;
     case 'TRUE_FALSE':
       base.correctAnswer = f.trueFalseAnswer;
@@ -293,27 +286,15 @@ export default function TopicDetailPage() {
     queryFn: () => svc.users.list({ pageSize: 1000, includeInactive: true }),
     enabled: (tab === 'materials' && canMaterialWrite) || tab === 'history',
   });
-  const editTypesQ = useQuery({
-    queryKey: ['training-types', 'active'],
-    queryFn: () => svc.master.listTrainingTypes({ pageSize: 200 }),
+  const editLookups = useQuery({
+    queryKey: ['course-form-lookups'],
+    queryFn: () => svc.topics.formLookups(),
     enabled: editTopicOpen,
   });
-  const editDesigs = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: editTopicOpen });
-  const editRoles = useQuery({ queryKey: ['roles', 'all'], queryFn: () => svc.roles.list({ pageSize: 200 }), enabled: editTopicOpen });
-  const editUsers = useQuery({ queryKey: ['users', 'topic-signatories'], queryFn: () => svc.users.list({ pageSize: 1000 }), enabled: editTopicOpen });
-  const editUserOpts = ((editUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
-  const editDesigOpts = ((editDesigs.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
-  const editRoleOpts = ((editRoles.data?.data ?? []) as unknown as { id: string; roleName: string }[]).map((r) => ({ value: r.id, label: r.roleName }));
-  // Training Type(s): offer every ACTIVE master type (built-in AND custom), mirroring the
-  // create form. Two edit-only concerns: codes already on this course are appended even if
-  // they are now inactive or legacy enum values, so saving an unrelated field can never
-  // silently drop the course's existing type; and if the master can't be read, fall back to
-  // the legacy enum list so the picker is never empty.
-  const activeEditTypes = ((editTypesQ.data?.data ?? []) as unknown as { code: string; displayName: string }[])
-    .map((t) => ({ value: t.code, label: t.displayName }));
-  const baseEditTypes = editTypesQ.isError
-    ? trainingType.options.map((x) => ({ value: x, label: x.replace(/_/g, ' ') }))
-    : activeEditTypes;
+  const editUserOpts = (editLookups.data?.signatories ?? []).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
+  const editDesigOpts = (editLookups.data?.functionalRoles ?? []).map((d) => ({ value: d.id, label: d.displayName }));
+  // Preserve an already-selected legacy/inactive type when editing unrelated fields.
+  const baseEditTypes = (editLookups.data?.trainingTypes ?? []).map((t) => ({ value: t.code, label: t.displayName }));
   const editTypeOpts = [
     ...baseEditTypes,
     ...editTopicForm.trainingTypes
@@ -1327,20 +1308,9 @@ export default function TopicDetailPage() {
           <input type="checkbox" checked={qForm.isMandatory} onChange={(e) => setQForm({ ...qForm, isMandatory: e.target.checked })} />
           Mandatory question (always included in assessments)
         </label>
-        {/* Options are only shuffled when the course itself randomizes, so this is offered for
-            multiple-choice questions where the authored order can matter. */}
-        {(qForm.questionType === 'MULTIPLE_CHOICE_SINGLE' || qForm.questionType === 'MULTIPLE_CHOICE_MULTI') && (
-          <>
-            <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
-              <input type="checkbox" checked={qForm.shuffleOptions} onChange={(e) => setQForm({ ...qForm, shuffleOptions: e.target.checked })} />
-              Shuffle the answer options for this question
-            </label>
-            <p className="mt-1 text-xs text-slate-500">
-              Uncheck to keep the options in the order entered above — needed for options like “All of the above”, which
-              would otherwise be moved to (a).
-            </p>
-          </>
-        )}
+        <p className="mt-2 text-xs text-slate-500">
+          Multiple-choice options remain in the order entered. Course randomisation changes question order only.
+        </p>
       </Dialog>
 
       {/* 4.1: replace/update a specific file — choose the source (device or library) */}
@@ -1539,7 +1509,7 @@ export default function TopicDetailPage() {
             <Button variant="outline" onClick={() => setEditTopicOpen(false)}>Cancel</Button>
             <Button
               disabled={
-                !editTopicForm.title ||
+                editLookups.isPending || editLookups.isError || !editTopicForm.title ||
                 // The pass mark and attempt limit apply only to an assessment; a reading course
                 // has nothing to score or attempt, so neither is required there.
                 (editTopicForm.requiresAssessment && (!editTopicForm.passingScorePercent || !editTopicForm.maxAttempts)) ||
@@ -1556,6 +1526,12 @@ export default function TopicDetailPage() {
         }
       >
         <p className="mb-2 text-xs text-slate-500">Course code is system-owned and locked. Passing score is changed via its own e-signed action.</p>
+        {editLookups.isError && (
+          <p role="alert" className="mb-3 text-sm text-red-600">
+            Unable to load course options and signatories. {apiError(editLookups.error)}{' '}
+            <button type="button" className="underline" onClick={() => editLookups.refetch()}>Retry</button>
+          </p>
+        )}
         {/* Field order MUST mirror the create form (TopicsPage) exactly so a course shows
             the same inputs in the same order on edit as on creation. */}
         <Field label="Title" required><Input value={editTopicForm.title} onChange={(e) => setEditTopicForm((f) => ({ ...f, title: e.target.value }))} /></Field>
@@ -1569,7 +1545,7 @@ export default function TopicDetailPage() {
               onChange={(trainingTypes) => setEditTopicForm((f) => ({ ...f, trainingTypes }))}
               placeholder="Select training type(s)…"
               heightClass="h-32"
-              emptyText={editTypesQ.isLoading ? 'Loading…' : 'No active training types'}
+              emptyText={editLookups.isLoading ? 'Loading…' : 'No active training types'}
             />
           </Field>
           <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">

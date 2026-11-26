@@ -111,21 +111,14 @@ export default function TopicsPage() {
     queryKey: ['topics', { page, search, statusFilter }],
     queryFn: () => svc.topics.list({ page, search: search || undefined, status: statusFilter }),
   });
-  const designations = useQuery({ queryKey: ['designations', 'all'], queryFn: () => svc.master.listDesignations({ pageSize: 200 }), enabled: creating });
-  const desigOptions = ((designations.data?.data ?? []) as unknown as { id: string; displayName: string }[]).map((d) => ({ value: d.id, label: d.displayName }));
-  // The picker offers every ACTIVE training type — built-in AND custom ones added in
-  // Master Setup. /master/training-types already excludes inactive + deleted rows, so
-  // the list is used as-is (no enum filtering: custom codes are valid, see
-  // trainingTypeCode in shared). If the master can't be read (e.g. no masterSetup:read
-  // permission) fall back to the legacy enum list so the form still works.
-  const trainingTypesQ = useQuery({
-    queryKey: ['training-types', 'active'],
-    queryFn: () => svc.master.listTrainingTypes({ pageSize: 200 }),
+  const courseLookups = useQuery({
+    queryKey: ['course-form-lookups'],
+    queryFn: () => svc.topics.formLookups(),
     enabled: creating,
   });
-  const activeTypeOptions = ((trainingTypesQ.data?.data ?? []) as unknown as { code: string; displayName: string }[])
-    .map((t) => ({ value: t.code, label: t.displayName }));
-  const typeOptions = trainingTypesQ.isError ? TRAINING_TYPE_FALLBACK : activeTypeOptions;
+  const desigOptions = (courseLookups.data?.functionalRoles ?? []).map((d) => ({ value: d.id, label: d.displayName }));
+  const activeTypeOptions = (courseLookups.data?.trainingTypes ?? []).map((t) => ({ value: t.code, label: t.displayName }));
+  const typeOptions = activeTypeOptions;
   // Map a training-type code → its display label (falls back to the raw code, spaced).
   const typeLabelMap = new Map([...TRAINING_TYPE_FALLBACK, ...activeTypeOptions].map((o) => [o.value, o.label]));
   const typeLabels = (r: Topic) => {
@@ -133,8 +126,7 @@ export default function TopicsPage() {
     return codes.filter(Boolean).map((c) => typeLabelMap.get(c) ?? c.replace(/_/g, ' ')).join(', ');
   };
 
-  const signatoryUsers = useQuery({ queryKey: ['users', 'signatory'], queryFn: () => svc.users.list({ pageSize: 500 }), enabled: creating });
-  const signatoryOptions = ((signatoryUsers.data?.data ?? []) as unknown as { id: string; fullName: string; employeeId: string }[]).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
+  const signatoryOptions = (courseLookups.data?.signatories ?? []).map((u) => ({ value: u.id, label: `${u.fullName} (${u.employeeId})` }));
 
   // Item 3: a signatory signs on or before today (never a future date); a course due
   // date is a deadline, so it must not already have passed. Enforced on the inputs
@@ -395,7 +387,7 @@ export default function TopicsPage() {
             <Button
               onClick={() => createMut.mutate('DRAFT')}
               disabled={
-                createMut.isPending ||
+                createMut.isPending || courseLookups.isPending || courseLookups.isError ||
                 !form.title ||
                 form.trainingTypes.length === 0 ||
                 // The pass mark and attempt limit apply only to an assessment; a reading course has
@@ -411,6 +403,12 @@ export default function TopicsPage() {
         }
       >
         <p className="mb-3 text-xs text-slate-500">The course code is generated automatically and locked once created. Drafts are hidden from trainees until published.</p>
+        {courseLookups.isError && (
+          <p role="alert" className="mb-3 text-sm text-red-600">
+            Unable to load course options and signatories. {apiError(courseLookups.error)}{' '}
+            <button type="button" className="underline" onClick={() => courseLookups.refetch()}>Retry</button>
+          </p>
+        )}
         <Field label="Title" required>
           <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         </Field>
@@ -428,7 +426,7 @@ export default function TopicsPage() {
               onChange={(trainingTypes) => setForm({ ...form, trainingTypes })}
               placeholder="Select training type(s)…"
               heightClass="h-32"
-              emptyText={trainingTypesQ.isLoading ? 'Loading…' : 'No active training types'}
+              emptyText={courseLookups.isLoading ? 'Loading…' : 'No active training types'}
             />
           </Field>
           <Field label="Functional Role(s) (optional)" hint="Eligibility/assignment is driven by Functional Role, TNI and JD.">

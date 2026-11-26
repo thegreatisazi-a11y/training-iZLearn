@@ -62,7 +62,13 @@ export default function MyTrainingsPage() {
   const [retakeFor, setRetakeFor] = useState<MyTraining | null>(null);
   const [justification, setJustification] = useState('');
 
-  const { data, isLoading } = useQuery({ queryKey: ['my-trainings'], queryFn: () => svc.assignments.mine() as unknown as Promise<MyTraining[]> });
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['my-trainings'],
+    queryFn: () => svc.assignments.mine() as unknown as Promise<MyTraining[]>,
+    // An assignment may have been added by another user since this page was last opened.
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
   const { data: retakes } = useQuery({ queryKey: ['my-retakes'], queryFn: () => svc.retake.mine() as unknown as Promise<RetakeRequest[]> });
 
   // assignmentId -> latest pending retake status, so a blocked row shows "requested".
@@ -177,6 +183,13 @@ export default function MyTrainingsPage() {
     <div>
       <PageHeader title="My Trainings" description="Your assigned trainings, due dates, status and completion." />
 
+      {isError && (
+        <div role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          Unable to load your assigned trainings. {apiError(error)}{' '}
+          <button type="button" className="underline" onClick={() => refetch()}>Retry</button>
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card><CardContent><div className="text-2xl font-semibold text-slate-800">{counts.total}</div><div className="text-xs text-slate-500">Total</div></CardContent></Card>
         <Card><CardContent><div className="text-2xl font-semibold text-amber-600">{counts.pending}</div><div className="text-xs text-slate-500">Pending</div></CardContent></Card>
@@ -196,7 +209,7 @@ export default function MyTrainingsPage() {
         columns={columns}
         rows={rows}
         loading={isLoading}
-        emptyText="You have no assigned trainings."
+        emptyText={isError ? 'Assigned trainings could not be loaded.' : 'You have no assigned trainings.'}
       />
       <p className="mt-3 flex items-center gap-1 text-xs text-slate-400"><GraduationCap className="h-3.5 w-3.5" /> Click Start Training to read the material and take the assessment.</p>
 

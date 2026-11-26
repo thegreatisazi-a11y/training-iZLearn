@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { hasPermission } from '../utils/permissions';
+import { isVisiblePersonalTraining } from '../utils/personalTrainingVisibility';
 import type { AuthUser } from '../types';
 import type { PermissionAction } from '@izlearn/shared';
 
@@ -13,13 +14,14 @@ export async function getDashboard(user: AuthUser) {
   // otherwise its counts are higher than what the user actually sees on My Trainings.
   // (Computed in JS — `supersededByTopicId` is optional and unreliable to filter on in Mongo.)
   const allTopics = await prisma.trainingTopic.findMany({ where: { isDeleted: false }, select: { id: true, supersededByTopicId: true, status: true } });
-  const supersededTopicIds = allTopics.filter((t) => !!t.supersededByTopicId).map((t) => t.id);
-  const currentOnly = supersededTopicIds.length ? { topicId: { notIn: supersededTopicIds } } : {};
+  // Positive ids exclude assignments to deleted/missing courses as well as revisions.
+  const currentTopicIds = allTopics.filter((t) => isVisiblePersonalTraining('COMPLETED', t)).map((t) => t.id);
+  const currentOnly = { topicId: { in: currentTopicIds } };
   // Keep counts in lockstep with My Trainings: an UNPUBLISHED (archived/draft) course's
   // still-actionable assignments are hidden there, so exclude them from the actionable
   // counts here too. Completed/waived history is unaffected (uses `currentOnly`).
-  const hiddenActionableTopicIds = allTopics.filter((t) => !!t.supersededByTopicId || t.status !== 'PUBLISHED').map((t) => t.id);
-  const actionableOnly = hiddenActionableTopicIds.length ? { topicId: { notIn: hiddenActionableTopicIds } } : {};
+  const actionableTopicIds = allTopics.filter((t) => isVisiblePersonalTraining('PENDING', t)).map((t) => t.id);
+  const actionableOnly = { topicId: { in: actionableTopicIds } };
   const ACTIONABLE = new Set(['PENDING', 'IN_PROGRESS', 'OVERDUE', 'BLOCKED']);
 
   // Personal training summary (every user has this). OVERDUE is authoritative on the
