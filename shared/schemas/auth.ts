@@ -5,6 +5,7 @@ export const loginSchema = z.object({
   windowsUsername: nonEmptyString,
   password: z.string().min(1, { message: 'Password is required' }),
   deviceInfo: z.string().optional(),
+  activeRoleId: z.string().uuid().optional(),
   /**
    * When an active session already exists on another device, the client re-sends
    * the login with this flag to terminate the previous session and continue
@@ -13,6 +14,8 @@ export const loginSchema = z.object({
   terminateExisting: z.boolean().optional(),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const switchRoleSchema = z.object({ activeRoleId: z.string().uuid() });
 
 export const refreshSchema = z.object({
   refreshToken: nonEmptyString,

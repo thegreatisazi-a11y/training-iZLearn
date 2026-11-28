@@ -15,6 +15,8 @@ export interface AuditActor {
   userFullName: string;
   userUsername?: string;
   sessionId?: string;
+  activeRoleId?: string;
+  activeRoleName?: string;
 }
 
 export interface AuditStore {

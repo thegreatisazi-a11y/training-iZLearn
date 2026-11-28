@@ -6,7 +6,7 @@ import { isSessionActive } from '../services/session.service';
 import { verifyAccessToken } from '../utils/jwtUtils';
 import { AppError, asyncHandler } from '../utils/response';
 import { auditContext } from '../utils/auditContext';
-import { mergePermissions } from '../utils/permissions';
+import { assignedActiveRoles } from '../services/activeRole.service';
 import type { AuthUser } from '../types';
 
 /** Load a fully-resolved auth principal (roles + merged permissions). */
@@ -14,13 +14,13 @@ export async function buildAuthUser(userId: string, sessionId: string): Promise<
   const user = await prisma.user.findFirst({ where: { id: userId, isDeleted: false, isActive: true } });
   if (!user) return null;
 
-  const userRoles = await prisma.userRole.findMany({ where: { userId, isActive: true } });
-  const roleIds = userRoles.map((r) => r.roleId);
-  const roles = roleIds.length
-    ? await prisma.role.findMany({ where: { id: { in: roleIds }, isActive: true, isDeleted: false } })
-    : [];
-
-  const permissions = mergePermissions(roles.map((r) => r.permissions as PermissionMatrix));
+  const [roles, session] = await Promise.all([
+    assignedActiveRoles(userId),
+    prisma.userSession.findFirst({ where: { userId, sessionId, isActive: true, expiresAt: { gt: new Date() } } }),
+  ]);
+  if (!session?.activeRoleId || !session.roleContext) return null;
+  const role = roles.find((item) => item.id === session.activeRoleId);
+  if (!role) return null;
 
   return {
     id: user.id,
@@ -31,9 +31,14 @@ export async function buildAuthUser(userId: string, sessionId: string): Promise<
     locationId: user.locationId,
     departmentId: user.departmentId,
     sessionId,
-    roleIds,
-    roleNames: roles.map((r) => r.roleName),
-    permissions,
+    roleIds: [role.id],
+    roleNames: [role.roleName],
+    activeRoleId: role.id,
+    activeRoleName: role.roleName,
+    activeRoleIsSystem: role.isSystem,
+    roleContext: session.roleContext,
+    availableRoles: roles.map((item) => ({ id: item.id, name: item.roleName })),
+    permissions: role.permissions as PermissionMatrix,
   };
 }
 
@@ -61,10 +66,16 @@ function makeAuthenticate(allowLocked: boolean) {
     }
 
     const authUser = await buildAuthUser(payload.sub, payload.sid);
-    if (!authUser) throw AppError.unauthorized('Account is inactive or no longer exists.');
+    if (!authUser) throw AppError.unauthorized('Your active role or session is no longer available. Please sign in again.');
+    if (!payload.rid || !payload.rc) throw AppError.unauthorized('Please sign in again to select an active role.');
+    const requestedContext = req.get('X-Role-Context');
+    if (payload.rid !== authUser.activeRoleId || payload.rc !== authUser.roleContext ||
+      (requestedContext && requestedContext !== authUser.roleContext)) {
+      throw new AppError(409, 'ROLE_CHANGED', 'Your active role changed. Reloading your current role.');
+    }
 
     req.user = authUser;
-    auditContext.setActor({ userId: authUser.id, userFullName: authUser.fullName, userUsername: authUser.windowsUsername, sessionId: authUser.sessionId });
+    auditContext.setActor({ userId: authUser.id, userFullName: authUser.fullName, userUsername: authUser.windowsUsername, sessionId: authUser.sessionId, activeRoleId: authUser.activeRoleId, activeRoleName: authUser.activeRoleName });
     auditContext.setRequestMeta({ sessionId: authUser.sessionId });
     next();
   });

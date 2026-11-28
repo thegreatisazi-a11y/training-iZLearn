@@ -13,7 +13,7 @@ const IGNORED = new Set(['updatedAt', 'createdAt', 'passwordChangedAt', 'lastLog
 const REDACTED = new Set(['passwordHash', 'signaturePasswordHash', 'refreshToken', 'password', 'signaturePassword']);
 const HOUSEKEEPING = ['lastLoginAt', 'failedLoginAttempts', 'lockedUntil', 'passwordChangedAt'];
 const FIELD_LABELS: Record<string, string> = {
-  fullName: 'Full Name', email: 'Email', isActive: 'Active', isDeleted: 'Deleted',
+  activeRoleName: 'Active Role', fullName: 'Full Name', email: 'Email', isActive: 'Active', isDeleted: 'Deleted',
   status: 'Status', roleName: 'Role Name', description: 'Description',
   permissions: 'Permissions', title: 'Title', topicNumber: 'Course Number',
   sopNumber: 'SOP Number', passingScorePercent: 'Passing Score (%)',
@@ -30,6 +30,7 @@ const USER_FIELDS = new Set([
 const EVENT_DETAILS: Record<string, string> = {
   CREATE: 'Record created', SOFT_DELETE: 'Record removed (soft-delete)',
   LOGIN: 'Signed in', LOGOUT: 'Signed out', LOGIN_FAILED: 'Sign-in failed',
+  SESSION_UNLOCKED: 'Session unlocked', ROLE_SWITCH: 'Active role switched',
   SESSION_LOCKED: 'Session locked (inactivity)', SESSION_TERMINATED: 'Session terminated',
   FILE_DOWNLOAD: 'File downloaded', FILE_UPLOAD: 'File uploaded', PRINT: 'Printed', EXPORT: 'Exported',
   ESIGN: 'Electronic signature applied', ACKNOWLEDGE: 'Acknowledged', ACCESS_DENIED: 'Access denied',
@@ -91,6 +92,7 @@ export function matchesAuditSearch(row: SearchRow, search: string, names: AuditS
   const displayedUser = row.userUsername || row.userFullName;
   const fields = [
     displayedUser,
+    row.activeRoleName || 'Role context unavailable',
     row.action,
     row.entityType,
     auditEntityLabel(row.entityType),

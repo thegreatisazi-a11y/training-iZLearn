@@ -20,6 +20,11 @@ function row(overrides: Partial<AuditTrail & { entityLabel: string | null }> = {
 }
 
 describe('audit free-text search', () => {
+  it('searches the immutable role name and the unavailable label for historical records', () => {
+    expect(matchesAuditSearch(row({ activeRoleName: 'Trainer', activeRoleId: 'role-id' }), 'Trainer', names)).toBe(true);
+    expect(matchesAuditSearch(row({ activeRoleName: null, activeRoleId: null }), 'Role context unavailable', names)).toBe(true);
+    expect(matchesAuditSearch(row({ activeRoleName: 'Trainer', activeRoleId: 'role-id' }), 'role-id', names)).toBe(false);
+  });
   it('matches the displayed entity label, not just its stored model name', () => {
     expect(matchesAuditSearch(row(), 'Training Material', names)).toBe(true);
   });

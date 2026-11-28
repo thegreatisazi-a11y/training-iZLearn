@@ -46,15 +46,18 @@ beforeEach(() => {
     { id: 'requested-role', permissions: matrix({ reports: { view: true, export: true } }) },
     { id: 'approval', permissions: matrix({ userRequests: { approve: true } }) },
     { id: 'report-authority', permissions: matrix({ reports: { view: true, export: true } }) },
+    { id: 'combined-authority', permissions: matrix({ userRequests: { approve: true }, reports: { view: true, export: true } }) },
     { id: 'legacy-manager', permissions: matrix({ userManagement: { approve: true }, reports: { view: true, export: true } }) },
     { id: 'inactive-approval', permissions: matrix({ userRequests: { approve: true } }), isActive: false },
     { id: 'deleted-approval', permissions: matrix({ userRequests: { approve: true } }), isDeleted: true },
   ].map((role) => ({ isActive: true, isDeleted: false, ...role }));
-  users = ['eligible', 'lower', 'legacy', 'inactive-user', 'deleted-user', 'inactive-link', 'inactive-role', 'deleted-role', 'no-email', 'requester']
+  users = ['eligible', 'split-authority', 'lower', 'legacy', 'inactive-user', 'deleted-user', 'inactive-link', 'inactive-role', 'deleted-role', 'no-email', 'requester']
     .map((id) => ({ id, fullName: id === 'requester' ? 'Priya Shah' : id, windowsUsername: id, email: `${id}@example.test`, isActive: id !== 'inactive-user', isDeleted: id === 'deleted-user' }));
   users.find((user) => user.id === 'no-email').email = '';
   links = [
     ...['eligible', 'inactive-user', 'deleted-user', 'no-email'].flatMap((userId) => ['approval', 'report-authority'].map((roleId) => ({ userId, roleId }))),
+    ...['eligible', 'inactive-user', 'deleted-user', 'no-email'].map((userId) => ({ userId, roleId: 'combined-authority' })),
+    ...['approval', 'report-authority'].map((roleId) => ({ userId: 'split-authority', roleId })),
     { userId: 'eligible', roleId: 'approval' }, // Duplicate links must not duplicate recipients.
     { userId: 'lower', roleId: 'approval' }, { userId: 'legacy', roleId: 'legacy-manager' },
     { userId: 'inactive-link', roleId: 'approval', isActive: false }, { userId: 'inactive-link', roleId: 'report-authority' },
@@ -66,21 +69,20 @@ beforeEach(() => {
   db.role.findMany.mockImplementation(async ({ where }: any) => roles.filter((role) =>
     (!where.id || where.id.in.includes(role.id)) && (where.isActive === undefined || role.isActive === where.isActive) &&
     (where.isDeleted === undefined || role.isDeleted === where.isDeleted)));
-  db.userRole.findMany.mockImplementation(async ({ where }: any) => links.filter((link) => link.isActive && where.roleId.in.includes(link.roleId)));
-  db.userRole.create.mockResolvedValue({});
   db.userRole.findMany.mockImplementation(async ({ where }: any) => where.userId ? [] : links.filter((link) => link.isActive && where.roleId.in.includes(link.roleId)));
-  db.user.update.mockImplementation(async ({ where, data }: any) => Object.assign(users.find((user) => user.id === where.id), data));
+  db.userRole.create.mockResolvedValue({});
   db.user.findMany.mockImplementation(async ({ where }: any) => users.filter((user) => where.id.in.includes(user.id) && user.isActive && !user.isDeleted));
   db.user.findUnique.mockImplementation(async ({ where }: any) => users.find((user) => user.id === where.id) ?? null);
   db.user.findFirst.mockImplementation(async ({ where }: any) => users.find((user) => (where.id ? user.id === where.id : user.windowsUsername === where.windowsUsername) && !user.isDeleted) ?? null);
   db.user.create.mockImplementation(async ({ data }: any) => { const user = { id: 'created-user', isActive: true, isDeleted: false, ...data }; users.push(user); return user; });
+  db.user.update.mockImplementation(async ({ where, data }: any) => Object.assign(users.find((user) => user.id === where.id), data));
   db.userCreationRequest.findFirst.mockImplementation(async ({ where }: any) => where.id === pending.id ? { ...pending } : null);
   db.userCreationRequest.create.mockImplementation(async ({ data }: any) => ({ id: 'new-request', ...data }));
   db.userCreationRequest.update.mockImplementation(async ({ data }: any) => { Object.assign(pending, data); return { ...pending }; });
   (auditedTransaction as jest.Mock).mockImplementation(async (_prisma, work) => (await work(db)).result);
 });
 
-it('routes submission mail only to an eligible active approver, combining all active roles and deduplicating links', async () => {
+it('routes submission mail only when one selectable role can approve, without combining roles or duplicating recipients', async () => {
   expect((await eligibleUserRequestApprovers(['requested-role'])).map((user) => user.id)).toEqual(['eligible']);
   await notifyUserRequestSubmitted('New Employee', 'EMP-20', 'requester', ['requested-role']);
   expect(queueEmail).toHaveBeenCalledTimes(1);
@@ -136,6 +138,7 @@ it('rechecks permissions at decision time after a previously eligible approver l
   await notifyUserRequestSubmitted('New Employee', 'EMP-20', 'requester', ['requested-role']);
   expect(queueEmail).toHaveBeenCalledTimes(1);
   roles.find((role) => role.id === 'report-authority').permissions = matrix({ reports: { view: true, export: false } });
+  roles.find((role) => role.id === 'combined-authority').permissions = matrix({ userRequests: { approve: true }, reports: { view: true, export: false } });
   await expect(decideRequest('request', { decision: 'REJECT' } as any, actor('eligible'))).rejects.toMatchObject({ statusCode: 403 });
   expect(signFromRequest).not.toHaveBeenCalled();
   expect(pending.status).toBe('PENDING_APPROVAL');
@@ -177,36 +180,6 @@ it('preserves legacy grant limits while ignoring retired permission keys', () =>
   expect(canGrantRolePermissions({}, [{ bundleManagement: { write: true }, assessments: { retired_action: true } } as any])).toBe(true);
 });
 
-it.each(['APPROVE', 'REJECT'] as const)('denies %s preflight without signing or changing data', async (decision) => {
-  await expect(checkRequestDecision('request', decision, actor('lower'))).rejects.toMatchObject({ statusCode: 403 });
-  expect(signFromRequest).not.toHaveBeenCalled();
-  expect(db.userCreationRequest.update).not.toHaveBeenCalled();
-  expect(auditedTransaction).not.toHaveBeenCalled();
-});
-
-it.each(['APPROVE', 'REJECT'] as const)('allows eligible %s preflight without signing or changing data', async (decision) => {
-  await expect(checkRequestDecision('request', decision, actor('eligible'))).resolves.toEqual({ eligible: true });
-  expect(signFromRequest).not.toHaveBeenCalled();
-  expect(db.userCreationRequest.update).not.toHaveBeenCalled();
-  expect(queueEmail).not.toHaveBeenCalled();
-});
-
-it('rechecks authority after a successful preflight', async () => {
-  await checkRequestDecision('request', 'APPROVE', actor('eligible'));
-  roles.find((role) => role.id === 'report-authority').permissions = matrix({ reports: { view: true, export: false } });
-  await expect(decideRequest('request', { decision: 'APPROVE' } as any, actor('eligible'))).rejects.toMatchObject({ statusCode: 403 });
-  expect(signFromRequest).not.toHaveBeenCalled();
-});
-
-it('checks stale requests and inactive roles before opening a signing flow', async () => {
-  pending.status = 'REJECTED';
-  await expect(checkRequestDecision('request', 'REJECT', actor('eligible'))).rejects.toMatchObject({ statusCode: 409 });
-  pending.status = 'PENDING_APPROVAL';
-  roles.find((role) => role.id === 'requested-role').isActive = false;
-  await expect(checkRequestDecision('request', 'APPROVE', actor('eligible'))).rejects.toMatchObject({ statusCode: 400 });
-  await expect(checkRequestDecision('request', 'REJECT', actor('eligible'))).resolves.toEqual({ eligible: true });
-});
-
 it('capitalizes new request names and profiles, including previously submitted lowercase names', async () => {
   const request = await createUserRequest({ ...pending, fullName: 'darshit shah', windowsUsername: 'fresh.employee' } as any, 'requester');
   expect(request.fullName).toBe('Darshit Shah');
@@ -233,3 +206,43 @@ it('uses a shorter password for resets while preserving login/signature reset an
   }) }));
 });
 
+it('requires selecting the system role to reset another administrator, even if that role is also assigned', async () => {
+  const req = actor('eligible');
+  Object.assign(req.user!, { permissions: matrix({ userManagement: { reset_password: true } }), activeRoleId: 'supervisor', activeRoleIsSystem: false, availableRoles: [{ id: 'system', name: 'Super Admin' }] });
+  db.userRole.findMany.mockResolvedValue([{ roleId: 'system' }]);
+  db.role.count.mockResolvedValue(1);
+  await expect(resetPassword('requester', req)).rejects.toMatchObject({ statusCode: 403 });
+  expect(signFromRequest).not.toHaveBeenCalled();
+  expect(db.user.update).not.toHaveBeenCalled();
+});
+
+it.each(['APPROVE', 'REJECT'] as const)('denies %s preflight without signing or changing data', async (decision) => {
+  await expect(checkRequestDecision('request', decision, actor('lower'))).rejects.toMatchObject({ statusCode: 403 });
+  expect(signFromRequest).not.toHaveBeenCalled();
+  expect(db.userCreationRequest.update).not.toHaveBeenCalled();
+  expect(auditedTransaction).not.toHaveBeenCalled();
+});
+
+it.each(['APPROVE', 'REJECT'] as const)('allows eligible %s preflight without signing or changing data', async (decision) => {
+  await expect(checkRequestDecision('request', decision, actor('eligible'))).resolves.toEqual({ eligible: true });
+  expect(signFromRequest).not.toHaveBeenCalled();
+  expect(db.userCreationRequest.update).not.toHaveBeenCalled();
+  expect(queueEmail).not.toHaveBeenCalled();
+});
+
+it('rechecks authority after a successful preflight', async () => {
+  await checkRequestDecision('request', 'APPROVE', actor('eligible'));
+  roles.find((role) => role.id === 'report-authority').permissions = matrix({ reports: { view: true, export: false } });
+  roles.find((role) => role.id === 'combined-authority').permissions = matrix({ userRequests: { approve: true }, reports: { view: true, export: false } });
+  await expect(decideRequest('request', { decision: 'APPROVE' } as any, actor('eligible'))).rejects.toMatchObject({ statusCode: 403 });
+  expect(signFromRequest).not.toHaveBeenCalled();
+});
+
+it('checks stale requests and inactive roles before opening a signing flow', async () => {
+  pending.status = 'REJECTED';
+  await expect(checkRequestDecision('request', 'REJECT', actor('eligible'))).rejects.toMatchObject({ statusCode: 409 });
+  pending.status = 'PENDING_APPROVAL';
+  roles.find((role) => role.id === 'requested-role').isActive = false;
+  await expect(checkRequestDecision('request', 'APPROVE', actor('eligible'))).rejects.toMatchObject({ statusCode: 400 });
+  await expect(checkRequestDecision('request', 'REJECT', actor('eligible'))).resolves.toEqual({ eligible: true });
+});

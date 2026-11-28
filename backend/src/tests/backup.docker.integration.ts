@@ -39,7 +39,7 @@ async function main() {
   await prisma.$runCommandRaw({ create: 'NewerOnlyCollection' });
   const result = await restoreBackup(imported.file, 'integration-test', {
     id: 'backup-integration-signature', userId: 'integration-test', userFullName: 'Integration Test',
-    recordType: 'Backup', recordId: backup.file, meaning: 'Performed', signedAt: new Date(), ipAddress: null,
+    activeRoleId: null, activeRoleName: null, recordType: 'Backup', recordId: backup.file, meaning: 'Performed', signedAt: new Date(), ipAddress: null,
   });
 
   assert.equal(result.file, imported.file);

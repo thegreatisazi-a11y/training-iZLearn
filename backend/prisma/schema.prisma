@@ -925,6 +925,8 @@ model AuditTrail {
   userId          String
   userFullName    String // Denormalized snapshot at time of action
   userUsername    String? // Username snapshot for new events; legacy rows retain their full-name display
+  activeRoleId    String?
+  activeRoleName  String?
   action          String // CREATE | UPDATE | DELETE | LOGIN | ...
   entityType      String
   entityId        String?
@@ -946,6 +948,8 @@ model ElectronicSignature {
   id           String   @id @default(uuid()) @map("_id")
   userId       String
   userFullName String // Snapshot
+  activeRoleId String?
+  activeRoleName String?
   recordType   String
   recordId     String
   meaning      String // "Approved" | "Reviewed" | "Rejected" | "Performed" | ...
@@ -961,6 +965,8 @@ model UserSession {
   userId       String
   refreshToken String   @unique
   sessionId    String   @unique
+  activeRoleId String?
+  roleContext  String?
   deviceInfo   String?
   ipAddress    String?
   expiresAt    DateTime

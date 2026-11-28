@@ -9,6 +9,7 @@ import {
   unlockSchema,
   changePasswordSchema,
   setSignaturePasswordSchema,
+  switchRoleSchema,
 } from '@izlearn/shared';
 
 /**
@@ -34,5 +35,6 @@ router.delete('/sessions/previous', authenticate, c.terminatePreviousSessions);
 router.post('/change-password', authenticate, validate(changePasswordSchema), c.changePassword);
 router.post('/set-signature-password', authenticate, validate(setSignaturePasswordSchema), c.setSignaturePassword);
 router.get('/me', authenticate, c.me);
+router.post('/switch-role', authenticate, validate(switchRoleSchema), c.switchRole);
 
 export default router;

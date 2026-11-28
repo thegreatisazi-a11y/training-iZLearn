@@ -2,8 +2,8 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env';
 import type { AccessTokenPayload, RefreshTokenPayload } from '../types';
 
-export function signAccessToken(userId: string, sessionId: string): string {
-  return jwt.sign({ sub: userId, sid: sessionId }, env.jwt.accessSecret, {
+export function signAccessToken(userId: string, sessionId: string, role: { activeRoleId: string; roleContext: string }): string {
+  return jwt.sign({ sub: userId, sid: sessionId, rid: role.activeRoleId, rc: role.roleContext }, env.jwt.accessSecret, {
     expiresIn: env.jwt.accessTtl,
   } as SignOptions);
 }

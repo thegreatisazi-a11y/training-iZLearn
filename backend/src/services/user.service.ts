@@ -695,9 +695,9 @@ export async function resetPassword(id: string, req: Request) {
   // Deliberately NOT a grantable permission: anyone able to grant it to themselves is
   // exactly who it exists to stop.
   if (await holdsSystemRole(id)) {
-    if (!(await holdsSystemRole(req.user!.id))) {
+    if (!req.user!.activeRoleIsSystem) {
       throw AppError.forbidden(
-        'Only a holder of the built-in administrator role may reset the password of another administrator.',
+        "Switch to the built-in administrator role before resetting another administrator's password.",
       );
     }
   }

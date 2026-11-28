@@ -5,7 +5,7 @@ import * as session from '../services/session.service';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
   const result = await svc.login(
-    { windowsUsername: req.body.windowsUsername, password: req.body.password, deviceInfo: req.body.deviceInfo },
+    { windowsUsername: req.body.windowsUsername, password: req.body.password, deviceInfo: req.body.deviceInfo, activeRoleId: req.body.activeRoleId },
     req.ip,
     req.get('user-agent'),
     req.body.terminateExisting === true,
@@ -54,4 +54,8 @@ export const setSignaturePassword = asyncHandler(async (req: Request, res: Respo
 
 export const me = asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, req.user);
+});
+
+export const switchRole = asyncHandler(async (req: Request, res: Response) => {
+  sendSuccess(res, await svc.switchRole(req.user!, req.body.activeRoleId), 'Active role changed');
 });

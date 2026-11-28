@@ -12,13 +12,20 @@ export interface AuthUser {
   sessionId: string;
   roleIds: string[];
   roleNames: string[];
-  /** Union of the permission matrices of all the user's active roles. */
+  activeRoleId: string;
+  activeRoleName: string;
+  activeRoleIsSystem: boolean;
+  roleContext: string;
+  availableRoles: Array<{ id: string; name: string }>;
+  /** Permissions of the selected role only. */
   permissions: PermissionMatrix;
 }
 
 export interface AccessTokenPayload {
   sub: string; // userId
   sid: string; // sessionId
+  rid: string;
+  rc: string;
 }
 
 export interface RefreshTokenPayload {

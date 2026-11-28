@@ -23,6 +23,7 @@ export async function createSession(
   userId: string,
   deviceInfo: string | undefined,
   ipAddress: string | undefined,
+  activeRoleId: string,
 ): Promise<{ sessionId: string; refreshToken: string }> {
   const sessionId = randomUUID();
   const refreshToken = signRefreshToken(userId, sessionId);
@@ -32,6 +33,8 @@ export async function createSession(
     data: {
       userId,
       sessionId,
+      activeRoleId,
+      roleContext: randomUUID(),
       refreshToken,
       deviceInfo: deviceInfo ?? null,
       ipAddress: ipAddress ?? null,

@@ -1,7 +1,6 @@
 import type { PermissionMatrix } from '@izlearn/shared';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/response';
-import { mergePermissions } from '../utils/permissions';
 import { canDecideUserRequest } from '../utils/roleGrant';
 
 async function requestedPermissions(roleIds: string[]): Promise<PermissionMatrix[] | null> {
@@ -18,7 +17,7 @@ export async function assertCanDecideUserRequest(actorPermissions: PermissionMat
   const permissions = await requestedPermissions(roleIds);
   if (!permissions) throw AppError.badRequest('The request contains missing or invalid roles. Ask a system administrator to review it.');
   if (!canDecideUserRequest(actorPermissions, permissions)) {
-    throw AppError.forbidden('You cannot approve or reject this request: request approval permission is required and the requested roles cannot carry permissions beyond your own.');
+    throw AppError.forbidden('You cannot approve or reject this request with your active role: approval permission is required and the requested roles cannot carry permissions beyond your active role.');
   }
 }
 
@@ -42,7 +41,7 @@ export async function eligibleUserRequestApprovers(roleIds: string[]) {
     matrices.push(permissions);
     byUser.set(membership.userId, matrices);
   }
-  const ids = [...byUser].filter(([, matrices]) => canDecideUserRequest(mergePermissions(matrices), target)).map(([id]) => id);
+  const ids = [...byUser].filter(([, matrices]) => matrices.some((permissions) => canDecideUserRequest(permissions, target))).map(([id]) => id);
   if (!ids.length) return [];
   const users = await prisma.user.findMany({
     where: { id: { in: ids }, isActive: true, isDeleted: false }, select: { id: true, fullName: true, email: true },

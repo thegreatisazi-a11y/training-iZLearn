@@ -77,7 +77,7 @@ describe('complete local backup', () => {
     fs.writeFileSync(path.join(env.storage.root, 'materials', 'guide.pdf'), 'changed');
     fs.writeFileSync(path.join(env.storage.root, 'materials', 'newer.pdf'), 'not in snapshot');
     await restoreBackup(created.file, 'test-user', {
-      id: 'signature-1', userId: 'test-user', userFullName: 'Test User', recordType: 'Backup',
+      id: 'signature-1', userId: 'test-user', userFullName: 'Test User', activeRoleId: null, activeRoleName: null, recordType: 'Backup',
       recordId: created.file, meaning: 'Performed', signedAt: new Date(), ipAddress: null,
     });
     expect(fs.readFileSync(path.join(env.storage.root, 'materials', 'guide.pdf'), 'utf8')).toBe('PDF A');

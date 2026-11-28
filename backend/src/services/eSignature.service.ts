@@ -47,6 +47,8 @@ export async function verifyAndSign(input: SignInput) {
     data: {
       userId: user.id,
       userFullName: user.fullName,
+      activeRoleId: auditContext.getStore()?.actor.activeRoleId ?? null,
+      activeRoleName: auditContext.getStore()?.actor.activeRoleName ?? null,
       recordType: input.recordType,
       recordId: input.recordId,
       meaning: input.meaning,

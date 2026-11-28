@@ -21,6 +21,7 @@ interface AuditEntry {
   timestamp: string;
   userFullName: string;
   userUsername?: string | null;
+  activeRoleName?: string | null;
   action: string;
   entityType: string;
   entityId: string | null;
@@ -37,6 +38,7 @@ const DIFF_REDACT = new Set(['passwordHash', 'signaturePasswordHash', 'refreshTo
 // CR-8: friendly labels for the common audited fields; anything not listed is
 // de-camelCased automatically.
 const FIELD_LABELS: Record<string, string> = {
+  activeRoleName: 'Active Role',
   fullName: 'Full Name',
   email: 'Email',
   isActive: 'Active',
@@ -102,6 +104,8 @@ const ACTION_DESCRIPTION: Record<string, string> = {
   LOGIN: 'Signed in',
   LOGOUT: 'Signed out',
   LOGIN_FAILED: 'Sign-in failed',
+  SESSION_UNLOCKED: 'Session unlocked',
+  ROLE_SWITCH: 'Active role switched',
   SESSION_LOCKED: 'Session locked (inactivity)',
   SESSION_TERMINATED: 'Session terminated',
   FILE_DOWNLOAD: 'File downloaded',
@@ -211,7 +215,7 @@ export function changeSummary(entry: AuditEntry, resolvers?: NameResolvers): str
 
 const ACTIONS = [
   'CREATE', 'UPDATE', 'SOFT_DELETE', 'APPROVE', 'REJECT', 'LOGIN', 'LOGOUT', 'LOGIN_FAILED',
-  'SESSION_TERMINATED', 'SESSION_LOCKED', 'EXPORT', 'PRINT', 'ESIGN', 'CONFIG_CHANGE',
+  'SESSION_TERMINATED', 'SESSION_LOCKED', 'SESSION_UNLOCKED', 'ROLE_SWITCH', 'EXPORT', 'PRINT', 'ESIGN', 'CONFIG_CHANGE',
   'PERMISSION_CHANGE', 'FILE_UPLOAD', 'FILE_DOWNLOAD', 'BACKUP_TRIGGERED', 'AUTO_DEACTIVATED_AD_SYNC',
   'ASSESSMENT_SUBMITTED', 'CERTIFICATE_GENERATED', 'ACCESS_DENIED', 'RATE_LIMITED',
 ].map((a) => ({ value: a, label: a }));
@@ -358,7 +362,16 @@ export default function AuditTrailPage() {
 
   const columns: Column<AuditEntry>[] = [
     { key: 'timestamp', header: 'Timestamp', render: (r) => formatDateTimeSeconds(r.timestamp) },
-    { key: 'userUsername', header: 'Username', render: (r) => r.userUsername || r.userFullName },
+    {
+      key: 'userUsername',
+      header: 'User / Active Role',
+      render: (r) => (
+        <div>
+          <div className="font-medium">{r.userUsername || r.userFullName}</div>
+          <div className="mt-0.5 text-xs text-slate-500">{r.activeRoleName ? `As ${r.activeRoleName}` : 'Role context unavailable'}</div>
+        </div>
+      ),
+    },
     { key: 'action', header: 'Action', render: (r) => <Badge tone={r.action}>{r.action}</Badge> },
     // The stored value stays as-is; only what the user reads is mapped (see ENTITY_LABELS).
     { key: 'entityType', header: 'Entity', render: (r) => auditEntityLabel(r.entityType) },
@@ -444,7 +457,7 @@ export default function AuditTrailPage() {
                 <Input
                   value={draft.search}
                   onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
-                  placeholder="Username, action, entity, record, details, remark, IP…"
+                  placeholder="Username, role, action, entity, record, details, remark, IP…"
                 />
               </Field>
             </div>

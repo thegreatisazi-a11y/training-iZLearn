@@ -35,6 +35,7 @@ export const list = asyncHandler(async (req: Request, res: Response) => {
 const COLUMNS = [
   { header: 'Timestamp', key: 'timestamp' },
   { header: 'Username', key: 'userUsername' },
+  { header: 'Active Role', key: 'activeRoleName' },
   { header: 'Action', key: 'action' },
   { header: 'Entity Type', key: 'entityType' },
   { header: 'Record', key: 'record' },
@@ -50,7 +51,7 @@ const HOUSEKEEPING_FIELDS = ['lastLoginAt', 'failedLoginAttempts', 'lockedUntil'
 // Kept in sync with frontend AuditTrailPage.tsx so the exported "Changes" column
 // reads exactly like the on-screen one.
 const FIELD_LABELS: Record<string, string> = {
-  fullName: 'Full Name', email: 'Email', isActive: 'Active', isDeleted: 'Deleted', status: 'Status',
+  activeRoleName: 'Active Role', fullName: 'Full Name', email: 'Email', isActive: 'Active', isDeleted: 'Deleted', status: 'Status',
   roleName: 'Role Name', description: 'Description', permissions: 'Permissions', title: 'Title',
   topicNumber: 'Course Number', sopNumber: 'SOP Number', passingScorePercent: 'Passing Score (%)',
   maxAttempts: 'Max Attempts', durationMinutes: 'Duration (min)', assessmentTimeMinutes: 'Assessment Time (min)',
@@ -64,6 +65,7 @@ const USER_ID_FIELDS = new Set([
 ]);
 const ACTION_DESCRIPTION: Record<string, string> = {
   LOGIN: 'Signed in', LOGOUT: 'Signed out', LOGIN_FAILED: 'Sign-in failed',
+  SESSION_UNLOCKED: 'Session unlocked', ROLE_SWITCH: 'Active role switched',
   SESSION_LOCKED: 'Session locked (inactivity)', SESSION_TERMINATED: 'Session terminated',
   FILE_DOWNLOAD: 'File downloaded', FILE_UPLOAD: 'File uploaded', PRINT: 'Printed', EXPORT: 'Exported',
   ESIGN: 'Electronic signature applied', ACKNOWLEDGE: 'Acknowledged', ACCESS_DENIED: 'Access denied',
@@ -158,6 +160,7 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
   const mapRow = (d: AuditRow): Record<string, unknown> => ({
     timestamp: formatDateTimeSeconds(d.timestamp, org.timezone),
     userUsername: d.userUsername || d.userFullName,
+    activeRoleName: d.activeRoleName || 'Role context unavailable',
     action: d.action,
     entityType: d.entityType,
     record: (d as { entityLabel?: string | null }).entityLabel ?? (d.entityId ?? ''),
@@ -263,8 +266,8 @@ export const exportAudit = asyncHandler(async (req: Request, res: Response) => {
   // word-wrapping so the table never overflows the page and the (often long) Changes
   // column is fully shown instead of being cut off.
   const COL_WIDTH: Record<string, string> = {
-    timestamp: '11%', userUsername: '12%', action: '9%', entityType: '10%',
-    record: '14%', changes: '30%', reasonForChange: '9%', ipAddress: '5%',
+    timestamp: '10%', userUsername: '10%', activeRoleName: '12%', action: '8%', entityType: '9%',
+    record: '12%', changes: '26%', reasonForChange: '8%', ipAddress: '5%',
   };
   const body = `<html><head><style>
     body{font-family:Arial;font-size:8px;}

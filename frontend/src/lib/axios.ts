@@ -11,17 +11,23 @@ const API_BASE = ORIGIN ? `${ORIGIN}/api` : '/api';
 
 const ACCESS_KEY = 'izlearn_access';
 const REFRESH_KEY = 'izlearn_refresh';
+export const ROLE_CONTEXT_KEY = 'izlearn_role_context';
+let requestRoleContext: string | null = null;
+export function setRequestRoleContext(value: string | null) { requestRoleContext = value; }
 
 export const tokenStore = {
   getAccess: () => localStorage.getItem(ACCESS_KEY),
   getRefresh: () => localStorage.getItem(REFRESH_KEY),
-  set(access: string, refresh?: string) {
+  set(access: string, refresh?: string, roleContext?: string) {
     localStorage.setItem(ACCESS_KEY, access);
     if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
+    if (roleContext) localStorage.setItem(ROLE_CONTEXT_KEY, roleContext);
   },
   clear() {
     localStorage.removeItem(ACCESS_KEY);
     localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(ROLE_CONTEXT_KEY);
+    requestRoleContext = null;
   },
 };
 
@@ -30,6 +36,8 @@ export const api = axios.create({ baseURL: API_BASE });
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = tokenStore.getAccess();
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // Preserve the original screen's context across automatic token-refresh retries.
+  if (requestRoleContext && !config.headers['X-Role-Context']) config.headers['X-Role-Context'] = requestRoleContext;
   return config;
 });
 
@@ -79,6 +87,10 @@ api.interceptors.response.use(
     // await unwrapBlobError(error);
     const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
     const status = error.response?.status;
+    if ((error.response?.data as { error?: { code?: string } })?.error?.code === 'ROLE_CHANGED') {
+      if (original?.url !== '/auth/me') window.dispatchEvent(new CustomEvent('izlearn:role-changed'));
+      return Promise.reject(error);
+    }
 
     // Inactivity lock — surfaced to the lock overlay.
     if (status === 423) {
@@ -86,7 +98,8 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (status === 401 && original && !original._retry && !original.url?.includes('/auth/')) {
+    const canRefresh = original?.url === '/auth/switch-role' || !original?.url?.includes('/auth/');
+    if (status === 401 && original && !original._retry && canRefresh) {
       original._retry = true;
       refreshing = refreshing ?? doRefresh();
       const access = await refreshing;

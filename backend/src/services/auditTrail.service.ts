@@ -11,7 +11,7 @@ export interface RecordEventInput {
   oldValue?: unknown;
   newValue?: unknown;
   reasonForChange?: string | null;
-  actor?: { userId: string; userFullName: string; userUsername?: string; sessionId?: string };
+  actor?: { userId: string; userFullName: string; userUsername?: string; sessionId?: string; activeRoleId?: string; activeRoleName?: string };
   ipAddress?: string;
   userAgent?: string;
 }
@@ -25,12 +25,14 @@ export interface RecordEventInput {
  */
 export async function recordEvent(input: RecordEventInput): Promise<void> {
   const store = auditContext.getStore();
-  const actor = input.actor ?? store?.actor ?? SYSTEM_ACTOR;
+  const actor = input.actor ? { ...(store?.actor.userId === input.actor.userId ? store.actor : {}), ...input.actor } : store?.actor ?? SYSTEM_ACTOR;
   await prisma.auditTrail.create({
     data: {
       userId: actor.userId,
       userFullName: actor.userFullName,
       userUsername: actor.userUsername ?? null,
+      activeRoleId: actor.activeRoleId ?? null,
+      activeRoleName: actor.activeRoleName ?? null,
       action: input.action,
       entityType: input.entityType ?? 'System',
       entityId: input.entityId ?? null,

@@ -11,6 +11,8 @@ import { getPasswordPolicy, getAuthPolicy } from './systemConfig.service';
 import { notifySessionTerminated } from './notification.service';
 import * as ldap from './ldap.service';
 import * as session from './session.service';
+import { randomUUID } from 'crypto';
+import { assignedActiveRoles } from './activeRole.service';
 
 /**
  * Module 1 — authentication, session and credential management.
@@ -25,6 +27,7 @@ export interface LoginInput {
   windowsUsername: string;
   password: string;
   deviceInfo?: string;
+  activeRoleId?: string;
 }
 
 export interface LoginResult {
@@ -34,12 +37,17 @@ export interface LoginResult {
   mustChangePassword: boolean;
 }
 
+export interface RoleSelectionResult {
+  requiresRoleSelection: true;
+  roles: Array<{ id: string; name: string }>;
+}
+
 export async function login(
   input: LoginInput,
   ip: string | undefined,
   userAgent: string | undefined,
   terminateExisting = false,
-): Promise<LoginResult> {
+): Promise<LoginResult | RoleSelectionResult> {
   // Username is matched case-insensitively so a user can sign in as "JDoe", "jdoe", etc.
   const user = await prisma.user.findFirst({
     where: { windowsUsername: { equals: input.windowsUsername, mode: 'insensitive' }, isDeleted: false },
@@ -97,6 +105,15 @@ export async function login(
     throw AppError.unauthorized('Invalid credentials');
   }
 
+  // Reveal role choices only after credentials pass; create no session until selected.
+  const roles = await assignedActiveRoles(user.id);
+  if (!roles.length) throw AppError.forbidden('Your account has no active role assigned. Contact your administrator.');
+  if (!input.activeRoleId && roles.length > 1) {
+    return { requiresRoleSelection: true, roles: roles.map((role) => ({ id: role.id, name: role.roleName })) };
+  }
+  const selectedRole = input.activeRoleId ? roles.find((role) => role.id === input.activeRoleId) : roles[0];
+  if (!selectedRole) throw AppError.forbidden('The selected role is not currently assigned to your account.');
+
   // Successful credential check — clear failure state and stamp lastLoginAt. This is
   // operational housekeeping already captured by the LOGIN event below, so suppress
   // the redundant "UPDATE User" audit row (item 1: avoids duplicate/confusing entries).
@@ -122,11 +139,13 @@ export async function login(
     await notifySessionTerminated(user.id, existing[0].deviceInfo || 'unknown');
   }
 
-  const { sessionId, refreshToken } = await session.createSession(user.id, input.deviceInfo, ip);
-  const accessToken = signAccessToken(user.id, sessionId);
+  const { sessionId, refreshToken } = await session.createSession(user.id, input.deviceInfo, ip, selectedRole.id);
 
   const authUser = await buildAuthUser(user.id, sessionId);
-  if (!authUser) throw AppError.unauthorized('Account is inactive or no longer exists.');
+  if (!authUser) {
+    await session.invalidateSession(user.id, sessionId);
+    throw AppError.unauthorized('Account or selected role is no longer available.');
+  }
 
   // CR-1: a user whose roles have all been made inactive (or who has no role
   // assigned) cannot use the system. buildAuthUser only returns active, non-deleted
@@ -146,11 +165,13 @@ export async function login(
     throw AppError.forbidden('Your account has no active role assigned. Contact your administrator.');
   }
 
+  const accessToken = signAccessToken(user.id, sessionId, authUser);
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId, activeRoleId: authUser.activeRoleId, activeRoleName: authUser.activeRoleName });
   await recordEvent({
     action: 'LOGIN',
     entityType: 'User',
     entityId: user.id,
-    actor: { userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId },
+    actor: { userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId, activeRoleId: authUser.activeRoleId, activeRoleName: authUser.activeRoleName },
     ipAddress: ip,
     userAgent,
   });
@@ -159,7 +180,7 @@ export async function login(
 }
 
 /** Issue a fresh access token from a valid refresh token (session must still be live and unlocked). */
-export async function refresh(refreshToken: string): Promise<{ accessToken: string }> {
+export async function refresh(refreshToken: string): Promise<{ accessToken: string; roleContext: string }> {
   let payload;
   try {
     payload = verifyRefreshToken(refreshToken);
@@ -175,7 +196,41 @@ export async function refresh(refreshToken: string): Promise<{ accessToken: stri
     throw new AppError(423, 'LOCKED', 'Session is locked due to inactivity. Re-enter your password to continue.');
   }
 
-  return { accessToken: signAccessToken(payload.sub, payload.sid) };
+  const user = await buildAuthUser(payload.sub, payload.sid);
+  if (!user) throw AppError.unauthorized('Your active role is no longer available. Please sign in again.');
+  return { accessToken: signAccessToken(payload.sub, payload.sid, user), roleContext: user.roleContext };
+}
+
+/** Switch within the same unlocked session; permissions never come from the client. */
+export async function switchRole(current: AuthUser, activeRoleId: string) {
+  const roles = await assignedActiveRoles(current.id);
+  const next = roles.find((role) => role.id === activeRoleId);
+  if (!next) throw AppError.forbidden('The selected role is not currently assigned to your account.');
+  if (await isLocked(current.id, current.sessionId)) throw new AppError(423, 'LOCKED', 'Unlock your session before switching roles.');
+  let expectedContext = current.roleContext;
+  if (current.activeRoleId !== next.id) {
+    const roleContext = randomUUID();
+    expectedContext = roleContext;
+    await auditContext.runWithoutAudit(() => prisma.$transaction(async (tx) => {
+      const updated = await tx.userSession.updateMany({
+        where: { userId: current.id, sessionId: current.sessionId, isActive: true, expiresAt: { gt: new Date() }, roleContext: current.roleContext },
+        data: { activeRoleId: next.id, roleContext },
+      });
+      if (updated.count !== 1) throw new AppError(409, 'ROLE_CHANGED', 'The session changed. Reload your current role.');
+      await tx.auditTrail.create({ data: {
+        userId: current.id, userFullName: current.fullName, userUsername: current.windowsUsername,
+        activeRoleId: current.activeRoleId, activeRoleName: current.activeRoleName,
+        action: 'ROLE_SWITCH', entityType: 'UserSession', entityId: current.sessionId, sessionId: current.sessionId,
+        oldValue: { activeRoleName: current.activeRoleName }, newValue: { activeRoleName: next.roleName },
+        reasonForChange: 'User switched active role',
+        ipAddress: auditContext.getStore()?.ipAddress ?? null, userAgent: auditContext.getStore()?.userAgent ?? null,
+      } });
+    }));
+  }
+  const user = await buildAuthUser(current.id, current.sessionId);
+  if (!user) throw AppError.unauthorized('Your active role is no longer available. Please sign in again.');
+  if (user.roleContext !== expectedContext) throw new AppError(409, 'ROLE_CHANGED', 'The session changed. Reload your current role.');
+  return { user, accessToken: signAccessToken(user.id, user.sessionId, user) };
 }
 
 export async function logout(userId: string, sessionId: string): Promise<void> {
@@ -248,8 +303,12 @@ export async function unlock(
   await auditContext.runWithoutAudit(() =>
     prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, lockedUntil: null } }),
   );
+  const principal = await buildAuthUser(user.id, payload.sid);
+  if (!principal) throw new AppError(401, 'SESSION_EXPIRED', 'Your active role is no longer available. Please sign in again.');
+  auditContext.setActor({ userId: user.id, userFullName: user.fullName, userUsername: user.windowsUsername, sessionId: payload.sid, activeRoleId: principal.activeRoleId, activeRoleName: principal.activeRoleName });
   await clearLock(user.id, payload.sid);
-  return { accessToken: signAccessToken(user.id, payload.sid) };
+  await recordEvent({ action: 'SESSION_UNLOCKED', entityType: 'UserSession', entityId: payload.sid, ipAddress: ip, userAgent });
+  return { accessToken: signAccessToken(user.id, payload.sid, principal) };
 }
 
 export async function changePassword(userId: string, current: string, next: string): Promise<{ ok: true }> {

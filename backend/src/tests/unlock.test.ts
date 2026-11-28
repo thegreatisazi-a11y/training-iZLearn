@@ -7,6 +7,7 @@ import { getAuthPolicy } from '../services/systemConfig.service';
 import { isSessionActive } from '../services/session.service';
 import * as ldap from '../services/ldap.service';
 import { unlock } from '../services/auth.service';
+import { buildAuthUser } from '../middlewares/auth.middleware';
 
 jest.mock('../config/prisma', () => ({ prisma: { user: { findFirst: jest.fn(), update: jest.fn() } } }));
 jest.mock('../config/redis', () => ({ clearLock: jest.fn() }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   jest.mocked(ldap.isEnabled).mockResolvedValue(false);
   jest.mocked(comparePassword).mockResolvedValue(true);
   jest.mocked(signAccessToken).mockReturnValue('new-access-token');
+  jest.mocked(buildAuthUser).mockResolvedValue({ activeRoleId: 'role-1', activeRoleName: 'Trainer', roleContext: 'role-context' } as never);
   jest.mocked(getAuthPolicy).mockResolvedValue({ maxFailedAttempts: 3, lockoutMinutes: 15 } as never);
   jest.mocked(auditContext.runWithoutAudit).mockImplementation((work) => work());
 });
@@ -50,7 +52,7 @@ describe('unlock an existing session', () => {
     expect(isSessionActive).toHaveBeenCalledWith('user-1', 'session-1');
     expect(comparePassword).toHaveBeenCalledWith('correct-password', 'hash');
     expect(clearLock).toHaveBeenCalledWith('user-1', 'session-1');
-    expect(signAccessToken).toHaveBeenCalledWith('user-1', 'session-1');
+    expect(signAccessToken).toHaveBeenCalledWith('user-1', 'session-1', expect.objectContaining({ activeRoleId: 'role-1', roleContext: 'role-context' }));
   });
 
   it('requires full login when the refresh token has expired', async () => {

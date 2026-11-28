@@ -5,8 +5,8 @@ import { hasPermission } from '../utils/permissions';
 import { recordEvent } from '../services/auditTrail.service';
 
 /**
- * 21 CFR Part 11 §11.10(g) — authority checks. Grants access if ANY of the
- * user's active roles allows the required module + action. Denials are audited.
+ * 21 CFR Part 11 §11.10(g) — authority checks against the session's selected
+ * role only. Denials retain that role's snapshot in the audit context.
  */
 export function requirePermission(module: string, action: PermissionAction) {
   return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
