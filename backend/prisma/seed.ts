@@ -14,6 +14,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { PrismaClient, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { clearBootstrapEmployeeId } from './builtInAdmin';
 import { normalizeRoleName } from '../src/utils/roleIdentity';
 
 // Load backend/.env if present, else fall back to the monorepo-root .env (same
@@ -275,6 +276,7 @@ async function bootstrapRolesAndConfig(): Promise<string> {
 
 /** Versioned release update; never runs as part of backend startup or bootstrap. */
 export async function runReleaseMigrations(): Promise<void> {
+  await clearBootstrapEmployeeId(prisma);
   // Independent marker: existing deployments already have the bootstrap-split marker.
   const exceptionPermissionMarker = 'migration.team_not_required_permission_v1';
   if (!await prisma.systemConfig.findUnique({ where: { key: exceptionPermissionMarker } })) {
@@ -542,7 +544,7 @@ async function bootstrapMastersAndAdmin(systemRoleId: string): Promise<void> {
     await prisma.$transaction(async (tx) => {
       const admin = await tx.user.create({
         data: {
-          employeeId: 'EMP-0001',
+          employeeId: '',
           fullName: 'System Administrator',
           windowsUsername: adminUsername,
           email: process.env.SEED_ADMIN_EMAIL || 'admin@example.com',

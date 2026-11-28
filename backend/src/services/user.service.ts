@@ -7,13 +7,14 @@ import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { auditContext } from '../utils/auditContext';
 import { signFromRequest } from './eSignature.service';
 import { assignRequiredCoursesToUser } from './assignment.service';
-import { getBool } from './systemConfig.service';
+import { getBool, getPasswordPolicy } from './systemConfig.service';
 import {
   notifyUserRequestSubmitted,
   notifyUserRequestDecision,
   notifyPasswordReset,
 } from './notification.service';
 import { hashPassword } from '../utils/passwordUtils';
+import { generateTemporaryPassword, normalizePersonName } from '../utils/accountDefaults';
 import { parseExcel } from '../utils/excelExporter';
 import { canGrantRolePermissions } from '../utils/roleGrant';
 import { assertCanDecideUserRequest } from './userRequestEligibility.service';
@@ -36,9 +37,9 @@ import type {
  */
 
 /** Generate a throw-away temporary password that satisfies the complexity policy. */
-function tempPassword(): string {
-  const rand = Math.random().toString(36).slice(2, 10);
-  return `Iz!${rand}${Math.floor(Math.random() * 90 + 10)}A`;
+async function tempPassword(): Promise<string> {
+  const policy = await getPasswordPolicy();
+  return generateTemporaryPassword(policy.minLength);
 }
 
 /**
@@ -188,7 +189,7 @@ export async function createUserRequest(input: CreateUserInput, createdBy: strin
   const request = await prisma.userCreationRequest.create({
     data: {
       userType: input.userType,
-      fullName: input.fullName,
+      fullName: normalizePersonName(input.fullName),
       employeeId: input.employeeId,
       windowsUsername,
       email: input.email ?? null,
@@ -300,14 +301,14 @@ export async function decideRequest(
     return updated;
   }
 
-  const plainPassword = tempPassword();
+  const plainPassword = await tempPassword();
   const passwordHash = await hashPassword(plainPassword);
 
   const result = await auditedTransaction(prisma, async (tx) => {
     const user = await tx.user.create({
       data: {
         employeeId: request.employeeId,
-        fullName: request.fullName,
+        fullName: normalizePersonName(request.fullName),
         windowsUsername: request.windowsUsername,
         email: request.email,
         passwordHash,
@@ -703,7 +704,7 @@ export async function resetPassword(id: string, req: Request) {
   await signFromRequest(req, 'User', id, 'Approved');
   auditContext.setActionOverride('UPDATE');
 
-  const plainPassword = tempPassword();
+  const plainPassword = await tempPassword();
   const passwordHash = await hashPassword(plainPassword);
   const updated = await auditedTransaction(prisma, async (tx) => {
     const u = await tx.user.update({

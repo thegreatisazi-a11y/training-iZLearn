@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ChevronDown, GraduationCap } from 'lucide-react';
 import { sidebarSections, type NavGroupId, type NavItem } from '@/config/nav';
+import { APP_VERSION } from '@/config/app';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +45,7 @@ export function Sidebar() {
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4 text-primary">
         <GraduationCap className="h-6 w-6" />
         <span className="text-lg font-bold">izLearn</span>
+        <span className="self-end pb-0.5 text-xs font-normal text-slate-400">v{APP_VERSION}</span>
       </div>
       <nav aria-label="Main navigation" className="flex-1 overflow-y-auto p-2">
         {sections.map((section) => {

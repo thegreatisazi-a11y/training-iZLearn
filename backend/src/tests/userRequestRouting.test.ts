@@ -3,7 +3,8 @@ import { deriveLegacyFlags, type PermissionMatrix } from '@izlearn/shared';
 import { prisma } from '../config/prisma';
 import { notifyUserRequestSubmitted } from '../services/notification.service';
 import { eligibleUserRequestApprovers } from '../services/userRequestEligibility.service';
-import { checkRequestDecision, createUserRequest, decideRequest } from '../services/user.service';
+import { checkRequestDecision, createUserRequest, decideRequest, resetPassword } from '../services/user.service';
+import { getPasswordPolicy } from '../services/systemConfig.service';
 import { canGrantRolePermissions } from '../utils/roleGrant';
 import { mergePermissions } from '../utils/permissions';
 import { queueEmail } from '../services/email.service';
@@ -12,12 +13,13 @@ import { auditedTransaction } from '../middlewares/auditTrail.middleware';
 import { logger } from '../config/logger';
 
 jest.mock('../config/prisma', () => ({ prisma: {
-  role: { findMany: jest.fn() }, userRole: { findMany: jest.fn(), create: jest.fn() },
-  user: { findMany: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
+  role: { findMany: jest.fn(), count: jest.fn() }, userRole: { findMany: jest.fn(), create: jest.fn() },
+  user: { findMany: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+  passwordHistory: { create: jest.fn() },
   userCreationRequest: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
 } }));
 jest.mock('../services/email.service', () => ({ queueEmail: jest.fn().mockResolvedValue({}) }));
-jest.mock('../services/systemConfig.service', () => ({ getConfig: jest.fn().mockResolvedValue('Company'), getBool: jest.fn().mockResolvedValue(false) }));
+jest.mock('../services/systemConfig.service', () => ({ getConfig: jest.fn().mockResolvedValue('Company'), getBool: jest.fn().mockResolvedValue(false), getPasswordPolicy: jest.fn().mockResolvedValue({ minLength: 8 }) }));
 jest.mock('../services/notificationSetting.service', () => ({ getSetting: jest.fn().mockResolvedValue(null) }));
 jest.mock('../services/eSignature.service', () => ({ signFromRequest: jest.fn().mockResolvedValue('signature') }));
 jest.mock('../services/assignment.service', () => ({ assignRequiredCoursesToUser: jest.fn().mockResolvedValue(0) }));
@@ -39,6 +41,7 @@ const actor = (userId: string) => ({ user: { id: userId, permissions: permission
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(getPasswordPolicy).mockResolvedValue({ minLength: 8, expiryDays: 90, historyCount: 5 });
   roles = [
     { id: 'requested-role', permissions: matrix({ reports: { view: true, export: true } }) },
     { id: 'approval', permissions: matrix({ userRequests: { approve: true } }) },
@@ -65,6 +68,8 @@ beforeEach(() => {
     (where.isDeleted === undefined || role.isDeleted === where.isDeleted)));
   db.userRole.findMany.mockImplementation(async ({ where }: any) => links.filter((link) => link.isActive && where.roleId.in.includes(link.roleId)));
   db.userRole.create.mockResolvedValue({});
+  db.userRole.findMany.mockImplementation(async ({ where }: any) => where.userId ? [] : links.filter((link) => link.isActive && where.roleId.in.includes(link.roleId)));
+  db.user.update.mockImplementation(async ({ where, data }: any) => Object.assign(users.find((user) => user.id === where.id), data));
   db.user.findMany.mockImplementation(async ({ where }: any) => users.filter((user) => where.id.in.includes(user.id) && user.isActive && !user.isDeleted));
   db.user.findUnique.mockImplementation(async ({ where }: any) => users.find((user) => user.id === where.id) ?? null);
   db.user.findFirst.mockImplementation(async ({ where }: any) => users.find((user) => (where.id ? user.id === where.id : user.windowsUsername === where.windowsUsername) && !user.isDeleted) ?? null);
@@ -201,3 +206,30 @@ it('checks stale requests and inactive roles before opening a signing flow', asy
   await expect(checkRequestDecision('request', 'APPROVE', actor('eligible'))).rejects.toMatchObject({ statusCode: 400 });
   await expect(checkRequestDecision('request', 'REJECT', actor('eligible'))).resolves.toEqual({ eligible: true });
 });
+
+it('capitalizes new request names and profiles, including previously submitted lowercase names', async () => {
+  const request = await createUserRequest({ ...pending, fullName: 'darshit shah', windowsUsername: 'fresh.employee' } as any, 'requester');
+  expect(request.fullName).toBe('Darshit Shah');
+  pending.fullName = 'darshit shah';
+  const result = await decideRequest('request', { decision: 'APPROVE' } as any, actor('eligible'));
+  if (!('tempPassword' in result)) throw new Error('Expected an approved account');
+  expect(result.tempPassword).toHaveLength(8);
+  expect(db.user.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ fullName: 'Darshit Shah', mustChangePassword: true }) }));
+});
+
+it('uses the configured minimum for first-login passwords', async () => {
+  jest.mocked(getPasswordPolicy).mockResolvedValue({ minLength: 12, expiryDays: 90, historyCount: 5 });
+  const result = await decideRequest('request', { decision: 'APPROVE' } as any, actor('eligible'));
+  if (!('tempPassword' in result)) throw new Error('Expected an approved account');
+  expect(result.tempPassword).toHaveLength(12);
+});
+
+it('uses a shorter password for resets while preserving login/signature reset and forced change', async () => {
+  users.find((user) => user.id === 'requester').supervisorId = 'eligible';
+  const result = await resetPassword('requester', actor('eligible'));
+  expect(result.tempPassword).toHaveLength(8);
+  expect(db.user.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+    passwordHash: 'hashed-password', signaturePasswordHash: 'hashed-password', mustChangePassword: true,
+  }) }));
+});
+

@@ -5,7 +5,7 @@ import { auditContext } from '../src/utils/auditContext';
 export async function repairBootstrapAdmin(id: string, username: string): Promise<void> {
   if (!id) throw new Error('An exact audited user ID is required.');
   const user = await prisma.user.findUnique({ where: { id } });
-  if (!user || user.windowsUsername !== username || user.employeeId !== 'EMP-0001' ||
+  if (!user || user.windowsUsername !== username || !['', 'EMP-0001'].includes(user.employeeId) ||
       user.createdBy !== 'SYSTEM' || user.isDeleted || !user.isActive) {
     throw new Error('Target is not the active SYSTEM-created bootstrap account. No change was made.');
   }
